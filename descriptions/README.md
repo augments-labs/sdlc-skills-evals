@@ -14,21 +14,30 @@ test suite that happens to be written in JSON.
 ## Layout
 
 ```
-tests/optimizing/descriptions/
-  test-triggering-on-queries.sh   scores a DESCRIPTION: queries x runs -> trigger rate
+descriptions/
   <phase>/<skill>.json            at least 20 balanced positive/near-miss queries
+  holdout/<phase>/<skill>.json    5-10 fresh queries, written after selection (see holdout/README.md)
 ```
 
 The runner is self-contained: it opens a session per query repetition, points it
-at a seeded project from `tests/fixtures.sh`, and reads which skills fired from
-the CLI's own stream through `tests/harnesses/<name>.sh`.
+at a seeded project from `fixtures/fixtures.sh`, and reads which skills fired from
+the CLI's own stream through `harnesses/<name>.sh`.
 
 ```bash
-tests/optimizing/descriptions/test-triggering-on-queries.sh --harness codex --all --dry-run
-tests/optimizing/descriptions/test-triggering-on-queries.sh --harness claude-code --skill yagni --split validation
+bin/triggering --harness opencode --all --dry-run
+bin/triggering --harness opencode --skill yagni
+bin/triggering --harness opencode --skill yagni --split validation
 ```
 
 `--help` covers the flags. This file covers what the flags cannot say.
+
+## Build-only lab
+
+The runner is kept working and priced, but **no selection run ever starts
+from here**. `--dry-run` prices; the live tuning loop runs nowhere in this
+repository. Query sets are maintained (renamed with skills, completed for
+new ones) so they stay runnable elsewhere; the shape check below is what
+keeps them honest while they wait.
 
 ## Anyone can run this, and it spends your own quota
 
@@ -77,13 +86,15 @@ contract — no registration, no code change. Each entry needs `query`,
 expected neighbouring activity (`"none"` if there is none). This field is
 diagnostic; the scorer does not evaluate that activity.
 
-**Nothing enforces the shape of a set — that is on the reader.** A set is only
-worth the money it costs to run if it can actually decide something: at least
-ten positives and ten near-miss negatives, no duplicates, a validation split
-between a quarter and a half of the set, and the same positive-to-negative
-proportion on both sides of it. Twenty happy-path positives will pass every eval
-they are ever run through and prove nothing. Check the shape when you edit a set;
-a live run cannot tell you the set was broken.
+**The shape of a set is enforced by `bin/check`** (override root:
+`DESCRIPTIONS_ROOT`): at least ten positives and ten near-miss negatives
+(holdout files: 5–10), no duplicates, every entry with `split` and boolean
+`should_trigger`, every negative with a non-empty `expect`, a validation
+split between a quarter and a half of the set with the same
+positive-to-negative proportion as train, and no query shared between a set
+and its holdout. A set is only worth the money it costs to run if it can
+actually decide something: twenty happy-path positives will pass every eval
+they are ever run through and prove nothing.
 
 **The near-misses are the point.** A description firing on its own happy-path
 opening proves nothing, because every description does that. The runner observes the subject anywhere in the bounded skill chain, including
@@ -104,7 +115,7 @@ Asking to *add* `src/utils/money.ts` works whether or not that path exists;
 asking to *delete* or *refactor* it does not — the agent answers that there is
 no such file and routes nowhere, which is indistinguishable in the report from a
 description that failed to fire. A query like that scores the fixture, not the
-description. `tests/fixtures.sh` says what actually exists.
+description. `fixtures/fixtures.sh` says what actually exists.
 
 ## What this costs, before you run it
 
@@ -131,9 +142,9 @@ that the skill would never fire.
 ## The sibling loop, and why it is not here
 
 Output behavior is a different question from activation. Use the smallest
-relevant `tests/run-behavioral.sh` scenario or a temporary controlled probe.
+relevant `bin/behavior` scenario or a temporary controlled probe.
 `--arm none` observes the bare agent; `--arm red --base REV` observes the prior
-library; `--arm green` observes the current library. Installed arms normally
+library; `--arm green --plugin REF` observes the current library. Installed arms normally
 expose the whole library, so disclose a probe that instead loads only its
 intended skill. A passing bare or prior-library sample does not erase a
 reported failure or a source contradiction.

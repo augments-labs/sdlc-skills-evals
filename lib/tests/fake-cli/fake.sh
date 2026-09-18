@@ -52,7 +52,11 @@ adapter_usage() { # $1 stream
 }
 
 _fake_emit_ok() { # $1 stream
-  [ "${FAKE_CHAIN:-1}" = 0 ] || printf 'SKILL fake-subject\n' >> "$1"
+  # FAKE_SUBJECT lets the triggering runner's subject matching hit;
+  # FAKE_CHAIN=0 or FAKE_FIRE=0 emits no chain (a clean baseline).
+  if [ "${FAKE_CHAIN:-1}" != 0 ] && [ "${FAKE_FIRE:-1}" != 0 ]; then
+    printf 'SKILL %s\n' "${FAKE_SUBJECT:-fake-subject}" >> "$1"
+  fi
   printf 'EDIT fixture-marker.txt\n' >> "$1"
 }
 

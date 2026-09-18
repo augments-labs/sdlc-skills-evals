@@ -1,18 +1,22 @@
 #!/usr/bin/env bash
 # Trigger eval — scores a DESCRIPTION, not a run.
 #
-# THIS IS AN OPTIMIZATION INSTRUMENT, NOT A TEST. It lives under tests/optimizing/
-# for that reason. It implements the standard's description-tuning loop: score,
-# revise against TRAIN failures, repeat, then select the iteration with the best
-# VALIDATION rate. Both splits are consumed by that loop, so neither is a held-out
-# result and a red sheet here is not a regression — see tests/optimizing/README.md.
+# THIS IS AN OPTIMIZATION INSTRUMENT, NOT A TEST. It lives under
+# descriptions/ for that reason. It implements the standard's
+# description-tuning loop: score, revise against TRAIN failures, repeat,
+# then select the iteration with the best VALIDATION rate. Both splits are
+# consumed by that loop, so neither is a held-out result and a red sheet
+# here is not a regression — see descriptions/README.md.
 #
 # ============================ THIS COSTS REAL MONEY ============================
 # Every query is a live session against your own harness account, and the default
-# is 20 queries x 3 runs = 60 CALLS PER SKILL. `--all` is 33 skills — roughly
+# is 20 queries x 3 runs = 60 CALLS PER SKILL. `--all` is 34 skills — roughly
 # 2,000 calls, hours of wall time, and enough usage to exhaust a plan's quota.
 #
 # Price any selection first:  --dry-run  prints the budget and calls nothing.
+#
+# BUILD-ONLY LAB: kept working and priced, but no selection run ever starts
+# from here.
 # ==============================================================================
 #
 # A description's job is to fire on the openings it should and stay quiet on the
@@ -26,8 +30,8 @@
 # separates a tuned description from a greedy one is the query that shares its
 # vocabulary and needs a different skill.
 #
-# Query sets live beside this script at <phase>/<skill>.json — an array of
-#   { "query": TEXT, "should_trigger": BOOL, "split": "train"|"validation",
+# Query sets live under DESCRIPTIONS_ROOT at <phase>/<skill>.json — an array of
+#   { "query": TEXT, "should_trigger": BOOL, "split": "train"|"validation"|"holdout",
 #     "expect": SKILL|"none" }   # `expect` = the correct route, diagnostic only
 # `should_trigger` is about THIS skill. `expect` records where a negative should
 # have gone instead, so a miss and a misroute are distinguishable in the report.
@@ -42,48 +46,61 @@
 # Flags and exit codes: --help.
 
 set -uo pipefail
-scriptdir="$(cd "$(dirname "$0")" && pwd)"
-repo="$(cd "$scriptdir/../../.." && pwd)"
-harnessdir="$repo/tests/harnesses"
+if [ -n "${SDLC_SKILLS_EVALS_ROOT:-}" ]; then
+  lab_root="$SDLC_SKILLS_EVALS_ROOT"
+else
+  lab_root="$(cd "$(dirname "$0")/.." && pwd)"
+fi
+descroot="${DESCRIPTIONS_ROOT:-$lab_root/descriptions}"
+harnessdir="$lab_root/harnesses"
 
 usage() {
   cat <<'EOF'
-test-triggering-on-queries.sh — score a skill DESCRIPTION against its query set.
+bin/triggering — score a skill DESCRIPTION against its query set.
 
-  --harness NAME    claude-code | codex | kimi-code   (required)
-  --skill NAME      the skill to score                (or --all)
-  --all             every query set beside this script
-  --split WHICH     all | train | validation          (default: all)
-  --runs N          repetitions per query             (default: 3)
-  --jobs N          repetitions to run concurrently   (default: 3, 1 = serial)
-  --timeout N       seconds per run                   (default: 120)
-  --max-turns N     turns before a run is cut off     (default: 6)
+  --harness NAME    opencode | claude-code | codex | kimi-code   (required)
+  --skill NAME      the skill to score                            (or --all)
+  --plugin P        path or git ref of the plugin tree under test
+                    (default: SDLC_SKILLS_ROOT, else the lab's sibling
+                    ../sdlc-skills; required except with --dry-run)
+  --all             every query set under DESCRIPTIONS_ROOT
+  --split WHICH     all | train | validation | holdout           (default: all)
+  --runs N          repetitions per query                         (default: 3)
+  --jobs N          repetitions to run concurrently               (default: 3, 1 = serial)
+  --timeout N       seconds per run                               (default: 120)
+  --max-turns N     turns before a run is cut off                 (default: 6)
   --json PATH       write the per-query records as a JSON array
   --dry-run         print the API-call budget and exit without calling
   --no-fixture      run queries in a bare directory instead of a seeded project
+  --harness-dir D   harness directory (default: harnesses;
+                    a test seam for offline runs)
   --help            this text
 
 COST: live sessions against your own harness account. One skill at the defaults
 is 20 queries x 3 runs = 60 calls; --all is ~2,000. Always --dry-run first.
 
+BUILD-ONLY LAB: this runner is kept working and priced, but no selection
+run ever starts from here.
+
 Exit codes: 0 every scored query passed · 1 at least one FAIL
-            2 bad or missing arguments · 3 `jq` or the harness CLI is missing
+            2 bad or missing arguments, or harness unrunnable (indeterminate)
 
 Examples:
-  tests/optimizing/descriptions/test-triggering-on-queries.sh --harness codex --all --dry-run
-  tests/optimizing/descriptions/test-triggering-on-queries.sh --harness claude-code --skill yagni
-  tests/optimizing/descriptions/test-triggering-on-queries.sh --harness claude-code --skill yagni --split train
-  tests/optimizing/descriptions/test-triggering-on-queries.sh --harness claude-code --skill yagni --json out.json
+  bin/triggering --harness opencode --skill yagni --dry-run
+  bin/triggering --harness opencode --skill yagni
+  bin/triggering --harness opencode --skill yagni --split train
+  bin/triggering --harness opencode --skill yagni --json out.json
 EOF
 }
 
 harness=""; skill=""; runs=3; split="all"; dry=""; jsonout=""; all=""; fixture="1"; jobs=3
-timeout_s=120; maxturns=6
+timeout_s=120; maxturns=6; plugin=""; harnessdir_override=""
 while [ "$#" -gt 0 ]; do
   case "$1" in
     -h|--help)    usage; exit 0;;
     --harness)    harness="$2"; shift 2;;
     --skill)      skill="$2"; shift 2;;
+    --plugin)     plugin="$2"; shift 2;;
     --all)        all="1"; shift;;
     --runs)       runs="$2"; shift 2;;
     --jobs)       jobs="$2"; shift 2;;
@@ -93,13 +110,14 @@ while [ "$#" -gt 0 ]; do
     --dry-run)    dry="1"; shift;;
     --json)       jsonout="$2"; shift 2;;
     --no-fixture) fixture=""; shift;;
+    --harness-dir) harnessdir_override="$2"; shift 2;;
     *) echo "unknown argument: $1" >&2; exit 2;;
   esac
 done
-[ -n "$harness" ] || { echo "needs --harness claude-code|codex|kimi-code" >&2; exit 2; }
+[ -n "$harness" ] || { echo "needs --harness opencode|claude-code|codex|kimi-code" >&2; exit 2; }
 [ -n "$skill" ] || [ -n "$all" ] || { echo "needs --skill NAME or --all" >&2; exit 2; }
 command -v jq >/dev/null 2>&1 || { echo "needs \`jq\`" >&2; exit 3; }
-case "$split" in all|train|validation) ;; *) echo "--split all|train|validation" >&2; exit 2;; esac
+case "$split" in all|train|validation|holdout) ;; *) echo "--split all|train|validation|holdout" >&2; exit 2;; esac
 # Counters this script feeds straight to `seq` and to arithmetic. A non-numeric
 # --runs yields an empty `seq`, which scores every query zero-valid and reports a
 # full sheet of INCONCLUSIVE — a wrong measurement that still looks like a
@@ -107,14 +125,15 @@ case "$split" in all|train|validation) ;; *) echo "--split all|train|validation"
 for n in runs jobs timeout_s maxturns; do
   case "${!n}" in ''|*[!0-9]*|0) echo "--${n%_s} needs a positive integer" >&2; exit 2;; esac
 done
+[ -n "$harnessdir_override" ] && harnessdir="$harnessdir_override"
 
 sets=()
 if [ -n "$all" ]; then
   while IFS= read -r f; do sets+=("$f"); done \
-    < <(find "$scriptdir" -name '*.json' -type f | sort)
+    < <(find "$descroot" -name '*.json' -type f | sort)
 else
   while IFS= read -r f; do sets+=("$f"); done \
-    < <(find "$scriptdir" -name "$skill.json" -type f | sort)
+    < <(find "$descroot" -name "$skill.json" -type f | sort)
   [ "${#sets[@]}" -gt 0 ] || { echo "no query set for skill: $skill" >&2; exit 2; }
 fi
 
@@ -135,10 +154,20 @@ if [ -n "$dry" ]; then
 fi
 
 [ -f "$harnessdir/$harness.sh" ] || { echo "no harness adapter: $harness" >&2; exit 2; }
+if [ "$(grep '^runnable=' "$harnessdir/$harness.sh" | sed 's/^runnable=//')" != "yes" ]; then
+  reason="$(grep '^runnable_reason=' "$harnessdir/$harness.sh" | sed 's/^runnable_reason=//')"
+  echo "harness $harness is unrunnable here (${reason:-no reason}) — every query INCONCLUSIVE" >&2
+  exit 2
+fi
 # shellcheck source=/dev/null
 . "$harnessdir/$harness.sh"
+# shellcheck source=../lib/common.sh
+. "$lab_root/lib/common.sh"
 # shellcheck source=/dev/null
-. "$repo/tests/fixtures.sh"
+. "$lab_root/fixtures/fixtures.sh"
+if [ -z "$plugin" ]; then
+  plugin="$(plugin_root 2>/dev/null)" || { echo "needs --plugin <path|ref> (no plugin checkout found)" >&2; exit 2; }
+fi
 adapter_check || exit 3
 # Default for the optional structural refusal check (see `observe_once`).
 # Conservative on purpose: an adapter that does not implement it is assumed to
@@ -174,7 +203,7 @@ observe_once() { # $1 query text  $2 subject skill
     git -c user.name='SDLC skills Harness' -c user.email='harness@example.invalid' \
         commit -q -m 'fixture baseline' ) || { rm -rf "$workdir" "$stream" "$errlog"; return 2; }
 
-  adapter_install "$repo" || { rm -rf "$workdir" "$stream" "$errlog"; return 3; }
+  adapter_install "$plugin" || { rm -rf "$workdir" "$stream" "$errlog"; return 3; }
   local prompt; prompt="$text$(adapter_prompt_suffix 2>/dev/null || true)"
   local -a xflags; mapfile -t xflags < <(adapter_activation_flags 2>/dev/null || true)
 
@@ -187,14 +216,16 @@ observe_once() { # $1 query text  $2 subject skill
   # and to finishing-a-branch (killed at verification-before-completion). Wait for the
   # SUBJECT; --max-turns bounds a run that never reaches it, which is every
   # correctly-behaving negative.
-  local want="sdlc-skills:${subject}"
+  # Chain names differ per harness (opencode reports bare directory names,
+  # others prefix sdlc-skills:) — normalize before comparing with the subject.
+  local want="$subject"
   while kill -0 "$cpid" 2>/dev/null; do
-    adapter_chain "$stream" | grep -qx "$want" && { kill "$cpid" 2>/dev/null; break; }
+    adapter_chain "$stream" | sed 's/^sdlc-skills://' | grep -qx "$want" && { kill "$cpid" 2>/dev/null; break; }
     sleep 2
   done
   wait "$cpid" 2>/dev/null
 
-  chain="$(adapter_chain "$stream" | awk 'NF && !seen[$0]++')"
+  chain="$(adapter_chain "$stream" | sed 's/^sdlc-skills://' | awk 'NF && !seen[$0]++')"
 
   # A run that never reached the model is NOT evidence about a description, and
   # scoring it as "did not fire" is how a dead provider gets reported as a result.
@@ -290,7 +321,7 @@ for f in "${sets[@]}"; do
       [ "$(jq -r '.inconclusive' <<<"$rec")" = "true" ] && continue
       valid=$((valid + 1))
       chains="$chains$(jq -r '.chain | join(">")' <<<"$rec")"$'\n'
-      jq -e --arg s "sdlc-skills:$subject" 'any(.chain[]; . == $s)' >/dev/null <<<"$rec" &&
+      jq -e --arg s "$subject" 'any(.chain[]; sub("^sdlc-skills:";"") == $s)' >/dev/null <<<"$rec" &&
         fired=$((fired + 1))
     done
     rm -rf "$rundir"

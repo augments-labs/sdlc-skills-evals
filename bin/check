@@ -44,4 +44,56 @@ if find behavior/scenarios -type f -perm -111 | grep -q .; then
 fi
 echo "check: behavior ok"
 
+# E-5: query-set shape — what the old README asked readers to check.
+# Root override for tests: DESCRIPTIONS_ROOT (default descriptions/).
+desc_root="${DESCRIPTIONS_ROOT:-descriptions}"
+_check_set() { # $1 file $2 holdout(0|1)
+  local f="$1" hold="$2" total pos neg t v tpos vpos
+  total="$(jq 'length' "$f")" || { echo "check: FAIL $f is not a JSON array"; return 1; }
+  pos="$(jq '[.[] | select(.should_trigger == true)] | length' "$f")"
+  neg="$(jq '[.[] | select(.should_trigger == false)] | length' "$f")"
+  if [ "$hold" -eq 0 ]; then
+    [ "$pos" -ge 10 ] || { echo "check: FAIL $f needs >= 10 positives (has $pos)"; return 1; }
+    [ "$neg" -ge 10 ] || { echo "check: FAIL $f needs >= 10 negatives (has $neg)"; return 1; }
+  else
+    [ "$total" -ge 5 ] && [ "$total" -le 10 ] \
+      || { echo "check: FAIL holdout $f holds 5-10 fresh queries (has $total)"; return 1; }
+  fi
+  jq -e 'all(.[]; (.split == "train" or .split == "validation" or .split == "holdout")
+    and (.should_trigger | type == "boolean"))' "$f" >/dev/null \
+    || { echo "check: FAIL $f entries need split and boolean should_trigger"; return 1; }
+  jq -e 'all(.[]; select(.should_trigger == false) | has("expect") and (.expect | type == "string" and length > 0))' "$f" >/dev/null \
+    || { echo "check: FAIL $f negatives need a non-empty expect route"; return 1; }
+  [ "$(jq -r '.[].query' "$f" | sort | uniq -d | wc -l)" -eq 0 ] \
+    || { echo "check: FAIL $f has duplicate queries"; return 1; }
+  if [ "$hold" -eq 0 ]; then
+    t="$(jq '[.[] | select(.split == "train")] | length' "$f")"
+    v="$(jq '[.[] | select(.split == "validation")] | length' "$f")"
+    tpos="$(jq '[.[] | select(.split == "train" and .should_trigger == true)] | length' "$f")"
+    vpos="$(jq '[.[] | select(.split == "validation" and .should_trigger == true)] | length' "$f")"
+    [ "$t" -gt 0 ] && [ "$v" -gt 0 ] || { echo "check: FAIL $f needs train and validation splits"; return 1; }
+    [ $((4 * v)) -ge "$total" ] && [ $((2 * v)) -le "$total" ] \
+      || { echo "check: FAIL $f validation share must be 1/4..1/2 (has $v/$total)"; return 1; }
+    [ "$((vpos * t))" -eq "$((tpos * v))" ] \
+      || { echo "check: FAIL $f validation/train positive proportions differ"; return 1; }
+    [ "$(((v - vpos) * t))" -eq "$(((t - tpos) * v))" ] \
+      || { echo "check: FAIL $f validation/train negative proportions differ"; return 1; }
+  else
+    jq -e 'all(.[]; .split == "holdout")' "$f" >/dev/null \
+      || { echo "check: FAIL holdout $f entries must carry split=holdout"; return 1; }
+  fi
+  return 0
+}
+while IFS= read -r sf; do
+  case "$sf" in */holdout/*) _check_set "$sf" 1 || exit 1;; *) _check_set "$sf" 0 || exit 1;; esac
+done < <(find "$desc_root" -name '*.json' -type f | sort)
+# a holdout set must not share a query with its set (it is written after selection)
+while IFS= read -r hf; do
+  main="${hf/holdout\//}"
+  [ -f "$main" ] || continue
+  shared="$(comm -12 <(jq -r '.[].query' "$main" | sort -u) <(jq -r '.[].query' "$hf" | sort -u) | wc -l)"
+  [ "$shared" -eq 0 ] || { echo "check: FAIL holdout $hf reuses queries from $main"; exit 1; }
+done < <(find "$desc_root/holdout" -name '*.json' -type f 2>/dev/null | sort)
+echo "check: descriptions ok"
+
 echo "check: OK"

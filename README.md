@@ -73,6 +73,7 @@ anything cites.
 | `SDLC_SKILLS_PIN` | the plugin ref records pin | `v10.2.1` |
 | `TMPDIR` | parent for per-run homes and workdirs | system default |
 | `BH_DEFAULT_TIMEOUT` | per-arm wall clock for `bin/behavior` (inherited by the runner) | `1800` |
+| `DESCRIPTIONS_ROOT` | query-set root for `bin/triggering` and the shape check | `descriptions/` under the lab root |
 | `LAB_CREDENTIAL_SEED` | directory of per-harness credential seeds (`<seed>/<harness>/`) copied into run homes | none — seeding is a quiet no-op without it |
 
 Later tasks extend this table when they add a variable.
