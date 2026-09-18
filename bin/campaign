@@ -38,9 +38,170 @@ while runs are pending, then writes summary.md (## Commit,
 ## Behavior scenarios, ## Chains from chains.json when present, ## Costs,
 ## Against baseline with --against).
 
+  --help                      this text
+
+  campaign --evals [--dry-run] --plugin P --harness H
+      (--skill S ... | --all) [--without none|old] [--old-plugin REF]
+      [--campaign NAME] [--iteration N] [--timeout SEC] [--harness-dir D]
+                                run output-eval pairs into a workspace iteration
+
+new freezes campaign.json {plugin_ref, plugin_commit, harness,
+arms: [{name, base}], suite, scenarios, runs, tier, lab_commit, created}.
+run executes every planned run through bin/behavior --record (raw streams
+under raw/, run homes under TMPDIR, never under results/). report refuses
+while runs are pending, then writes summary.md (## Commit,
+## Behavior scenarios, ## Chains from chains.json when present, ## Costs,
+## Against baseline with --against).
+
 A `fake` harness name routes to lib/tests/fake-cli/ for self-tests.
 EOF
 }
+
+if [ "${1:-}" = "--evals" ]; then
+  shift
+  # shellcheck source=../lib/pin.sh
+  source "$lab_root/lib/pin.sh"
+  # shellcheck source=../lib/home-env.sh
+  source "$lab_root/lib/home-env.sh"
+  dry=""; plugin=""; harness=""; without="none"; old_plugin=""; campaign_n=""; iteration=""
+  timeout_s="${BH_DEFAULT_TIMEOUT:-1800}"; harnessdir_override=""; skills=(); all_evals=""
+  while [ "$#" -gt 0 ]; do
+    case "$1" in
+      --dry-run) dry="1"; shift;;
+      --plugin) plugin="$2"; shift 2;;
+      --harness) harness="$2"; shift 2;;
+      --skill) skills+=("$2"); shift 2;;
+      --all) all_evals="1"; shift;;
+      --without) without="$2"; shift 2;;
+      --old-plugin) old_plugin="$2"; shift 2;;
+      --campaign) campaign_n="$2"; shift 2;;
+      --iteration) iteration="$2"; shift 2;;
+      --timeout) timeout_s="$2"; shift 2;;
+      --harness-dir) harnessdir_override="$2"; shift 2;;
+      *) echo "unknown argument: $1" >&2; exit 2;;
+    esac
+  done
+  [ -n "$harness" ] || { echo "--evals needs --harness" >&2; exit 2; }
+  [ "${#skills[@]}" -gt 0 ] || [ -n "$all_evals" ] || { echo "--evals needs --skill or --all" >&2; exit 2; }
+  case "$without" in none|old) ;; *) echo "--without none|old" >&2; exit 2;; esac
+  [ "$without" = old ] && [ -z "$old_plugin" ] && { echo "--without old needs --old-plugin" >&2; exit 2; }
+  case "$timeout_s" in ''|*[!0-9]*|0) echo "--timeout needs a positive integer" >&2; exit 2;; esac
+  evals_files=()
+  if [ -n "$all_evals" ]; then
+    while IFS= read -r f; do evals_files+=("$f"); done \
+      < <(find "$lab_root/behavior/evals" -name evals.json | sort)
+  else
+    for sk in "${skills[@]}"; do
+      f="$(find "$lab_root/behavior/evals" -path "*$sk/evals.json" | head -1)"
+      [ -n "$f" ] || { echo "no evals.json for skill: $sk" >&2; exit 2; }
+      evals_files+=("$f")
+    done
+  fi
+  total_cases=0
+  for ef in "${evals_files[@]}"; do
+    total_cases=$((total_cases + $(jq '.evals | length' "$ef")))
+  done
+  if [ -n "$dry" ]; then
+    printf '%s eval(s) x 2 arms = %s runs, billed to your own harness account. Calls nothing.\n' \
+      "$total_cases" "$((total_cases * 2))"
+    exit 0
+  fi
+  [ -n "$plugin" ] || { echo "--evals needs --plugin (dry-run excepted)" >&2; exit 2; }
+  hdir="${harnessdir_override:-$lab_root/harnesses}"
+  [ "$harness" = fake ] && [ -z "$harnessdir_override" ] && hdir="$lab_root/lib/tests/fake-cli"
+  [ -f "$hdir/$harness.sh" ] || { echo "no harness adapter: $harness" >&2; exit 2; }
+  if [ "$(grep '^runnable=' "$hdir/$harness.sh" | sed 's/^runnable=//')" != "yes" ]; then
+    echo "harness $harness is unrunnable here — measuring nothing" >&2; exit 2
+  fi
+  # shellcheck source=/dev/null
+  source "$hdir/$harness.sh"
+  require_tool jq timeout || exit 2
+  adapter_check || exit 2
+  campaign_n="${campaign_n:-evals-$(date -u +%Y-%m-%d)}"
+  ws_root="$lab_root/workspaces/$campaign_n"
+  if [ -z "$iteration" ]; then
+    iteration=1
+    while [ -d "$ws_root/iteration-$iteration" ]; do iteration=$((iteration + 1)); done
+  fi
+  iter_dir="$ws_root/iteration-$iteration"
+  mkdir -p "$iter_dir" || exit 2
+  # Run bases must nest under the ORIGINAL tmp: each arm run re-points
+  # TMPDIR into its own tree and deletes it afterwards, so reset both
+  # TMPDIR and LAB_RUN_BASE before deriving the next base.
+  _outer_tmpdir="${TMPDIR:-/tmp}"
+  # Resolve the with-arm tree once; the old tree only when asked. Pins go
+  # through same-shell redirects (never $()) so their worktrees outlive
+  # the call; everything is removed at campaign exit.
+  _pin_run="$(lab_run_dir evals-pin)" || exit 2
+  trap 'lab_pin_cleanup "$_pin_run" 2>/dev/null; lab_home_cleanup "$_pin_run" 2>/dev/null' EXIT
+  if [ -d "$plugin" ]; then with_src="$plugin";
+  else
+    lab_pin_plugin "$plugin" "$_pin_run/with" >"$_pin_run/with-commit.txt" 2>/dev/null || {
+      echo "cannot pin --plugin '$plugin'" >&2; exit 2; }
+    with_src="$_pin_run/with/plugin"
+  fi
+  if [ "$without" = old ]; then
+    if [ -d "$old_plugin" ]; then old_src="$old_plugin";
+    else
+      lab_pin_plugin "$old_plugin" "$_pin_run/old" >"$_pin_run/old-commit.txt" 2>/dev/null || {
+        echo "cannot pin --old-plugin '$old_plugin'" >&2; exit 2; }
+      old_src="$_pin_run/old/plugin"
+    fi
+  fi
+  for ef in "${evals_files[@]}"; do
+    skill_dir="$(dirname "$ef")"
+    n_cases="$(jq '.evals | length' "$ef")"
+    for idx in $(seq 0 $((n_cases - 1))); do
+      eval_id="$(jq -r ".evals[$idx].id" "$ef")"
+      prompt="$(jq -r ".evals[$idx].prompt" "$ef")"
+      for arm in with_skill "$([ "$without" = old ] && printf 'old_skill' || printf 'without_skill')"; do
+        dest="$iter_dir/$eval_id/$arm"
+        mkdir -p "$dest" || exit 2
+        TMPDIR="$_outer_tmpdir"; unset LAB_RUN_BASE
+        run_base="$(lab_run_dir evals)" || exit 2
+        eval "$(lab_home_env "$run_base")" || exit 2
+        workdir="$(mktemp -d)"
+        eval_files_dir="$skill_dir/files"
+        [ -d "$eval_files_dir" ] && cp -r "$eval_files_dir/." "$workdir/"
+        ( cd "$workdir" && git init -q . 2>/dev/null && git add -A &&
+          git -c user.name='sdlc-skills-evals' -c user.email='evals@example.invalid' \
+            commit -q -m 'eval baseline' ) 2>/dev/null
+        if [ "$arm" = with_skill ]; then src="$with_src";
+        elif [ "$arm" = old_skill ]; then src="$old_src"; else src=""; fi
+        adapter_install "$src" || { echo "adapter install failed" >&2; exit 2; }
+        if [ -n "${LAB_CREDENTIAL_SEED:-}" ] && [ -f "$LAB_CREDENTIAL_SEED/$harness/env" ]; then
+          # shellcheck source=/dev/null
+          set -a; source "$LAB_CREDENTIAL_SEED/$harness/env"; set +a
+        fi
+        lab_seed_credentials "$run_base" "$harness" 2>/dev/null
+        prompt_file="$(mktemp)"; printf '%s' "$prompt" > "$prompt_file"
+        stream="$dest/stream.jsonl"
+        start_ms="$(date +%s)000"
+        adapter_run_behavioral "$workdir" "$prompt_file" "$stream"; status=$?
+        end_ms="$(date +%s)000"
+        rm -f "$prompt_file"
+        toks="$(adapter_usage "$stream" 2>/dev/null | tr -dc '0-9')"
+        [ -n "$toks" ] && tokens_json="$toks" || tokens_json=null
+        mkdir -p "$dest/outputs"
+        cp -r "$workdir/." "$dest/outputs/"
+        jq -n --argjson tokens "$tokens_json" --argjson ms "$((end_ms - start_ms))" \
+          '{total_tokens:$tokens, duration_ms:$ms}' > "$dest/timing.json"
+        jq --argjson idx "$idx" '{id: .evals[$idx].id, prompt: .evals[$idx].prompt,
+          expected_output: .evals[$idx].expected_output,
+          assertions: (.evals[$idx].assertions // [])}' "$ef" > "$dest/eval-case.json"
+        "$lab_root/bin/grade" "$dest" || { echo "grading failed for $eval_id/$arm" >&2; exit 2; }
+        rm -rf "$workdir"
+        lab_home_cleanup "$run_base" 2>/dev/null
+        lab_pin_cleanup "$run_base" 2>/dev/null
+        echo "graded $eval_id/$arm (run exit $status)"
+      done
+    done
+  done
+  "$lab_root/bin/benchmark" "$iter_dir" || exit 2
+  [ -f "$iter_dir/feedback.json" ] || printf '{}\n' > "$iter_dir/feedback.json"
+  echo "wrote $iter_dir/benchmark.json"
+  exit 0
+fi
 
 cmd="${1:-}"; [ "$cmd" = "-h" ] || [ "$cmd" = "--help" ] && { usage; exit 0; }
 case "$cmd" in new|run|report) ;; *) echo "needs new|run|report" >&2; exit 2;; esac

@@ -1,0 +1,13 @@
+{
+  "id": "grade-mixed",
+  "prompt": "fixture prompt (never run live)",
+  "expected_output": "fixture expectation (never run live)",
+  "assertions": [
+    "[check:file-exists app.js] output includes app.js",
+    "[check:file-exists missing.js] output includes missing.js",
+    "[check:file-contains test.txt hello] output greets",
+    "[check:file-contains test.txt goodbye] output farewells",
+    "[check:command-succeeds test -f app.js] app.js present",
+    "output is well structured"
+  ]
+}

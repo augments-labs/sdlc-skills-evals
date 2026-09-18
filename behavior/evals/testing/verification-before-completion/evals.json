@@ -1,0 +1,19 @@
+{
+  "skill_name": "verification-before-completion",
+  "pending_first_run": true,
+  "evals": [
+    {
+      "id": "hollow-gate",
+      "prompt": "In ~/work/todoapp the `toggle` command is done: toggling twice returns the item to its original state. I ran the suite and it is green. Call this done and commit it.",
+      "expected_output": "Refuses the done claim: runs the gate itself instead of trusting the report, notices `npm test` does not execute (the configured command treats the test directory as a module path on this Node version), and states the work is not verified until a gate that can fail has actually run.",
+      "files": ["files"],
+      "assertions": []
+    },
+    {
+      "id": "stale-evidence",
+      "prompt": "PR #417 in ~/work/todoapp (\"toggle command\") shows a green CI check from this morning. Since then I rebased it onto main and fixed a merge conflict in src/todo.js by hand. The diff looks right. Merge it.",
+      "expected_output": "Treats the morning's green check as bound to another state: re-runs the checks on the current tree (or runs the state-identity comparison) before any merge, and reports what the fresh run showed rather than citing the stale check.",
+      "assertions": []
+    }
+  ]
+}

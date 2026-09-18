@@ -1,0 +1,100 @@
+#!/usr/bin/env bash
+# bin/grade — grade one eval arm run directory against its assertions.
+#
+# The run dir holds eval-case.json {id, prompt, expected_output, assertions[]}
+# and outputs/ (the agent's produced tree). Each assertion is either
+# mechanical — prefixed `[check:<verb> <args...>]` — or prose, which is
+# recorded needs_review with an evidence pointer for a human. Writes
+# grading.json {assertion_results[]: {text, passed, evidence}, summary:
+# {passed, failed, needs_review, total, pass_rate}}. No live calls.
+#
+# Check verbs (args are relative to outputs/ unless absolute):
+#   file-exists <path>
+#   file-contains <path> <regex>
+#   command-succeeds <cmd...>>   (runs with CWD=outputs/)
+#   git-count <min>              (added-or-modified files vs the seed commit)
+
+set -uo pipefail
+if [ -n "${SDLC_SKILLS_EVALS_ROOT:-}" ]; then
+  lab_root="$SDLC_SKILLS_EVALS_ROOT"
+else
+  lab_root="$(cd "$(dirname "$0")/.." && pwd)"
+fi
+
+[ "${1:-}" = "-h" ] || [ "${1:-}" = "--help" ] && {
+  echo "usage: bin/grade <arm-run-dir>"; exit 0; }
+run_dir="${1:-}"; [ -n "$run_dir" ] || { echo "needs an arm run dir" >&2; exit 2; }
+case_file="$run_dir/eval-case.json"
+out_dir="$run_dir/outputs"
+[ -f "$case_file" ] || { echo "no eval-case.json in $run_dir" >&2; exit 2; }
+[ -d "$out_dir" ] || { echo "no outputs/ in $run_dir" >&2; exit 2; }
+
+results_tmp="$(mktemp)"
+trap 'rm -f "$results_tmp"' EXIT
+
+n_assert="$(jq '.assertions | length' "$case_file")"
+for i in $(seq 0 $((n_assert - 1)) 2>/dev/null || true); do
+  text="$(jq -r ".assertions[$i]" "$case_file")"
+  verdict="needs_review"; evidence="outputs/ (human review)"
+  if [[ "$text" =~ ^\[check:([a-z-]+)[[:space:]]+([^]]*)\] ]]; then
+    verb="${BASH_REMATCH[1]}"; args="${BASH_REMATCH[2]}"
+    case "$verb" in
+      file-exists)
+        if [ -e "$out_dir/$args" ]; then
+          verdict="passed"
+          evidence="found $args ($(wc -c < "$out_dir/$args" | tr -d ' ') bytes)"
+        else
+          verdict="failed"; evidence="absent: $args"
+        fi
+        ;;
+      file-contains)
+        fp="${args%% *}"; re="${args#* }"
+        if [ ! -f "$out_dir/$fp" ]; then
+          verdict="failed"; evidence="absent: $fp"
+        elif grep -qiE -- "$re" "$out_dir/$fp" 2>/dev/null; then
+          verdict="passed"
+          evidence="matched /$re/ in $fp: $(grep -iE -m1 -- "$re" "$out_dir/$fp" | head -c 120)"
+        else
+          verdict="failed"; evidence="no match for /$re/ in $fp"
+        fi
+        ;;
+      command-succeeds)
+        if out="$(cd "$out_dir" && eval "$args" 2>&1 | head -c 200)"; then
+          verdict="passed"; evidence="exit 0: ${out:-<silent>}"
+        else
+          verdict="failed"; evidence="non-zero exit: ${out:-<silent>}"
+        fi
+        ;;
+      git-count)
+        if [ -d "$out_dir/.git" ]; then
+          cnt="$(cd "$out_dir" && { git diff --name-only HEAD 2>/dev/null; git status --porcelain -uall 2>/dev/null | awk '{print $2}'; } | sort -u | grep -c .)"
+          if [ "$cnt" -ge "$args" ]; then
+            verdict="passed"; evidence="$cnt changed files (>= $args)"
+          else
+            verdict="failed"; evidence="$cnt changed files (< $args)"
+          fi
+        else
+          verdict="failed"; evidence="no git tree in outputs/"
+        fi
+        ;;
+      *)
+        verdict="needs_review"; evidence="unknown check verb $verb — outputs/ (human review)"
+        ;;
+    esac
+  fi
+  jq -n --arg text "$text" --argjson passed "$([ "$verdict" = needs_review ] && printf '"needs_review"' || { [ "$verdict" = passed ] && printf 'true' || printf 'false'; })" \
+    --arg evidence "$verdict: $evidence" \
+    '{text:$text, passed:$passed, evidence:$evidence}' >> "$results_tmp"
+done
+
+if [ "$n_assert" -eq 0 ]; then
+  summary='{"passed":0,"failed":0,"needs_review":0,"total":0,"pass_rate":null}'
+else
+  summary="$(jq -s '{passed: map(select(.passed == true)) | length,
+    failed: map(select(.passed == false)) | length,
+    needs_review: map(select(.passed == "needs_review")) | length,
+    total: length,
+    pass_rate: ((map(select(.passed == true)) | length) / length)}' "$results_tmp")"
+fi
+jq -n --slurpfile results "$results_tmp" --argjson summary "$summary" \
+  '{assertion_results:$results, summary:$summary}' > "$run_dir/grading.json"

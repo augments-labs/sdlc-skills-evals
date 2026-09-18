@@ -1,0 +1,61 @@
+#!/usr/bin/env bash
+# bin/benchmark — aggregate one iteration directory into benchmark.json.
+#
+# Reads <eval-id>/{with_skill,without_skill|old_skill}/{grading.json,
+# timing.json} and writes benchmark.json {run_summary: {with_skill: {...},
+# without_skill|old_skill: {...}, delta: {pass_rate, time_seconds,
+# tokens}}}, each metric {mean, stddev} (population). Token stats run over
+# the runs that reported tokens; all-unknown stays null, never zero. The
+# second arm keeps its own name (without_skill or old_skill). No live calls.
+
+set -uo pipefail
+[ "${1:-}" = "-h" ] || [ "${1:-}" = "--help" ] && {
+  echo "usage: bin/benchmark <iteration-dir>"; exit 0; }
+iter="${1:-}"; [ -n "$iter" ] || { echo "needs an iteration dir" >&2; exit 2; }
+[ -d "$iter" ] || { echo "no such dir: $iter" >&2; exit 2; }
+
+command -v jq >/dev/null 2>&1 || { echo "needs \`jq\`" >&2; exit 3; }
+
+second_arm=""
+for e in "$iter"/*/; do
+  [ -d "$e" ] || continue
+  for arm in "$e"*/; do
+    a="$(basename "$arm")"
+    if [ "$a" != with_skill ]; then
+      if [ -z "$second_arm" ]; then second_arm="$a"
+      elif [ "$a" != "$second_arm" ]; then
+        echo "two second arms ($second_arm, $a) — one iteration compares one pair" >&2; exit 2
+      fi
+    fi
+  done
+done
+[ -n "$second_arm" ] && [ "$second_arm" != with_skill ] || {
+  echo "no with_skill/second-arm pairs in $iter" >&2; exit 2; }
+
+stats() { # $1 arm name — prints a {pass_rate,time_seconds,tokens} object
+  local arm="$1" rates times toks
+  rates="$(for g in "$iter"/*/"$arm"/grading.json; do
+    [ -f "$g" ] || continue; jq -r '.summary.pass_rate // empty' "$g"; done | jq -s .)"
+  times="$(for t in "$iter"/*/"$arm"/timing.json; do
+    [ -f "$t" ] || continue; jq -r '(.duration_ms // 0) / 1000' "$t"; done | jq -s .)"
+  toks="$(for t in "$iter"/*/"$arm"/timing.json; do
+    [ -f "$t" ] || continue; jq -r '.total_tokens // empty' "$t"; done | jq -s .)"
+  jq -n --argjson rates "${rates:-[]}" --argjson times "${times:-[]}" --argjson toks "${toks:-[]}" '
+    def agg: if length == 0 then null
+      else (add / length) as $m
+      | {mean: $m,
+         stddev: (if length == 1 then 0
+           else ((map(. - $m) | map(. * .) | add / length) | sqrt) end)} end;
+    {pass_rate: ($rates | agg), time_seconds: ($times | agg), tokens: ($toks | agg)}'
+}
+
+with_stats="$(stats with_skill)"
+second_stats="$(stats "$second_arm")"
+jq -n --argjson with "$with_stats" --argjson second "$second_stats" --arg arm "$second_arm" '
+  def meanof(o): if o == null then null else o.mean end;
+  def sub(a; b): if a == null or b == null then null else a - b end;
+  {run_summary: ({with_skill: $with} + {($arm): $second}
+    + {delta: {pass_rate: sub(meanof($with.pass_rate); meanof($second.pass_rate)),
+               time_seconds: sub(meanof($with.time_seconds); meanof($second.time_seconds)),
+               tokens: sub(meanof($with.tokens); meanof($second.tokens))}})}' \
+  > "$iter/benchmark.json"
