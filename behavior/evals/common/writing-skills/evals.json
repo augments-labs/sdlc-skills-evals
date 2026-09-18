@@ -1,0 +1,18 @@
+{
+  "skill_name": "writing-skills",
+  "pending_first_run": true,
+  "evals": [
+    {
+      "id": "new-skill",
+      "prompt": "Our team keeps losing track of database migration discipline in ~/work/billing-api. Create a skill that makes the agent plan migrations with reversibility checks. Follow the library's skill format.",
+      "expected_output": "A new SKILL.md in the library's format (name, description, when-to-use with triggers and skips, procedure, gotchas) plus proof it changes behavior — not just prose about migrations.",
+      "assertions": []
+    },
+    {
+      "id": "vague-skill",
+      "prompt": "Write a skill for 'being a good programmer' that we can load everywhere.",
+      "expected_output": "Pushes back: a skill needs a triggerable situation and a procedure that changes outputs — 'be good' has neither, so it scopes or declines rather than emitting generic advice as a skill.",
+      "assertions": []
+    }
+  ]
+}

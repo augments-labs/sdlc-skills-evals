@@ -1,0 +1,18 @@
+{
+  "skill_name": "debugging",
+  "pending_first_run": true,
+  "evals": [
+    {
+      "id": "random-logouts",
+      "prompt": "Tenants in ~/work/billing-api with two API keys get randomly logged out; single-key tenants are fine. Find the cause before proposing any fix.",
+      "expected_output": "A diagnosed cause (the session cache keyed by tenant instead of key, evicting the first key) with the evidence chain — and no fix proposed or applied until the cause is established.",
+      "assertions": []
+    },
+    {
+      "id": "obvious-typo",
+      "prompt": "~/work/billing-api/src/server.js line 12 calls `rout()` instead of `route()` and nothing starts. Why doesn't it start?",
+      "expected_output": "Names the typo directly with the fix — a one-line error whose cause and complete effect are visible takes no investigation ritual.",
+      "assertions": []
+    }
+  ]
+}

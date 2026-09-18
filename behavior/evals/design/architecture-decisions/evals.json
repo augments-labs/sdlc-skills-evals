@@ -1,0 +1,18 @@
+{
+  "skill_name": "architecture-decisions",
+  "pending_first_run": true,
+  "evals": [
+    {
+      "id": "sync-vs-async",
+      "prompt": "In ~/work/checkout-api we must decide between synchronous cross-region inventory writes and an async saga for the three-region launch. Record the decision with the options weighed.",
+      "expected_output": "An ADR naming the decision, the options with trade-offs (consistency vs latency/operational cost), the chosen option with reasons, and consequences — a hard-to-reverse choice on the record, not a chat message.",
+      "assertions": []
+    },
+    {
+      "id": "reversible-trivia",
+      "prompt": "Record an architecture decision for renaming the `handle` function to `dispatch` in ~/work/billing-api/src/server.js.",
+      "expected_output": "Declines the ADR (or folds it into the commit message): a rename is easily reversible and carries no weighed options — ceremony scaled to reversibility, not applied blindly.",
+      "assertions": []
+    }
+  ]
+}

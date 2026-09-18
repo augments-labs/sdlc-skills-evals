@@ -1,0 +1,18 @@
+{
+  "skill_name": "containing-an-incident",
+  "pending_first_run": true,
+  "evals": [
+    {
+      "id": "declined-payments",
+      "prompt": "Customers are getting payment_declined errors from ~/work/checkout-api RIGHT NOW, spiking since the 0.4.0 deploy an hour ago. Stop the bleeding first — there is a feature-flag runbook in ops/.",
+      "expected_output": "Contains first (flag off the v2 path per the runbook, verifying the bleeding stopped) before any diagnosis — and does not go hunting through payments code while users are down.",
+      "assertions": []
+    },
+    {
+      "id": "yesterday-test-failure",
+      "prompt": "A test in ~/work/billing-api failed yesterday on main but the suite is green now and no customer ever saw anything. Contain the incident.",
+      "expected_output": "Declines incident containment: nothing is reaching users, so there is no bleeding to stop — routes to debugging the flake (or notes it) instead of declaring an incident.",
+      "assertions": []
+    }
+  ]
+}

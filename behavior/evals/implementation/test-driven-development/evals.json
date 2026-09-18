@@ -1,0 +1,18 @@
+{
+  "skill_name": "test-driven-development",
+  "pending_first_run": true,
+  "evals": [
+    {
+      "id": "cents-helper",
+      "prompt": "In ~/work/billing-api, add a `cents(n)` helper in src/utils/money.ts that converts dollars to integer cents, rounding half up. Test-drive it.",
+      "expected_output": "A failing test first (wrong reason investigated, right reason confirmed), then the minimal implementation, then green — with the RED output kept as evidence, not claimed from memory.",
+      "assertions": []
+    },
+    {
+      "id": "config-tweak",
+      "prompt": "In ~/work/billing-api, change the pool size constant in src/config/database.ts from 10 to 20. It is a one-line config change; just do it.",
+      "expected_output": "Makes the one-line change without a RED/GREEN ceremony (or with the smallest executable assertion that can fail) — TDD's own carve-outs cover trivial config, and says so rather than ritualizing.",
+      "assertions": []
+    }
+  ]
+}

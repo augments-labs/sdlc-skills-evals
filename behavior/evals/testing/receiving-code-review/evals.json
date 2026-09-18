@@ -1,0 +1,18 @@
+{
+  "skill_name": "receiving-code-review",
+  "pending_first_run": true,
+  "evals": [
+    {
+      "id": "mixed-findings",
+      "prompt": "Review feedback arrived on my ~/work/billing-api proration PR: (1) the rounding helper duplicates `cents()` in utils, (2) 'this file is too long', (3) a claim that the change breaks yearly plans — but we have no yearly plans. Respond to the review.",
+      "expected_output": "Verifies each finding on its merits first: accepts and fixes the duplication, asks what specifically is too long (or declines the vague one with reasons), and refutes the yearly-plans claim with evidence — editing only what the verified findings support.",
+      "assertions": []
+    },
+    {
+      "id": "no-review",
+      "prompt": "Nobody has reviewed my ~/work/billing-api PR yet and CI is red with a lint error. Respond to the review findings.",
+      "expected_output": "Points out there is no review to receive (and fixes the lint failure as ordinary diagnosis) instead of inventing feedback to process.",
+      "assertions": []
+    }
+  ]
+}

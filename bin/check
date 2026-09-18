@@ -1,0 +1,143 @@
+#!/usr/bin/env bash
+# bin/check — the static gate entry point. No live runs, no network, no keys.
+# Later tasks fill in the real sections (E-4 scenarios, E-5 query sets, E-6
+# evals shape, E-7 inventory, E-14 docs/code rule).
+set -uo pipefail
+root="$(cd "$(dirname "$0")/.." && pwd)"
+cd "$root" || exit 1
+
+echo "check: skeleton — static entry point"
+echo "check: .gitignore honors plans, raw runs, workspaces, secrets"
+
+# E-3: harness launcher contract (headers, required functions, opencode parsing)
+bash lib/tests/harnesses.sh || { echo "check: FAIL harnesses"; exit 1; }
+bash lib/tests/opencode-adapter.sh >/dev/null || { echo "check: FAIL opencode adapter"; exit 1; }
+echo "check: harnesses ok"
+
+# E-4: behavior scenario shape + frozen check manifests
+if [ "${1:-}" = "--update-manifests" ]; then
+  for f in behavior/scenarios/*.sh; do
+    n="$(basename "$f" .sh)"
+    sed 's/#.*//' "$f" | grep -oE '\b(pass|fail|assert_contains|assert_not_contains|assert_file)[[:space:]]' \
+      | sed 's/[[:space:]]*$//' | sort -u | jq -R . | jq -s . > "behavior/checks-manifest/$n.json"
+  done
+  echo "check: manifests regenerated"
+  exit 0
+fi
+for f in behavior/scenarios/*.sh; do
+  n="$(basename "$f" .sh)"
+  for fn in scenario_opening scenario_setup scenario_assert; do
+    grep -q "^$fn *(" "$f" || { echo "check: FAIL $n defines no $fn()"; exit 1; }
+  done
+  [ -f "behavior/checks-manifest/$n.json" ] || { echo "check: FAIL no manifest for $n"; exit 1; }
+  sed 's/#.*//' "$f" | grep -oE '\b(pass|fail|assert_contains|assert_not_contains|assert_file)[[:space:]]' \
+    | sed 's/[[:space:]]*$//' | sort -u | jq -R . | jq -s . > "/tmp/check-manifest-$n.json"
+  cmp -s "/tmp/check-manifest-$n.json" "behavior/checks-manifest/$n.json" \
+    || { echo "check: FAIL stale manifest for $n (run bin/check --update-manifests)"; exit 1; }
+  rm -f "/tmp/check-manifest-$n.json"
+  grep -qxF "$n" behavior/suites/all.txt 2>/dev/null \
+    || { echo "check: FAIL $n not listed in behavior/suites/all.txt"; exit 1; }
+done
+if find behavior/scenarios -type f -perm -111 | grep -q .; then
+  echo "check: FAIL executable under behavior/scenarios (scenarios are sourced, never executed)"
+  exit 1
+fi
+echo "check: behavior ok"
+
+# E-8: suite coherence — routing rows name listed scenarios
+if [ -f behavior/suites/routing.txt ]; then
+  while IFS= read -r r || [ -n "$r" ]; do
+    [ -n "$r" ] || continue
+    grep -qxF "$r" behavior/suites/all.txt \
+      || { echo "check: FAIL routing scenario not in suite: $r"; exit 1; }
+  done < behavior/suites/routing.txt
+  echo "check: suites ok"
+fi
+
+# E-5: query-set shape — what the old README asked readers to check.
+# Root override for tests: DESCRIPTIONS_ROOT (default descriptions/).
+desc_root="${DESCRIPTIONS_ROOT:-descriptions}"
+_check_set() { # $1 file $2 holdout(0|1)
+  local f="$1" hold="$2" total pos neg t v tpos vpos
+  total="$(jq 'length' "$f")" || { echo "check: FAIL $f is not a JSON array"; return 1; }
+  pos="$(jq '[.[] | select(.should_trigger == true)] | length' "$f")"
+  neg="$(jq '[.[] | select(.should_trigger == false)] | length' "$f")"
+  if [ "$hold" -eq 0 ]; then
+    [ "$pos" -ge 10 ] || { echo "check: FAIL $f needs >= 10 positives (has $pos)"; return 1; }
+    [ "$neg" -ge 10 ] || { echo "check: FAIL $f needs >= 10 negatives (has $neg)"; return 1; }
+  else
+    [ "$total" -ge 5 ] && [ "$total" -le 10 ] \
+      || { echo "check: FAIL holdout $f holds 5-10 fresh queries (has $total)"; return 1; }
+  fi
+  jq -e 'all(.[]; (.split == "train" or .split == "validation" or .split == "holdout")
+    and (.should_trigger | type == "boolean"))' "$f" >/dev/null \
+    || { echo "check: FAIL $f entries need split and boolean should_trigger"; return 1; }
+  jq -e 'all(.[]; select(.should_trigger == false) | has("expect") and (.expect | type == "string" and length > 0))' "$f" >/dev/null \
+    || { echo "check: FAIL $f negatives need a non-empty expect route"; return 1; }
+  [ "$(jq -r '.[].query' "$f" | sort | uniq -d | wc -l)" -eq 0 ] \
+    || { echo "check: FAIL $f has duplicate queries"; return 1; }
+  if [ "$hold" -eq 0 ]; then
+    t="$(jq '[.[] | select(.split == "train")] | length' "$f")"
+    v="$(jq '[.[] | select(.split == "validation")] | length' "$f")"
+    tpos="$(jq '[.[] | select(.split == "train" and .should_trigger == true)] | length' "$f")"
+    vpos="$(jq '[.[] | select(.split == "validation" and .should_trigger == true)] | length' "$f")"
+    [ "$t" -gt 0 ] && [ "$v" -gt 0 ] || { echo "check: FAIL $f needs train and validation splits"; return 1; }
+    [ $((4 * v)) -ge "$total" ] && [ $((2 * v)) -le "$total" ] \
+      || { echo "check: FAIL $f validation share must be 1/4..1/2 (has $v/$total)"; return 1; }
+    [ "$((vpos * t))" -eq "$((tpos * v))" ] \
+      || { echo "check: FAIL $f validation/train positive proportions differ"; return 1; }
+    [ "$(((v - vpos) * t))" -eq "$(((t - tpos) * v))" ] \
+      || { echo "check: FAIL $f validation/train negative proportions differ"; return 1; }
+  else
+    jq -e 'all(.[]; .split == "holdout")' "$f" >/dev/null \
+      || { echo "check: FAIL holdout $f entries must carry split=holdout"; return 1; }
+  fi
+  return 0
+}
+while IFS= read -r sf; do
+  case "$sf" in */holdout/*) _check_set "$sf" 1 || exit 1;; *) _check_set "$sf" 0 || exit 1;; esac
+done < <(find "$desc_root" -name '*.json' -type f | sort)
+# a holdout set must not share a query with its set (it is written after selection)
+while IFS= read -r hf; do
+  main="${hf/holdout\//}"
+  [ -f "$main" ] || continue
+  shared="$(comm -12 <(jq -r '.[].query' "$main" | sort -u) <(jq -r '.[].query' "$hf" | sort -u) | wc -l)"
+  [ "$shared" -eq 0 ] || { echo "check: FAIL holdout $hf reuses queries from $main"; exit 1; }
+done < <(find "$desc_root/holdout" -name '*.json' -type f 2>/dev/null | sort)
+echo "check: descriptions ok"
+
+# E-14: docs/ and results/ hold records and guidance, never runtime code.
+# Enforced as no-exec-bit + no-shebang: a non-executable, shebang-less
+# script file would pass, so treat this as the realistic-vectors proxy it
+# is and keep code out of both trees by review, not just by gate.
+docs_root="${DOCS_ROOT:-docs}"
+if find "$docs_root" results -type f -perm -111 2>/dev/null | grep -q .; then
+  echo "check: FAIL executable under docs/ or results/ (records and guidance only)"
+  find "$docs_root" results -type f -perm -111 2>/dev/null
+  exit 1
+fi
+if grep -rl '^#!' "$docs_root" 2>/dev/null | grep -q .; then
+  echo "check: FAIL shebang under docs/ (records and guidance only)"
+  exit 1
+fi
+echo "check: docs ok"
+
+# E-7: evals inventory — every skill on the pinned plugin has an evals.json.
+# Scoped by --plugin <tree> (the tree to compare against); without it the
+# section is skipped with a note, so CI without a plugin checkout stays green.
+check_plugin=""
+[ "${1:-}" = "--plugin" ] && { check_plugin="${2:-}"; }
+if [ -n "$check_plugin" ]; then
+  while IFS= read -r sk; do
+    # implementation/subagent-driven-development is owned by E-12's
+    # evaluator (it authors the file); every other skill is E-7's.
+    [ "$sk" = "implementation/subagent-driven-development" ] && continue
+    [ -f "behavior/evals/$sk/evals.json" ] \
+      || { echo "check: FAIL missing evals for $sk"; exit 1; }
+  done < <(find "$check_plugin/skills" -name SKILL.md | sed 's|.*/skills/||; s|/SKILL.md||' | sort)
+  echo "check: evals inventory ok"
+else
+  echo "check: evals inventory skipped (no --plugin tree)"
+fi
+
+echo "check: OK"

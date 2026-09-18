@@ -1,0 +1,18 @@
+{
+  "skill_name": "mapping-the-codebase",
+  "pending_first_run": true,
+  "evals": [
+    {
+      "id": "charge-flow",
+      "prompt": "Before I change anything in ~/work/checkout-api, map how a checkout flows from src/server.js through totals to payment capture: the callers, the owners of each step, and the boundaries a change would cross.",
+      "expected_output": "A map of the charge flow naming each step's file and function, who calls whom, and where the seams are (flag read, rate lookup, gateway call) — established from the code, before any change is proposed.",
+      "assertions": []
+    },
+    {
+      "id": "already-mapped",
+      "prompt": "Map how src/tax.js rate lookups work in ~/work/checkout-api. (For context: we mapped this exact region yesterday and nothing has changed since.)",
+      "expected_output": "Skips re-mapping work the current context already covers (or reuses it explicitly) instead of re-deriving the same map from scratch — at most a freshness check.",
+      "assertions": []
+    }
+  ]
+}

@@ -1,0 +1,18 @@
+{
+  "skill_name": "requesting-code-review",
+  "pending_first_run": true,
+  "evals": [
+    {
+      "id": "ready-to-merge",
+      "prompt": "My ~/work/billing-api proration change is complete on task/proration and its gates are green. Is it ready to merge? Review it first.",
+      "expected_output": "An independent review of the frozen state (correctness, coverage, yagni, silent failures) with a merge/no-merge verdict — the diff read fresh, not a rubber stamp of the author's summary.",
+      "assertions": []
+    },
+    {
+      "id": "midway-checkpoint",
+      "prompt": "I am halfway through the proration work in ~/work/billing-api, tests are red, and I will keep going either way. Request a code review of the current state before I continue.",
+      "expected_output": "Declines the full review (or gives a bounded steer labeled as such): an unfinished, knowingly-red checkpoint is not a reviewable state — review happens at a done boundary.",
+      "assertions": []
+    }
+  ]
+}

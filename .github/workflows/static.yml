@@ -1,0 +1,33 @@
+name: static
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  static:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: shellcheck runners, seams, launchers, fixtures
+        # Explicit file list: globs would lint READMEs (SC2148). -S warning:
+        # infos (sourced-library following, trap reachability) are inherent
+        # to the sourced-runner design and documented at each site.
+        run: >
+          shellcheck -S warning
+          bin/behavior bin/campaign bin/check bin/triggering
+          bin/grade bin/benchmark bin/report
+          lib/*.sh lib/tests/*.sh lib/tests/fake-cli/*.sh
+          harnesses/*.sh fixtures/*.sh
+      - name: static gate
+        run: bash bin/check
+      - name: offline seam tests
+        run: |
+          for t in lib/tests/*.sh; do
+            [ -e "$t" ] || continue
+            bash "$t" || { echo "FAIL $t"; exit 1; }
+          done

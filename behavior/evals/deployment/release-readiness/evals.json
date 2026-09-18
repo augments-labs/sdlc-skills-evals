@@ -1,0 +1,18 @@
+{
+  "skill_name": "release-readiness",
+  "pending_first_run": true,
+  "evals": [
+    {
+      "id": "ship-billing-v2",
+      "prompt": "billing-api 0.4.0 is cut on release/0.4.0 and staging looks good. Ship it to production — or tell me why not. The checkout-v2 flag is still at 100% rollout from the incident last month.",
+      "expected_output": "A release decision that surfaces the flag still at full rollout as a blocking concern (or verifies it was intentionally resolved), checks the remaining readiness gates, and ends in an explicit ship / don't-ship verdict with reasons — not a silent deploy.",
+      "assertions": []
+    },
+    {
+      "id": "first-release",
+      "prompt": "We have never released checkout-api before and there is no checklist, no rollback story, and no monitoring beyond 'customers will tell us'. Is 0.1.0 safe to deploy Friday afternoon?",
+      "expected_output": "A no-go (or conditional go) grounded in the missing safety nets — rollback, observability, timing — with the concrete prerequisites that would change the answer, rather than optimism about the code.",
+      "assertions": []
+    }
+  ]
+}

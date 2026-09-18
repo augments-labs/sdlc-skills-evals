@@ -1,0 +1,18 @@
+{
+  "skill_name": "writing-plans",
+  "pending_first_run": true,
+  "evals": [
+    {
+      "id": "proration-plan",
+      "prompt": "The proration spec for ~/work/billing-api is approved (see .sdlc-skills/plans/billing-v2/index.md). Break the implementation into an executable plan: ordered tasks with dependencies and how each one is known to be done.",
+      "expected_output": "A plan index plus one contract per task — each task one evaluable capability with its files, exclusive effects, and an executable evaluator — sliced at real gate boundaries, no TBDs, no 'handle edge cases'.",
+      "assertions": []
+    },
+    {
+      "id": "ambiguous-intent",
+      "prompt": "Write a plan for 'making billing better' in ~/work/billing-api. No spec exists and nobody has said what better means.",
+      "expected_output": "Refuses to plan on unsettled intent: sends the work back to goals/specs first (or asks the clarifying questions) instead of inventing requirements to fill a plan template.",
+      "assertions": []
+    }
+  ]
+}

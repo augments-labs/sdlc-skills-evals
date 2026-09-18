@@ -1,0 +1,18 @@
+{
+  "skill_name": "migration-strategy",
+  "pending_first_run": true,
+  "evals": [
+    {
+      "id": "checkout-rewrite",
+      "prompt": "We are rewriting ~/work/checkout-api's totals path (v1 to v2) while it serves live traffic. Plan how behavior is preserved through cutover and recovery — including what happens if v2 misprices at 3am.",
+      "expected_output": "A migration contract with the behavior to preserve, the cutover mechanism (flag, rollout, dual-run or shadow comparison), the recovery path (flag-off, rollback owner and time), and entry/exit gates — not just the new code.",
+      "assertions": []
+    },
+    {
+      "id": "bounded-rename",
+      "prompt": "Plan the migration for renaming `chargeTenant` to `charge` in ~/work/billing-api/src/billing/charge.js. Three call sites, no external callers.",
+      "expected_output": "A small, directly reviewable change — no cutover machinery, no recovery plan beyond version control — with the reasoning that bounded diffs need no migration strategy.",
+      "assertions": []
+    }
+  ]
+}

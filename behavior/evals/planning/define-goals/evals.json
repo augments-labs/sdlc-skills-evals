@@ -1,0 +1,18 @@
+{
+  "skill_name": "define-goals",
+  "pending_first_run": true,
+  "evals": [
+    {
+      "id": "billing-v2-goals",
+      "prompt": "We are starting billing-v2 in ~/work/billing-api: usage-based pricing on top of the current per-seat plans. Before anyone scopes or builds, pin down what this initiative is for — objective, stakeholders, how we will know it worked, and the guardrails.",
+      "expected_output": "A goals statement naming the objective (why usage-based, for whom), the stakeholders, measurable success criteria, and explicit guardrails (what must not break), written before any scope or plan.",
+      "assertions": []
+    },
+    {
+      "id": "solution-in-search",
+      "prompt": "My co-founder wants to rewrite ~/work/billing-api in Rust because the team thinks it will be fun and look good on the blog. Help me figure out what this initiative is actually for before we commit to anything.",
+      "expected_output": "Refuses to accept the rewrite as the goal: surfaces that no objective, stakeholder, or success measure has been stated, and pins down what problem (if any) justifies an initiative at all — possibly concluding there is no initiative here.",
+      "assertions": []
+    }
+  ]
+}

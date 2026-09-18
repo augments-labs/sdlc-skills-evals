@@ -1,0 +1,18 @@
+{
+  "skill_name": "visual-ui-verification",
+  "pending_first_run": true,
+  "evals": [
+    {
+      "id": "invite-states",
+      "prompt": "The tenant-invite screen in ~/work/billing-api is implemented. Verify it visually: pending, expired, and over-seat-cap states, mobile width, and the empty-team state — against the approved design.",
+      "expected_output": "A visual check across the named states and viewport with conformance notes per state (what matches the design, what deviates) — looking at the running interface, not asserting from the code.",
+      "assertions": []
+    },
+    {
+      "id": "backend-only",
+      "prompt": "Visually verify the proration rounding change in ~/work/billing-api/src/server.js. It has no UI surface.",
+      "expected_output": "Declines the visual check: no interface changed, so there is nothing to look at — routes to the behavioral gate instead of screenshotting a backend diff.",
+      "assertions": []
+    }
+  ]
+}

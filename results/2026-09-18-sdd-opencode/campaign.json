@@ -1,0 +1,29 @@
+{
+  "label": "sdd-opencode"
+,
+  "plugin_ref": "v10.2.1"
+,
+  "plugin_commit": "457107b206272266b920aebf81e1983829ee22f3"
+,
+  "harness": "opencode"
+,
+  "arms": [
+  {
+    "name": "green",
+    "base": null
+  }
+],
+  "suite": null,
+  "scenarios": [
+  "subagent-driven-development"
+]
+,
+  "runs": 1,
+  "tier": null,
+  "harness_dir": null,
+  "scenario_dir": null,
+  "lab_commit": "8c3458ecdf5c88b2bef2745d3ed2a04a01f934ab"
+,
+  "created": "2026-09-18T13:43:37Z"
+
+}

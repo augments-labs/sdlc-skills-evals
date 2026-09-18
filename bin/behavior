@@ -1,0 +1,414 @@
+#!/usr/bin/env bash
+# bin/behavior — did the skill change what got BUILT?
+#
+# Activation asks "did the skill fire?" — one generic verdict. This asks "did
+# the skill change what got BUILT?", which has no generic verdict: success
+# differs per skill. So the scenario owns the judgement (`scenario_assert`,
+# exit code) and the harness owns only how its CLI is driven
+# (`harnesses/<harness>.sh`).
+#
+# THREE ARMS, because a behavioural claim is a comparison — and there are two
+# different comparisons worth making:
+#   --arm green   loads the skills from --plugin <path|ref> (your change)
+#   --arm red     loads them from a throwaway worktree at --base, so the
+#                 before-arm stays reproducible AFTER the change is committed.
+#   --arm none    loads NO skills at all — a bare agent on the same opening.
+#
+# RED vs GREEN compares two plugin trees on one scenario. NONE observes the
+# bare agent. Keep every sampled result: a passing control does not erase a
+# reported failure or prove a skill unnecessary.
+#
+# Verdicts are three-valued (exit 0/1/2): pass, fail, indeterminate. Anything
+# unobserved — timeout, adapter error, provider refusal, contaminated
+# control, empty capture, no checks ran, manifest mismatch, unrunnable
+# harness — is indeterminate, never a false red or green.
+#
+# One skill on one harness is the primary flow:
+#   bin/behavior --harness opencode --scenario subagent-driven-development --arm green
+#
+# Real API calls, roughly a full agent task per arm. Manual tool, never CI.
+
+set -uo pipefail
+
+usage() {
+  cat <<'EOF'
+bin/behavior — did the skill change what got BUILT?
+
+  --harness NAME    opencode | claude-code | codex | kimi-code   (required)
+  --scenario NAME   a file at behavior/scenarios/NAME.sh        (required)
+  --arm WHICH       green | red | none                           (required)
+                      green  skills from --plugin <path|ref>
+                      red    skills from a worktree at --base
+                      none   no skills at all (--plugin rejected)
+  --plugin P        path or git ref of the plugin tree (green arm, required)
+  --base REF        git ref the red arm checks out in SDLC_SKILLS_ROOT
+                    (red arm, required; supersedes --plugin for red)
+  --timeout SEC     per-arm wall clock                           (default: 1800)
+  --tier TIER       small | medium | large — overrides the scenario's model
+                    tier for one diagnostic run (needs adapter_model)
+  --keep            keep the scenario workdir for inspection
+  --record DIR      write runs/<scenario>-<arm>-<n>.json under DIR
+  --scenario-dir D  scenario directory (default: behavior/scenarios;
+                    a test seam for offline runs)
+  --harness-dir D   harness directory (default: harnesses;
+                    a test seam for offline runs)
+  --help            this text
+
+Exit codes: 0 the scenario's own assertions passed · 1 they failed
+            2 bad arguments or indeterminate (unobserved, never a verdict)
+
+Examples:
+  bin/behavior --harness opencode --scenario writing-specs --arm green --plugin ../sdlc-skills
+  bin/behavior --harness opencode --scenario writing-specs --arm none
+EOF
+}
+
+# --- roots and seams ---------------------------------------------------------
+if [ -n "${SDLC_SKILLS_EVALS_ROOT:-}" ]; then
+  lab_root="$SDLC_SKILLS_EVALS_ROOT"
+else
+  lab_root="$(cd "$(dirname "$0")/.." && pwd)"
+fi
+# shellcheck source=../lib/common.sh
+source "$lab_root/lib/common.sh"
+# shellcheck source=../lib/verdict.sh
+source "$lab_root/lib/verdict.sh"
+# shellcheck source=../lib/pin.sh
+source "$lab_root/lib/pin.sh"
+# shellcheck source=../lib/home-env.sh
+source "$lab_root/lib/home-env.sh"
+
+scenario="" harness="" arm="" plugin="" base="" record_dir=""
+timeout_s="${BH_DEFAULT_TIMEOUT:-1800}"
+tier_override="" keep="" scenario_dir="" harness_dir="" harnessdir_given=""
+for a in "$@"; do
+  [ "$a" = "-h" ] || [ "$a" = "--help" ] && { usage; exit 0; }
+done
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    --harness) harness="$2"; shift 2;;
+    --scenario) scenario="$2"; shift 2;;
+    --arm) arm="$2"; shift 2;;
+    --plugin) plugin="$2"; shift 2;;
+    --base) base="$2"; shift 2;;
+    --timeout) timeout_s="$2"; shift 2;;
+    --tier) tier_override="$2"; shift 2;;
+    --keep) keep="1"; shift;;
+    --record) record_dir="$2"; shift 2;;
+    --scenario-dir) scenario_dir="$2"; shift 2;;
+    --harness-dir) harness_dir="$2"; harnessdir_given="1"; shift 2;;
+    *) echo "unknown argument: $1" >&2; exit 2;;
+  esac
+done
+scenario_dir="${scenario_dir:-$lab_root/behavior/scenarios}"
+harness_dir="${harness_dir:-$lab_root/harnesses}"
+# A `fake` harness name routes to the offline test double for self-tests.
+if [ "$harness" = fake ] && [ -z "$harnessdir_given" ]; then
+  harness_dir="$lab_root/lib/tests/fake-cli"
+fi
+
+[ -n "$scenario" ] || { echo "needs --scenario NAME" >&2; exit 2; }
+[ -n "$harness" ] || { echo "needs --harness NAME" >&2; exit 2; }
+case "$arm" in green|red|none) ;; *) echo "needs --arm green|red|none" >&2; exit 2;; esac
+case "$timeout_s" in ''|*[!0-9]*|0) echo "--timeout needs a positive integer" >&2; exit 2;; esac
+if [ "$arm" = none ] && [ -n "$plugin" ]; then
+  echo "--arm none loads no skills: --plugin rejected" >&2; exit 2
+fi
+if [ "$arm" = green ] && [ -z "$plugin" ]; then
+  echo "--arm green needs --plugin <path|ref>" >&2; exit 2
+fi
+if [ "$arm" = red ] && [ -z "$base" ]; then
+  echo "--arm red needs --base REF" >&2; exit 2
+fi
+
+harness_file="$harness_dir/$harness.sh"
+[ -f "$harness_file" ] || { echo "no harness adapter: $harness" >&2; exit 2; }
+# shellcheck source=/dev/null
+source "$harness_file"
+
+# An unrunnable harness is indeterminate, never launched.
+if [ "$(grep '^runnable=' "$harness_file" | sed 's/^runnable=//')" != "yes" ]; then
+  reason="$(grep '^runnable_reason=' "$harness_file" | sed 's/^runnable_reason=//')"
+  echo "scenario   : $scenario"
+  echo "adapter    : $harness"
+  echo "verdict    : indeterminate(stage=harness) — ${reason:-unrunnable}"
+  exit 2
+fi
+
+# Millisecond clock without `date +%N` (not portable: uutils ignores the
+# precision). $EPOCHREALTIME needs bash 5+; otherwise second resolution.
+_ms() {
+  if [ -n "${EPOCHREALTIME:-}" ]; then
+    printf '%s' "${EPOCHREALTIME/.}"
+  else
+    printf '%s000000' "$(date +%s)"
+  fi
+}
+_ms_to_ms() { printf '%s' "${1:0:13}"; }
+
+# --- per-run isolation -------------------------------------------------------
+run_dir="$(lab_run_dir behavior)" || exit 2
+workdir=""; stream=""; errlog=""
+cleanup() {
+  lab_pin_cleanup "$run_dir" 2>/dev/null
+  lab_home_cleanup "$run_dir" 2>/dev/null
+  if [ -n "${keep:-}" ]; then
+    echo "kept: workdir=$workdir stream=$stream errlog=$errlog"
+  else
+    rm -rf "${workdir:-}" "${stream:-}" "${errlog:-}"
+  fi
+}
+trap cleanup EXIT
+eval "$(lab_home_env "$run_dir")" || exit 2
+
+require_tool jq timeout || exit 2
+if ! adapter_check; then
+  echo "verdict    : indeterminate(stage=harness) — adapter unavailable" >&2; exit 2
+fi
+
+# --- scenario ----------------------------------------------------------------
+scenario_file="$scenario_dir/$scenario.sh"
+[ -f "$scenario_file" ] || { echo "no scenario at $scenario_file" >&2; exit 2; }
+# The runner sources the assertion library AND the fixtures BEFORE the
+# scenario; scenarios themselves source nothing and stay byte-identical
+# across layouts.
+# shellcheck source=../lib/prelude.sh
+source "$lab_root/lib/prelude.sh"
+# shellcheck source=/dev/null
+source "$lab_root/fixtures/fixtures.sh"
+# shellcheck source=/dev/null
+source "$scenario_file"
+for fn in scenario_opening scenario_setup scenario_assert; do
+  command -v "$fn" >/dev/null 2>&1 || { echo "$scenario.sh defines no $fn()" >&2; exit 2; }
+done
+if command -v scenario_followups >/dev/null 2>&1; then need_continue=1; followups=(); else need_continue=""; followups=(); fi
+if [ -n "${tier_override:-}" ]; then scenario_model_tier="$tier_override"; fi
+if [ -n "${scenario_model_tier:-}" ] && ! command -v adapter_model >/dev/null 2>&1; then
+  echo "$scenario asks for model tier '$scenario_model_tier' and $harness binds no tiers" >&2; exit 2
+fi
+if [ -n "${scenario_harnesses:-}" ]; then
+  case " ${scenario_harnesses} " in
+    *" $harness "*) : ;;
+    *) echo "$scenario is bound to: $scenario_harnesses — not $harness" >&2; exit 2;;
+  esac
+fi
+if [ -n "$need_continue" ] && ! command -v adapter_continue_behavioral >/dev/null 2>&1; then
+  echo "$harness adapter cannot continue a multi-turn behavioural session" >&2; exit 2
+fi
+
+# Track which assertion verbs actually ran, for the manifest check. The
+# wrappers delegate to the prelude originals, so counting and exit bands
+# are untouched; lib/prelude.sh itself is never edited here.
+_lab_invoked=""
+_wrap_verb() { # $1 verb name
+  local body renamed
+  body="$(declare -f "$1")" || return 1
+  renamed="orig_$1${body#"$1"}"
+  eval "$renamed"
+  eval "$1() { _lab_invoked=\"\$_lab_invoked $1\"; orig_$1 \"\$@\"; }"
+}
+for _vv in pass fail assert_contains assert_not_contains assert_file; do _wrap_verb "$_vv"; done
+
+# --- pin the plugin ----------------------------------------------------------
+plugin_src=""; plugin_commit=""
+case "$arm" in
+  none) : ;;
+  green)
+    if [ -d "$plugin" ]; then
+      git -C "$plugin" rev-parse --git-dir >/dev/null 2>&1 || {
+        echo "--plugin is not a plugin checkout: $plugin" >&2; exit 2; }
+      plugin_src="$plugin"
+      plugin_commit="$(git -C "$plugin" rev-parse HEAD)"
+    else
+      lab_pin_plugin "$plugin" "$run_dir" >"$run_dir/plugin_commit.txt" || {
+        echo "cannot pin --plugin '$plugin'" >&2; exit 2; }
+      plugin_commit="$(cat "$run_dir/plugin_commit.txt")"
+      plugin_src="$run_dir/plugin"
+    fi
+    ;;
+  red)
+    if [ -n "$plugin" ]; then
+      echo "note: --base supersedes --plugin for the red arm" >&2
+    fi
+    lab_pin_plugin "$base" "$run_dir" >"$run_dir/plugin_commit.txt" || {
+      echo "cannot pin --base '$base' (fetch first?)" >&2; exit 2; }
+    plugin_commit="$(cat "$run_dir/plugin_commit.txt")"
+    plugin_src="$run_dir/plugin"
+    ;;
+esac
+
+# --- seed the fixture --------------------------------------------------------
+opening_file="$(mktemp)"
+if command -v "scenario_opening_${harness//-/_}" >/dev/null 2>&1; then
+  "scenario_opening_${harness//-/_}" > "$opening_file"
+else
+  scenario_opening > "$opening_file"
+fi
+if command -v "scenario_setup_${harness//-/_}" >/dev/null 2>&1; then
+  setup_kind="scenario_setup_${harness//-/_}"
+else
+  setup_kind="scenario_setup"
+fi
+workdir="$(mktemp -d)"
+"$setup_kind" "$workdir" || { echo "failed to seed fixture" >&2; exit 2; }
+(
+  cd "$workdir" || exit 2
+  git init -q . 2>/dev/null || exit 2
+  git add -A
+  git -c user.name='sdlc-skills-evals' -c user.email='evals@example.invalid' \
+      commit -q -m 'scenario baseline'
+  git switch -qc "${scenario_branch:-task/behavioral-probe}"
+) || { echo "failed to seed fixture repo" >&2; exit 2; }
+
+# --- run ---------------------------------------------------------------------
+stream="$(mktemp)"; errlog="$(mktemp)"
+adapter_install "$plugin_src" || { echo "adapter install failed" >&2; exit 2; }
+if [ -n "${LAB_CREDENTIAL_SEED:-}" ] && [ -f "$LAB_CREDENTIAL_SEED/$harness/env" ]; then
+  # Operator-owned seed file (KEY=VALUE lines); the path is validated above.
+  set -a
+  # shellcheck disable=SC1090
+  source "$LAB_CREDENTIAL_SEED/$harness/env"
+  set +a
+fi
+lab_seed_credentials "$run_dir" "$harness" 2>/dev/null
+start_ms="$(_ms_to_ms "$(_ms)")"
+adapter_run_behavioral "$workdir" "$opening_file" "$stream"; status=$?
+if [ "$status" -eq 0 ] && [ -n "$need_continue" ]; then
+  scenario_followups
+  for followup in ${followups[@]+"${followups[@]}"}; do
+    turn_stream="$(mktemp)"
+    adapter_continue_behavioral "$workdir" "$followup" "$turn_stream" "$stream"; status=$?
+    cat "$turn_stream" >> "$stream"
+    rm -f "$turn_stream"
+    [ "$status" -eq 0 ] || break
+  done
+fi
+end_ms="$(_ms_to_ms "$(_ms)")"
+duration_ms=$((end_ms - start_ms))
+
+# --- compose the verdict -----------------------------------------------------
+setup_v=pass run_v=pass capture_v=pass checks_v=pass manifest_v=pass
+stage_detail=""
+
+if [ "$status" -eq 124 ]; then
+  run_v=indeterminate; stage_detail="timeout after ${timeout_s}s"
+elif [ "$status" -ne 0 ]; then
+  run_v=indeterminate; stage_detail="adapter exited $status (see $errlog)"
+elif grep -qiE 'usage limit|login_required|api_error: 4' "$stream" "$errlog" 2>/dev/null; then
+  run_v=indeterminate; stage_detail="provider refused (quota/auth)"
+fi
+
+chain=""
+if [ "$run_v" = pass ]; then
+  if [ ! -s "$stream" ]; then
+    capture_v=indeterminate; stage_detail="empty capture"
+  elif command -v adapter_ran >/dev/null 2>&1 && ! adapter_ran "$stream"; then
+    capture_v=indeterminate; stage_detail="never reached the model"
+  else
+    chain="$(adapter_chain "$stream" 2>/dev/null | awk 'NF && !seen[$0]++')"
+    if [ "$arm" = none ] && [ -n "$chain" ]; then
+      run_v=indeterminate; stage_detail="contaminated — arm=none but loaded: $(printf '%s' "$chain" | paste -sd' ' -)"
+    fi
+  fi
+fi
+
+checks_run=0 asserts_out=""
+if [ "$run_v" = pass ] && [ "$capture_v" = pass ]; then
+  asserts_out_file="$(mktemp)"
+  scenario_assert "$workdir" >"$asserts_out_file" 2>&1; checks_rc=$?
+  asserts_out="$(cat "$asserts_out_file")"; rm -f "$asserts_out_file"
+  # Set by the scenario's assertion verbs (lib/prelude.sh, sourced above).
+  # shellcheck disable=SC2154
+  checks_run="$_lab_checks_run"
+  if [ "$checks_run" -eq 0 ]; then
+    checks_v=indeterminate; stage_detail="no check ran"
+  elif [ "$checks_rc" -ne 0 ]; then
+    checks_v=fail
+  fi
+fi
+
+# Manifests live beside their scenario directory (default:
+# behavior/checks-manifest); a custom --scenario-dir carries its own, so
+# test doubles never pollute the real manifests.
+_manifest_dir="$scenario_dir/../checks-manifest"
+[ -d "$_manifest_dir" ] || _manifest_dir="$lab_root/behavior/checks-manifest"
+manifest_file="$_manifest_dir/$scenario.json"
+if [ "$run_v" = pass ] && [ "$capture_v" = pass ] && [ "$checks_v" != indeterminate ]; then
+  if [ -f "$manifest_file" ]; then
+    manifest_hit=""
+    for verb in $(jq -r '.[]' "$manifest_file" 2>/dev/null); do
+      printf ' %s ' "$_lab_invoked" | grep -q " $verb " && manifest_hit="1" && break
+    done
+    if [ -z "$manifest_hit" ]; then
+      manifest_v=indeterminate; stage_detail="none of the manifest verbs ran"
+    fi
+  else
+    manifest_v=indeterminate; stage_detail="missing manifest for $scenario"
+  fi
+fi
+
+verdict="$(verdict_compose "$setup_v" "$run_v" "$capture_v" "$checks_v" "$manifest_v")"
+verdict_rc=$?
+
+# --- report ------------------------------------------------------------------
+case "$arm" in
+  none) src='no skills installed' ;;
+  red)  src="$base" ;;
+  *)    src="$plugin" ;;
+esac
+echo "scenario   : $scenario"
+echo "adapter    : $harness"
+echo "arm        : $arm  (skills from: $src)"
+[ -n "$plugin_commit" ] && echo "plugin     : $plugin_commit"
+toks="$(adapter_usage "$stream" 2>/dev/null | tr -dc '0-9')"
+if [ -n "$toks" ]; then
+  echo "cost       : ${duration_ms}ms · ${toks} tokens"
+else
+  echo "cost       : ${duration_ms}ms · tokens not reported by this harness"
+fi
+echo "skill chain: ${chain:-(none)}"
+echo "artifacts  :"
+( cd "$workdir" && {
+    root_c="$(git rev-list --max-parents=0 HEAD 2>/dev/null | tail -1)"
+    [ -n "$root_c" ] && git diff --name-status --diff-filter=A "$root_c" HEAD 2>/dev/null \
+      | sed 's/^/  committed /'
+    git status --porcelain -uall | sed 's/^/  /'
+  } )
+if [ -n "$asserts_out" ]; then
+  echo "assertions :"
+  printf '%s\n' "$asserts_out" | sed 's/^/  /'
+fi
+if [ "$verdict" = pass ]; then
+  echo "verdict    : pass"
+elif [ "$verdict" = fail ]; then
+  echo "verdict    : fail"
+else
+  echo "verdict    : indeterminate${stage_detail:+ ($stage_detail)}"
+fi
+
+# --- record ------------------------------------------------------------------
+if [ -n "$record_dir" ]; then
+  mkdir -p "$record_dir/runs" || exit 2
+  n=1
+  while [ -f "$record_dir/runs/$scenario-$arm-$n.json" ]; do n=$((n + 1)); done
+  if [ "$verdict" = pass ]; then stage_json=null; else
+    if [ "$run_v" = indeterminate ]; then stage_json='"run"';
+    elif [ "$capture_v" = indeterminate ]; then stage_json='"capture"';
+    elif [ "$checks_v" = indeterminate ]; then stage_json='"checks"';
+    else stage_json='"manifest"'; fi
+  fi
+  [ -n "$toks" ] && tokens_json="$toks" || tokens_json=null
+  [ -n "$plugin_commit" ] && commit_json="\"$plugin_commit\"" || commit_json=null
+  # The assertion log is evidence: counts alone cannot show what held.
+  jq -n --arg scenario "$scenario" --arg arm "$arm" --arg harness "$harness" \
+    --argjson plugin_commit "$commit_json" --arg verdict "$verdict" \
+    --argjson stage "$stage_json" --argjson checks_run "${checks_run:-0}" \
+    --argjson tokens "$tokens_json" --argjson duration_ms "$duration_ms" \
+    --arg workdir "$workdir" --arg log "${asserts_out:-}" \
+    '{scenario:$scenario, arm:$arm, harness:$harness, plugin_commit:$plugin_commit,
+      verdict:$verdict, stage:$stage, checks_run:$checks_run, tokens:$tokens,
+      duration_ms:$duration_ms, workdir:$workdir, log:$log}' \
+    > "$record_dir/runs/$scenario-$arm-$n.json" || exit 2
+fi
+
+exit "$verdict_rc"

@@ -1,0 +1,18 @@
+{
+  "skill_name": "verification-strategy",
+  "pending_first_run": true,
+  "evals": [
+    {
+      "id": "hollow-suite",
+      "prompt": "Our ~/work/checkout-api suite is green but the outage proved it catches nothing about regions. Design our correctness battery: which checks catch which defects and when each runs.",
+      "expected_output": "An assurance matrix mapping defect classes to checks (unit, contract, region-matrix, canary) with owners and CI placement — where each check runs, what it catches, and the unfalsifiable gaps the outage exposed, closed.",
+      "assertions": []
+    },
+    {
+      "id": "single-feature",
+      "prompt": "How should I test the one-line pool-size constant change in ~/work/billing-api/src/config/database.ts? Design the full verification strategy.",
+      "expected_output": "Points at the existing gate (or the smallest real check) instead of designing a project-wide strategy: a bounded change takes its defined gate, not a new assurance program.",
+      "assertions": []
+    }
+  ]
+}

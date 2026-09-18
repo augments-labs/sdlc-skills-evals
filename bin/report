@@ -1,0 +1,21 @@
+#!/usr/bin/env bash
+# bin/report — copy an iteration's benchmark.json into a record directory.
+# The copy under results/ is canonical: a second report for the same record
+# refuses rather than silently overwriting evidence. No live calls.
+
+set -uo pipefail
+[ "${1:-}" = "-h" ] || [ "${1:-}" = "--help" ] && {
+  echo "usage: bin/report --workspace <iteration-dir> --record <record-dir>"; exit 0; }
+ws=""; rec=""
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    --workspace) ws="$2"; shift 2;;
+    --record) rec="$2"; shift 2;;
+    *) echo "unknown argument: $1" >&2; exit 2;;
+  esac
+done
+[ -n "$ws" ] && [ -n "$rec" ] || { echo "needs --workspace and --record" >&2; exit 2; }
+[ -f "$ws/benchmark.json" ] || { echo "no benchmark.json in $ws" >&2; exit 2; }
+[ -e "$rec/benchmark.json" ] && { echo "refusing: $rec/benchmark.json exists" >&2; exit 2; }
+mkdir -p "$rec" || exit 2
+cp "$ws/benchmark.json" "$rec/benchmark.json"

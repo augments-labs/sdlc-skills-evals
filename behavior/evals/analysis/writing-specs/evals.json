@@ -1,0 +1,18 @@
+{
+  "skill_name": "writing-specs",
+  "pending_first_run": true,
+  "evals": [
+    {
+      "id": "invite-flow",
+      "prompt": "The tenant-invite goal is settled and agreed: admins invite teammates by email, invites expire after 7 days, and each tenant caps at 25 seats. Write the detailed requirements for the invite flow in ~/work/billing-api so it can be planned.",
+      "expected_output": "A spec with numbered requirements covering invite creation, email delivery, expiry, seat-cap enforcement, and resend/revoke, each with acceptance criteria that name observable behavior (not implementation), plus explicit non-goals.",
+      "assertions": []
+    },
+    {
+      "id": "vague-edges",
+      "prompt": "Spec the reporting export in ~/work/billing-api: tenants can export their invoices as CSV. That's the whole brief — work out the details, especially what happens with ten thousand rows and with special characters in tenant names.",
+      "expected_output": "Requirements that pin down the vague edges (row limits/pagination, CSV escaping rules, filename convention, empty-result behavior) as testable criteria, and mark the remaining open questions as questions rather than silently assuming answers.",
+      "assertions": []
+    }
+  ]
+}

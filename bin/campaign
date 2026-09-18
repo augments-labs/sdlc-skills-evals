@@ -1,0 +1,425 @@
+#!/usr/bin/env bash
+# bin/campaign — one command runs a labelled, pinned set of scenarios across
+# arms and writes a dated record. Inputs are frozen in campaign.json BEFORE
+# the first run; the summary appears only when every planned run has ended.
+#
+# A campaign is the unit of evidence anything cites. Its record must be
+# readable without the lab: summary.md says what ran, on what, and what
+# came out, with indeterminate counted separately from pass and fail.
+#
+# Manual tool, never CI. Live runs (new covers pricing via bin/behavior's
+# own observation; run spends tokens) start only on a recorded go.
+
+set -uo pipefail
+if [ -n "${SDLC_SKILLS_EVALS_ROOT:-}" ]; then
+  lab_root="$SDLC_SKILLS_EVALS_ROOT"
+else
+  lab_root="$(cd "$(dirname "$0")/.." && pwd)"
+fi
+# shellcheck source=../lib/common.sh
+source "$lab_root/lib/common.sh"
+
+usage() {
+  cat <<'EOF'
+bin/campaign — run a labelled, pinned scenario set; report it.
+
+  new <label> --plugin <path|ref> --harness H --arms <list>
+      [--base REF] (--suite NAME | --scenarios a,b,c) --runs N [--tier T]
+      [--harness-dir D] [--scenario-dir D]
+  run <label>                 execute every planned run
+  report <label> [--against <record-dir>]
+  --help                      this text
+
+new freezes campaign.json {plugin_ref, plugin_commit, harness,
+arms: [{name, base}], suite, scenarios, runs, tier, lab_commit, created}.
+run executes every planned run through bin/behavior --record (raw streams
+under raw/, run homes under TMPDIR, never under results/). report refuses
+while runs are pending, then writes summary.md (## Commit,
+## Behavior scenarios, ## Chains from chains.json when present, ## Costs,
+## Against baseline with --against).
+
+  --help                      this text
+
+  campaign --evals [--dry-run] --plugin P --harness H
+      (--skill S ... | --all) [--without none|old] [--old-plugin REF]
+      [--campaign NAME] [--iteration N] [--timeout SEC] [--harness-dir D]
+                                run output-eval pairs into a workspace iteration
+
+new freezes campaign.json {plugin_ref, plugin_commit, harness,
+arms: [{name, base}], suite, scenarios, runs, tier, lab_commit, created}.
+run executes every planned run through bin/behavior --record (raw streams
+under raw/, run homes under TMPDIR, never under results/). report refuses
+while runs are pending, then writes summary.md (## Commit,
+## Behavior scenarios, ## Chains from chains.json when present, ## Costs,
+## Against baseline with --against).
+
+A `fake` harness name routes to lib/tests/fake-cli/ for self-tests.
+EOF
+}
+
+if [ "${1:-}" = "--evals" ]; then
+  shift
+  # shellcheck source=../lib/pin.sh
+  source "$lab_root/lib/pin.sh"
+  # shellcheck source=../lib/home-env.sh
+  source "$lab_root/lib/home-env.sh"
+  dry=""; plugin=""; harness=""; without="none"; old_plugin=""; campaign_n=""; iteration=""
+  timeout_s="${BH_DEFAULT_TIMEOUT:-1800}"; harnessdir_override=""; skills=(); all_evals=""
+  while [ "$#" -gt 0 ]; do
+    case "$1" in
+      --dry-run) dry="1"; shift;;
+      --plugin) plugin="$2"; shift 2;;
+      --harness) harness="$2"; shift 2;;
+      --skill) skills+=("$2"); shift 2;;
+      --all) all_evals="1"; shift;;
+      --without) without="$2"; shift 2;;
+      --old-plugin) old_plugin="$2"; shift 2;;
+      --campaign) campaign_n="$2"; shift 2;;
+      --iteration) iteration="$2"; shift 2;;
+      --timeout) timeout_s="$2"; shift 2;;
+      --harness-dir) harnessdir_override="$2"; shift 2;;
+      *) echo "unknown argument: $1" >&2; exit 2;;
+    esac
+  done
+  [ -n "$harness" ] || { echo "--evals needs --harness" >&2; exit 2; }
+  [ "${#skills[@]}" -gt 0 ] || [ -n "$all_evals" ] || { echo "--evals needs --skill or --all" >&2; exit 2; }
+  case "$without" in none|old) ;; *) echo "--without none|old" >&2; exit 2;; esac
+  [ "$without" = old ] && [ -z "$old_plugin" ] && { echo "--without old needs --old-plugin" >&2; exit 2; }
+  case "$timeout_s" in ''|*[!0-9]*|0) echo "--timeout needs a positive integer" >&2; exit 2;; esac
+  evals_files=()
+  if [ -n "$all_evals" ]; then
+    while IFS= read -r f; do evals_files+=("$f"); done \
+      < <(find "$lab_root/behavior/evals" -name evals.json | sort)
+  else
+    for sk in "${skills[@]}"; do
+      matches=""
+      while IFS= read -r f || [ -n "$f" ]; do
+        [ "$(basename "$(dirname "$f")")" = "$sk" ] && matches="$matches$f
+"
+      done < <(find "$lab_root/behavior/evals" -name evals.json | sort)
+      [ -n "$matches" ] || { echo "no evals.json for skill: $sk" >&2; exit 2; }
+      [ "$(printf '%s' "$matches" | grep -c .)" -eq 1 ] || {
+        echo "ambiguous --skill '$sk'" >&2; exit 2; }
+      evals_files+=("$(printf '%s' "$matches")")
+    done
+  fi
+  total_cases=0
+  for ef in "${evals_files[@]}"; do
+    total_cases=$((total_cases + $(jq '.evals | length' "$ef")))
+  done
+  if [ -n "$dry" ]; then
+    printf '%s eval(s) x 2 arms = %s runs, billed to your own harness account. Calls nothing.\n' \
+      "$total_cases" "$((total_cases * 2))"
+    exit 0
+  fi
+  [ -n "$plugin" ] || { echo "--evals needs --plugin (dry-run excepted)" >&2; exit 2; }
+  hdir="${harnessdir_override:-$lab_root/harnesses}"
+  [ "$harness" = fake ] && [ -z "$harnessdir_override" ] && hdir="$lab_root/lib/tests/fake-cli"
+  [ -f "$hdir/$harness.sh" ] || { echo "no harness adapter: $harness" >&2; exit 2; }
+  if [ "$(grep '^runnable=' "$hdir/$harness.sh" | sed 's/^runnable=//')" != "yes" ]; then
+    echo "harness $harness is unrunnable here — measuring nothing" >&2; exit 2
+  fi
+  # shellcheck source=/dev/null
+  source "$hdir/$harness.sh"
+  require_tool jq timeout || exit 2
+  adapter_check || exit 2
+  campaign_n="${campaign_n:-evals-$(date -u +%Y-%m-%d)}"
+  ws_root="$lab_root/workspaces/$campaign_n"
+  if [ -z "$iteration" ]; then
+    iteration=1
+    while [ -d "$ws_root/iteration-$iteration" ]; do iteration=$((iteration + 1)); done
+  fi
+  iter_dir="$ws_root/iteration-$iteration"
+  mkdir -p "$iter_dir" || exit 2
+  # Run bases must nest under the ORIGINAL tmp: each arm run re-points
+  # TMPDIR into its own tree and deletes it afterwards, so reset both
+  # TMPDIR and LAB_RUN_BASE before deriving the next base.
+  _outer_tmpdir="${TMPDIR:-/tmp}"
+  # Resolve the with-arm tree once; the old tree only when asked. Pins go
+  # through same-shell redirects (never $()) so their worktrees outlive
+  # the call; everything is removed at campaign exit.
+  _pin_run="$(lab_run_dir evals-pin)" || exit 2
+  trap 'lab_pin_cleanup "$_pin_run" 2>/dev/null; lab_home_cleanup "$_pin_run" 2>/dev/null' EXIT
+  if [ -d "$plugin" ]; then with_src="$plugin";
+  else
+    lab_pin_plugin "$plugin" "$_pin_run/with" >"$_pin_run/with-commit.txt" 2>/dev/null || {
+      echo "cannot pin --plugin '$plugin'" >&2; exit 2; }
+    with_src="$_pin_run/with/plugin"
+  fi
+  if [ "$without" = old ]; then
+    if [ -d "$old_plugin" ]; then old_src="$old_plugin";
+    else
+      lab_pin_plugin "$old_plugin" "$_pin_run/old" >"$_pin_run/old-commit.txt" 2>/dev/null || {
+        echo "cannot pin --old-plugin '$old_plugin'" >&2; exit 2; }
+      old_src="$_pin_run/old/plugin"
+    fi
+  fi
+  for ef in "${evals_files[@]}"; do
+    skill_dir="$(dirname "$ef")"
+    n_cases="$(jq '.evals | length' "$ef")"
+    for idx in $(seq 0 $((n_cases - 1))); do
+      eval_id="$(jq -r ".evals[$idx].id" "$ef")"
+      prompt="$(jq -r ".evals[$idx].prompt" "$ef")"
+      for arm in with_skill "$([ "$without" = old ] && printf 'old_skill' || printf 'without_skill')"; do
+        dest="$iter_dir/$eval_id/$arm"
+        mkdir -p "$dest" || exit 2
+        TMPDIR="$_outer_tmpdir"; unset LAB_RUN_BASE
+        run_base="$(lab_run_dir evals)" || exit 2
+        eval "$(lab_home_env "$run_base")" || exit 2
+        workdir="$(mktemp -d)"
+        eval_files_dir="$skill_dir/files"
+        [ -d "$eval_files_dir" ] && cp -r "$eval_files_dir/." "$workdir/"
+        ( cd "$workdir" && git init -q . 2>/dev/null && git add -A &&
+          git -c user.name='sdlc-skills-evals' -c user.email='evals@example.invalid' \
+            commit -q -m 'eval baseline' ) 2>/dev/null
+        if [ "$arm" = with_skill ]; then src="$with_src";
+        elif [ "$arm" = old_skill ]; then src="$old_src"; else src=""; fi
+        adapter_install "$src" || { echo "adapter install failed" >&2; exit 2; }
+        if [ -n "${LAB_CREDENTIAL_SEED:-}" ] && [ -f "$LAB_CREDENTIAL_SEED/$harness/env" ]; then
+          # Operator-owned seed file (KEY=VALUE lines); the path is validated above.
+          set -a
+          # shellcheck disable=SC1090
+          source "$LAB_CREDENTIAL_SEED/$harness/env"
+          set +a
+        fi
+        lab_seed_credentials "$run_base" "$harness" 2>/dev/null
+        prompt_file="$(mktemp)"; printf '%s' "$prompt" > "$prompt_file"
+        stream="$dest/stream.jsonl"
+        start_ms="$(date +%s)000"
+        adapter_run_behavioral "$workdir" "$prompt_file" "$stream"; status=$?
+        end_ms="$(date +%s)000"
+        rm -f "$prompt_file"
+        toks="$(adapter_usage "$stream" 2>/dev/null | tr -dc '0-9')"
+        [ -n "$toks" ] && tokens_json="$toks" || tokens_json=null
+        mkdir -p "$dest/outputs"
+        cp -r "$workdir/." "$dest/outputs/"
+        jq -n --argjson tokens "$tokens_json" --argjson ms "$((end_ms - start_ms))" \
+          '{total_tokens:$tokens, duration_ms:$ms}' > "$dest/timing.json"
+        jq --argjson idx "$idx" '{id: .evals[$idx].id, prompt: .evals[$idx].prompt,
+          expected_output: .evals[$idx].expected_output,
+          assertions: (.evals[$idx].assertions // [])}' "$ef" > "$dest/eval-case.json"
+        "$lab_root/bin/grade" "$dest" || { echo "grading failed for $eval_id/$arm" >&2; exit 2; }
+        rm -rf "$workdir"
+        lab_home_cleanup "$run_base" 2>/dev/null
+        lab_pin_cleanup "$run_base" 2>/dev/null
+        echo "graded $eval_id/$arm (run exit $status)"
+      done
+    done
+  done
+  "$lab_root/bin/benchmark" "$iter_dir" || exit 2
+  [ -f "$iter_dir/feedback.json" ] || printf '{}\n' > "$iter_dir/feedback.json"
+  echo "wrote $iter_dir/benchmark.json"
+  exit 0
+fi
+
+cmd="${1:-}"; [ "$cmd" = "-h" ] || [ "$cmd" = "--help" ] && { usage; exit 0; }
+case "$cmd" in new|run|report) ;; *) echo "needs new|run|report" >&2; exit 2;; esac
+shift || { usage >&2; exit 2; }
+
+_record_dir() { # $1 label -> prints the record dir or fails
+  local found
+  found="$(ls -d "$lab_root"/results/*-"$1" 2>/dev/null | head -1)"
+  [ -n "$found" ] || { echo "no record for label: $1" >&2; return 2; }
+  printf '%s\n' "$found"
+}
+
+if [ "$cmd" = "new" ]; then
+  label="${1:-}"; [ -n "$label" ] || { echo "new needs a label" >&2; exit 2; }; shift
+  case "$label" in *[!A-Za-z0-9-]*|"") echo "label allows [A-Za-z0-9-] only: $label" >&2; exit 2;; esac
+  plugin=""; harness=""; arms=""; base=""; suite=""; scenarios=""; runs=""; tier=""
+  harnessdir_override=""; scenariodir_override=""
+  while [ "$#" -gt 0 ]; do
+    case "$1" in
+      --plugin) plugin="$2"; shift 2;;
+      --harness) harness="$2"; shift 2;;
+      --arms) arms="$2"; shift 2;;
+      --base) base="$2"; shift 2;;
+      --suite) suite="$2"; shift 2;;
+      --scenarios) scenarios="$2"; shift 2;;
+      --runs) runs="$2"; shift 2;;
+      --tier) tier="$2"; shift 2;;
+      --harness-dir) harnessdir_override="$2"; shift 2;;
+      --scenario-dir) scenariodir_override="$2"; shift 2;;
+      *) echo "unknown argument: $1" >&2; exit 2;;
+    esac
+  done
+  [ -n "$plugin" ] || { echo "new needs --plugin <path|ref>" >&2; exit 2; }
+  [ -n "$harness" ] || { echo "new needs --harness" >&2; exit 2; }
+  [ -n "$arms" ] || { echo "new needs --arms" >&2; exit 2; }
+  case "$runs" in ''|*[!0-9]*|0) echo "--runs needs a positive integer" >&2; exit 2;; esac
+  if [ -n "$suite" ] && [ -n "$scenarios" ]; then echo "--suite and --scenarios exclude each other" >&2; exit 2; fi
+  if [ -z "$suite" ] && [ -z "$scenarios" ]; then echo "new needs --suite or --scenarios" >&2; exit 2; fi
+  if [ -n "$suite" ]; then
+    [ -f "$lab_root/behavior/suites/$suite.txt" ] || { echo "no suite: $suite" >&2; exit 2; }
+    scenarios="$(grep -v '^#' "$lab_root/behavior/suites/$suite.txt" | grep -v '^$' | paste -sd, -)"
+  fi
+  for s in ${scenarios//,/ }; do
+    sdir="${scenariodir_override:-$lab_root/behavior/scenarios}"
+    [ -f "$sdir/$s.sh" ] || { echo "no scenario: $s" >&2; exit 2; }
+  done
+  if printf '%s' ",$arms," | grep -q ",red,"; then
+    [ -n "$base" ] || { echo "--arms red needs --base REF" >&2; exit 2; }
+  fi
+  # Freeze the plugin: a directory resolves to its HEAD, a ref resolves in
+  # SDLC_SKILLS_ROOT. Nothing global, nothing installed, ever satisfies this.
+  plugin_commit=""
+  if [ -d "$plugin" ]; then
+    plugin_commit="$(git -C "$plugin" rev-parse HEAD 2>/dev/null)" || {
+      echo "--plugin is not a plugin checkout: $plugin" >&2; exit 2; }
+  else
+    proot="$(plugin_root 2>/dev/null)" || { echo "cannot resolve --plugin '$plugin' (no plugin checkout)" >&2; exit 2; }
+    plugin_commit="$(git -C "$proot" rev-parse "$plugin^{commit}" 2>/dev/null)" || {
+      echo "cannot resolve --plugin '$plugin' in $proot" >&2; exit 2; }
+  fi
+  lab_commit="$(git -C "$lab_root" rev-parse HEAD 2>/dev/null || printf 'uncommitted')"
+  day="$(date -u +%Y-%m-%d)"; created="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+  dir="$lab_root/results/$day-$label"
+  [ -e "$dir" ] && { echo "record exists: $dir" >&2; exit 2; }
+  mkdir -p "$dir/runs" || exit 2
+  arms_json="$(printf '%s\n' "$arms" | tr ',' '\n' | while read -r a; do
+    [ -n "$a" ] || continue
+    if [ "$a" = red ]; then b="$base"; else b=""; fi
+    jq -n --arg name "$a" --arg base "$b" '{name:$name, base:(if $base == "" then null else $base end)}'
+  done | jq -s .)"
+  {
+    printf '{\n  "label": '; jq -n --arg l "$label" '$l'; printf ',\n'
+    printf '  "plugin_ref": '; jq -n --arg p "$plugin" '$p'; printf ',\n'
+    printf '  "plugin_commit": '; jq -n --arg c "$plugin_commit" '$c'; printf ',\n'
+    printf '  "harness": '; jq -n --arg h "$harness" '$h'; printf ',\n'
+    printf '  "arms": %s,\n' "$arms_json"
+    printf '  "suite": '; if [ -n "$suite" ]; then jq -n --arg s "$suite" '$s'; else printf 'null'; fi; printf ',\n'
+    printf '  "scenarios": '; jq -n --arg s "$scenarios" '$s | split(",")'; printf ',\n'
+    printf '  "runs": %s,\n' "$runs"
+    printf '  "tier": '; if [ -n "$tier" ]; then jq -n --arg t "$tier" '$t'; else printf 'null'; fi; printf ',\n'
+    printf '  "harness_dir": '; if [ -n "$harnessdir_override" ]; then jq -n --arg d "$harnessdir_override" '$d'; else printf 'null'; fi; printf ',\n'
+    printf '  "scenario_dir": '; if [ -n "$scenariodir_override" ]; then jq -n --arg d "$scenariodir_override" '$d'; else printf 'null'; fi; printf ',\n'
+    printf '  "lab_commit": '; jq -n --arg c "$lab_commit" '$c'; printf ',\n'
+    printf '  "created": '; jq -n --arg c "$created" '$c'; printf '\n}\n'
+  } > "$dir/campaign.json"
+  jq -e '.plugin_commit and (.arms | type == "array")' "$dir/campaign.json" >/dev/null || exit 2
+  planned="$(printf '%s\n' "$scenarios" | tr ',' '\n' | grep -c .)"
+  planned=$(( planned * $(printf '%s\n' "$arms" | tr ',' '\n' | grep -c .) * runs ))
+  echo "planned $planned runs into $dir"
+  exit 0
+fi
+
+if [ "$cmd" = "run" ]; then
+  label="${1:-}"; [ -n "$label" ] || { echo "run needs a label" >&2; exit 2; }
+  dir="$(_record_dir "$label")" || exit 2
+  harness="$(jq -r '.harness' "$dir/campaign.json")"
+  plugin_ref="$(jq -r '.plugin_ref' "$dir/campaign.json")"
+  runs_n="$(jq -r '.runs' "$dir/campaign.json")"
+  tier_c="$(jq -r '.tier // empty' "$dir/campaign.json")"
+  hdir_c="$(jq -r '.harness_dir // empty' "$dir/campaign.json")"
+  sdir_c="$(jq -r '.scenario_dir // empty' "$dir/campaign.json")"
+  planned=0; done_n=0
+  while read -r sc; do
+    while read -r an; do
+      abase="$(jq -r --arg a "$an" '.arms[] | select(.name == $a) | .base // empty' "$dir/campaign.json")"
+      for _i in $(seq 1 "$runs_n"); do
+        planned=$((planned + 1))
+        args=(--harness "$harness" --scenario "$sc" --arm "$an" --record "$dir")
+        if [ "$an" = red ]; then args+=(--base "$abase");
+        elif [ "$an" = none ]; then :;
+        else args+=(--plugin "$plugin_ref"); fi
+        [ -n "$tier_c" ] && args+=(--tier "$tier_c")
+        [ -n "$hdir_c" ] && args+=(--harness-dir "$hdir_c")
+        [ -n "$sdir_c" ] && args+=(--scenario-dir "$sdir_c")
+        "$lab_root/bin/behavior" "${args[@]}" >/dev/null 2>&1
+        done_n=$((done_n + 1))
+      done
+    done < <(jq -r '.arms[].name' "$dir/campaign.json")
+  done < <(jq -r '.scenarios[]' "$dir/campaign.json")
+  echo "completed $done_n/$planned runs into $dir"
+  exit 0
+fi
+
+# report
+label="${1:-}"; [ -n "$label" ] || { echo "report needs a label" >&2; exit 2; }; shift
+against=""
+while [ "$#" -gt 0 ]; do
+  case "$1" in --against) against="$2"; shift 2;; *) echo "unknown argument: $1" >&2; exit 2;; esac
+done
+dir="$(_record_dir "$label")" || exit 2
+planned="$(jq -r '(.scenarios | length) * (.arms | length) * .runs' "$dir/campaign.json")"
+have="$(find "$dir/runs" -name '*.json' | wc -l)"
+if [ "$have" -lt "$planned" ]; then
+  echo "report refused: $have/$planned runs complete" >&2; exit 2
+fi
+plugin_ref="$(jq -r '.plugin_ref' "$dir/campaign.json")"
+plugin_commit="$(jq -r '.plugin_commit' "$dir/campaign.json")"
+harness="$(jq -r '.harness' "$dir/campaign.json")"
+lab_commit="$(jq -r '.lab_commit' "$dir/campaign.json")"
+created="$(jq -r '.created' "$dir/campaign.json")"
+{
+  echo "# Campaign: $label"
+  echo
+  echo "## Commit"
+  echo
+  echo "- plugin: $plugin_ref ($plugin_commit)"
+  echo "- harness: $harness"
+  echo "- created: $created"
+  echo "- lab: $lab_commit"
+  echo
+  echo "## Behavior scenarios"
+  echo
+  echo "| scenario | arm | result | runs | pass | indeterminate |"
+  echo "| --- | --- | --- | --- | --- | --- |"
+  while read -r sc; do
+    while read -r an; do
+      files="$(find "$dir/runs" -name "$sc-$an-*.json" | sort)"
+      n="$(printf '%s\n' "$files" | grep -c .)"
+      p="$(printf '%s\n' "$files" | while read -r f; do [ -n "$f" ] && jq -r 'select(.verdict == "pass") | "x"' "$f" 2>/dev/null; done | wc -l)"
+      ind="$(printf '%s\n' "$files" | while read -r f; do [ -n "$f" ] && jq -r 'select(.verdict == "indeterminate") | "x"' "$f" 2>/dev/null; done | wc -l)"
+      if [ "$p" = "$n" ] && [ "$n" -gt 0 ]; then res="pass";
+      elif [ "$ind" = "$n" ] && [ "$n" -gt 0 ]; then res="indeterminate";
+      else res="fail"; fi
+      echo "| $sc | $an | $res | $n | $p | $ind |"
+    done < <(jq -r '.arms[].name' "$dir/campaign.json")
+  done < <(jq -r '.scenarios[]' "$dir/campaign.json")
+  echo
+  if [ -f "$dir/chains.json" ]; then
+    echo "## Chains"
+    echo
+    echo "| chain | task | turns | wasted_steps |"
+    echo "| --- | --- | --- | --- |"
+    jq -r '.[] | "| \(.chain) | \(.task) | \(.turns) | \(.wasted_steps) |"' "$dir/chains.json"
+    echo
+  fi
+  echo "## Costs"
+  echo
+  echo "| arm | tokens | wall time |"
+  echo "| --- | --- | --- |"
+  while read -r an; do
+    have_toks="$(find "$dir/runs" -name "*-$an-*.json" -exec jq -r '.tokens // empty' {} + 2>/dev/null | wc -l)"
+    if [ "$have_toks" -eq 0 ]; then toks="unknown";
+    else toks="$(find "$dir/runs" -name "*-$an-*.json" -exec jq -r '.tokens // 0' {} + 2>/dev/null | awk '{s+=$1} END{print s+0}')"; fi
+    ms="$(find "$dir/runs" -name "*-$an-*.json" -exec jq -r '.duration_ms // 0' {} + 2>/dev/null | awk '{s+=$1} END{print s+0}')"
+    echo "| $an | $toks | ${ms}ms |"
+  done < <(jq -r '.arms[].name' "$dir/campaign.json" | sort -u)
+  if [ -n "$against" ]; then
+    echo
+    echo "## Against baseline"
+    echo
+    echo "Baseline: $against"
+    echo
+    echo "| scenario | baseline | now |"
+    echo "| --- | --- | --- |"
+    while read -r sc; do
+      while read -r an; do
+        was="$(find "$against/runs" -name "$sc-$an-*.json" -exec jq -r 'select(.verdict == "pass") | "x"' {} + 2>/dev/null | wc -l)"
+        now="$(find "$dir/runs" -name "$sc-$an-*.json" -exec jq -r 'select(.verdict == "pass") | "x"' {} + 2>/dev/null | wc -l)"
+        if [ "$was" -gt 0 ]; then
+          if [ "$now" -gt 0 ]; then echo "| $sc ($an) | pass | pass |";
+          else echo "| $sc ($an) | pass | NOT PASS |"; fi
+        fi
+      done < <(jq -r '.arms[].name' "$dir/campaign.json")
+    done < <(jq -r '.scenarios[]' "$dir/campaign.json")
+    echo
+    echo "Scenarios present now and absent from the baseline:"
+    echo
+    comm -13 <(find "$against/runs" -name '*-green-*.json' -printf '%f\n' 2>/dev/null | sed 's/-green-[0-9]*\.json//' | sort -u) \
+             <(jq -r '.scenarios[]' "$dir/campaign.json" | sort -u) | sed 's/^/- /'
+  fi
+} > "$dir/summary.md"
+echo "wrote $dir/summary.md"
