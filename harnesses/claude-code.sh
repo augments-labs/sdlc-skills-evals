@@ -8,10 +8,19 @@
 
 adapter_name='claude-code'
 
+runnable=yes
+runnable_reason="claude CLI and credentials on this machine; streams battle-tested"
+permission_flags="--permission-mode acceptEdits"
+capabilities="subagent-loads-skills=yes(documentation) nesting-depth=unknown(documentation) tier-settable=yes(run) session-start-event=yes(run) post-compaction-event=unknown(documentation)"
+
 source_claude_home="${CLAUDE_CONFIG_DIR:-${HOME:-}/.claude}"
 
+_libdir="$(cd "$(dirname "${BASH_SOURCE[0]}")/../lib" && pwd)"
+# shellcheck source=../lib/common.sh
+source "$_libdir/common.sh"
+
 adapter_check() {
-  command -v claude >/dev/null 2>&1 || { echo "no \`claude\` CLI on PATH" >&2; return 3; }
+  require_tool claude || return 3
 }
 
 # Claude Code loads a plugin tree directly, so `--plugin-dir` is the whole
@@ -41,16 +50,10 @@ adapter_install() { # $1 plugin source ("" = NONE arm, load nothing)
   return 0
 }
 
-# DISCOVERY: ask Claude Code to resolve the plugin exactly as a session would
-# and return the skill names from its component inventory. A filesystem count
-# cannot prove that the manifest entries were accepted by the harness.
-adapter_component_inventory() { # $1 plugin source
-  env CLAUDE_CONFIG_DIR="$harness_home" claude --plugin-dir "$1" plugin details sdlc-skills 2>>"$errlog" |
-    awk '/^  Skills \([0-9]+\)/ {
-      sub(/^  Skills \([0-9]+\)[[:space:]]+/, "")
-      gsub(/,[[:space:]]*/, "\n")
-      print
-    }'
+# The runner pins the plugin and exports plugin_dir; adapter_activation_flags
+# names the pin, never the lab root.
+adapter_activation_flags() {   # --plugin-dir loads the pinned plugin tree
+  printf '%s\n' --plugin-dir "$plugin_dir"
 }
 
 # DETECTION: only a structured `Skill` tool_use in an ASSISTANT event counts.
@@ -109,12 +112,8 @@ adapter_run_activation() { # $1 workdir  $2 prompt  $3 stream  $4 extra flags...
   ( cd "$wd" && exec timeout "$timeout_s" env CLAUDE_CONFIG_DIR="$harness_home" claude -p "$prompt" \
       --output-format stream-json --verbose "$@" \
       --max-turns "${maxturns:-6}" \
-      --tools "Skill,Read,Glob,Grep" \
-      --allowedTools Skill Read Glob Grep ) < /dev/null > "$stream" 2>>"$errlog"
-}
-
-adapter_activation_flags() {   # --working-tree loads live edits, not the install cache
-  printf '%s\n' --plugin-dir "$repo"
+       --tools "Skill,Read,Glob,Grep" \
+       --allowedTools Skill Read Glob Grep ) < /dev/null > "$stream" 2>>"$errlog"
 }
 
 # COST: the terminal `result` event carries the run's own totals. Sum all four

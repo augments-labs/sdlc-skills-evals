@@ -3,10 +3,20 @@
 # plugin-smoke, and trigger-eval — never executed directly.
 
 adapter_name='codex'
+
+runnable=no
+runnable_reason="not verified on this machine — credentials exist but no run observed"
+permission_flags="--approve-for-me"
+capabilities="subagent-loads-skills=yes(documentation) nesting-depth=unknown(documentation) tier-settable=no(run) session-start-event=unknown(documentation) post-compaction-event=unknown(documentation)"
+
 source_codex_home="${CODEX_HOME:-${HOME:-}/.codex}"
 
+_libdir="$(cd "$(dirname "${BASH_SOURCE[0]}")/../lib" && pwd)"
+# shellcheck source=../lib/common.sh
+source "$_libdir/common.sh"
+
 adapter_check() {
-  command -v codex >/dev/null 2>&1 || { echo "no \`codex\` CLI on PATH" >&2; return 3; }
+  require_tool codex || return 3
 }
 
 # Isolated CODEX_HOME with this checkout installed from a local marketplace —

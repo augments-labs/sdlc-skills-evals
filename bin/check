@@ -1,10 +1,17 @@
 #!/usr/bin/env bash
 # bin/check — the static gate entry point. No live runs, no network, no keys.
 # Later tasks fill in the real sections (E-4 scenarios, E-5 query sets, E-6
-# evals shape, E-7 inventory, E-14 docs/code rule); until then this stub
-# passes so the skeleton stands on its own.
+# evals shape, E-7 inventory, E-14 docs/code rule).
 set -uo pipefail
+root="$(cd "$(dirname "$0")/.." && pwd)"
+cd "$root" || exit 1
 
-echo "check: skeleton stub — real sections arrive with E-4..E-7, E-14"
+echo "check: skeleton stub — remaining sections arrive with E-4..E-7, E-14"
 echo "check: .gitignore honors plans, raw runs, workspaces, secrets"
+
+# E-3: harness launcher contract (headers, required functions, opencode parsing)
+bash lib/tests/harnesses.sh || { echo "check: FAIL harnesses"; exit 1; }
+bash lib/tests/opencode-adapter.sh >/dev/null || { echo "check: FAIL opencode adapter"; exit 1; }
+echo "check: harnesses ok"
+
 echo "check: OK"

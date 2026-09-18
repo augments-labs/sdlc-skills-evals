@@ -3,10 +3,22 @@
 # plugin-smoke, and trigger-eval — never executed directly.
 
 adapter_name='kimi-code'
+
+runnable=no
+runnable_reason="no account on this machine"
+# Kimi takes no permission flag in prompt mode (see adapter_run_activation
+# below); the header names the stream-shaping flag the file actually passes.
+permission_flags="--output-format stream-json"
+capabilities="subagent-loads-skills=yes(documentation) nesting-depth=unknown(documentation) tier-settable=no(run) session-start-event=unknown(documentation) post-compaction-event=unknown(documentation)"
+
 source_kimi_home="${KIMI_CODE_HOME:-${HOME:-}/.kimi-code}"
 
+_libdir="$(cd "$(dirname "${BASH_SOURCE[0]}")/../lib" && pwd)"
+# shellcheck source=../lib/common.sh
+source "$_libdir/common.sh"
+
 adapter_check() {
-  command -v kimi >/dev/null 2>&1 || { echo "no \`kimi\` CLI on PATH" >&2; return 3; }
+  require_tool kimi || return 3
 }
 
 # Isolated home with this checkout as a managed plugin — the layout
