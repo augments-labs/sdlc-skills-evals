@@ -106,4 +106,17 @@ while IFS= read -r hf; do
 done < <(find "$desc_root/holdout" -name '*.json' -type f 2>/dev/null | sort)
 echo "check: descriptions ok"
 
+# E-14: docs/ and results/ hold records and guidance, never runtime code.
+docs_root="${DOCS_ROOT:-docs}"
+if find "$docs_root" results -type f -perm -111 2>/dev/null | grep -q .; then
+  echo "check: FAIL executable under docs/ or results/ (records and guidance only)"
+  find "$docs_root" results -type f -perm -111 2>/dev/null
+  exit 1
+fi
+if grep -rl '^#!' "$docs_root" 2>/dev/null | grep -q .; then
+  echo "check: FAIL shebang under docs/ (records and guidance only)"
+  exit 1
+fi
+echo "check: docs ok"
+
 echo "check: OK"

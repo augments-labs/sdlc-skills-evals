@@ -74,6 +74,8 @@ anything cites.
 | `TMPDIR` | parent for per-run homes and workdirs | system default |
 | `BH_DEFAULT_TIMEOUT` | per-arm wall clock for `bin/behavior` (inherited by the runner) | `1800` |
 | `DESCRIPTIONS_ROOT` | query-set root for `bin/triggering` and the shape check | `descriptions/` under the lab root |
+| `DOCS_ROOT` | guide root for the records-not-code rule | `docs/` under the lab root |
+| `RELEASE` | plugin version for per-release records (`E-13` evaluator input) | unset |
 | `LAB_CREDENTIAL_SEED` | directory of per-harness credential seeds (`<seed>/<harness>/`) copied into run homes | none — seeding is a quiet no-op without it |
 
 Later tasks extend this table when they add a variable.
