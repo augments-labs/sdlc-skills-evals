@@ -25,10 +25,11 @@ for h in "$hh"/*.sh; do
     if grep -q "^$field=" "$h"; then ok "$name header carries $field";
     else bad "$name header carries $field"; fi
   done
-  # the header must not claim flags the file never passes
-  flags="$(grep '^permission_flags=' "$h" | sed 's/^permission_flags=//')"
+  # the header must not claim flags the file never passes (the header
+  # line itself is excluded, so a bare claim cannot satisfy this)
+  flags="$(grep '^permission_flags=' "$h" | sed 's/^permission_flags=//; s/^"//; s/"$//')"
   if [ -n "$flags" ]; then
-    if grep -qF -- "$flags" "$h"; then ok "$name permission_flags matches a passed flag";
+    if grep -v '^permission_flags=' "$h" | grep -qF -- "$flags"; then ok "$name permission_flags matches a passed flag";
     else bad "$name permission_flags matches a passed flag ($flags)"; fi
   else
     bad "$name permission_flags is non-empty"

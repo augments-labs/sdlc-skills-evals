@@ -8,5 +8,6 @@
   "checks_run": 9,
   "tokens": null,
   "duration_ms": 1110395,
-  "workdir": "/tmp/tmp.2lTWhaLXZR"
+  "workdir": "/tmp/tmp.2lTWhaLXZR",
+  "tokens_note": "tokens amended to null: the lab concatenated every step-finish total (fixed in harnesses/opencode.sh) and the stream was already gone, so the true total is unrecoverable. Pre-amendment file sha256: 4ff4234b268d8f5f6a5055a0d943e171f00e4c239aca97ca79f383eaa53e6e79. Verdict and counts untouched."
 }

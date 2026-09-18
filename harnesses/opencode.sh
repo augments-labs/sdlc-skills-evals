@@ -40,19 +40,22 @@ adapter_install() { # $1 plugin source ("" = NONE arm, load nothing)
   # (maxturns): opencode has no CLI turns flag, so the isolated config
   # carries it. Past the bound the agent answers text-only and exits —
   # a miss, not a hang. Without maxturns the wall clock is the only bound.
-  local plug steps
+  local plug_cfg steps_cfg
   if [ -n "${1:-}" ]; then
-    plug=",\"plugin\":[\"$1/.opencode/plugins/sdlc-skills.js\"]"
+    plug_cfg="$(jq -n --arg p "$1/.opencode/plugins/sdlc-skills.js" '[$p]')"
   else
-    plug=""
+    plug_cfg="null"
   fi
   if [ -n "${maxturns:-}" ]; then
-    steps=",\"agent\":{\"build\":{\"steps\":$maxturns}}"
+    steps_cfg="$(jq -n --argjson n "$maxturns" '{build:{steps:$n}}')"
   else
-    steps=""
+    steps_cfg="null"
   fi
-  printf '{"$schema":"https://opencode.ai/config.json"%s%s}' "$plug" "$steps" \
-    > "$harness_home/xdg/opencode/opencode.json"
+  jq -n --argjson plugin "$plug_cfg" --argjson agent "$steps_cfg" \
+    '{"$schema":"https://opencode.ai/config.json"}
+     + (if $plugin == null then {} else {plugin:$plugin} end)
+     + (if $agent == null then {} else {agent:$agent} end)' \
+    > "$harness_home/xdg/opencode/opencode.json" || return 3
   plugin_dir="$1"
   return 0
 }

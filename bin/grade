@@ -11,8 +11,12 @@
 # Check verbs (args are relative to outputs/ unless absolute):
 #   file-exists <path>
 #   file-contains <path> <regex>
-#   command-succeeds <cmd...>>   (runs with CWD=outputs/)
+#   command-succeeds <cmd...>   (full shell under `timeout`, CWD=outputs/)
 #   git-count <min>              (added-or-modified files vs the seed commit)
+#
+# Trust note: eval files are lab-authored and reviewed like scenarios —
+# command-succeeds authors assume a full shell. Never grade eval files
+# from untrusted input.
 
 set -uo pipefail
 if [ -n "${SDLC_SKILLS_EVALS_ROOT:-}" ]; then
@@ -49,7 +53,9 @@ for i in $(seq 0 $((n_assert - 1)) 2>/dev/null || true); do
         ;;
       file-contains)
         fp="${args%% *}"; re="${args#* }"
-        if [ ! -f "$out_dir/$fp" ]; then
+        if [ "$fp" = "$args" ]; then
+          verdict="failed"; evidence="malformed check (need: path regex): $args"
+        elif [ ! -f "$out_dir/$fp" ]; then
           verdict="failed"; evidence="absent: $fp"
         elif grep -qiE -- "$re" "$out_dir/$fp" 2>/dev/null; then
           verdict="passed"
@@ -59,7 +65,7 @@ for i in $(seq 0 $((n_assert - 1)) 2>/dev/null || true); do
         fi
         ;;
       command-succeeds)
-        if out="$(cd "$out_dir" && eval "$args" 2>&1 | head -c 200)"; then
+        if out="$(cd "$out_dir" && timeout 120 bash -c "$args" 2>&1 | head -c 200)"; then
           verdict="passed"; evidence="exit 0: ${out:-<silent>}"
         else
           verdict="failed"; evidence="non-zero exit: ${out:-<silent>}"

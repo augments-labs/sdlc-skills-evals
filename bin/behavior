@@ -186,8 +186,11 @@ if [ -n "${tier_override:-}" ]; then scenario_model_tier="$tier_override"; fi
 if [ -n "${scenario_model_tier:-}" ] && ! command -v adapter_model >/dev/null 2>&1; then
   echo "$scenario asks for model tier '$scenario_model_tier' and $harness binds no tiers" >&2; exit 2
 fi
-if [ -n "${scenario_harnesses:-}" ] && ! printf ' %s ' $scenario_harnesses | grep -q " $harness "; then
-  echo "$scenario is bound to: $scenario_harnesses — not $harness" >&2; exit 2
+if [ -n "${scenario_harnesses:-}" ]; then
+  case " ${scenario_harnesses} " in
+    *" $harness "*) : ;;
+    *) echo "$scenario is bound to: $scenario_harnesses — not $harness" >&2; exit 2;;
+  esac
 fi
 if [ -n "$need_continue" ] && ! command -v adapter_continue_behavioral >/dev/null 2>&1; then
   echo "$harness adapter cannot continue a multi-turn behavioural session" >&2; exit 2

@@ -92,9 +92,15 @@ if [ "${1:-}" = "--evals" ]; then
       < <(find "$lab_root/behavior/evals" -name evals.json | sort)
   else
     for sk in "${skills[@]}"; do
-      f="$(find "$lab_root/behavior/evals" -path "*$sk/evals.json" | head -1)"
-      [ -n "$f" ] || { echo "no evals.json for skill: $sk" >&2; exit 2; }
-      evals_files+=("$f")
+      matches=""
+      while IFS= read -r f || [ -n "$f" ]; do
+        [ "$(basename "$(dirname "$f")")" = "$sk" ] && matches="$matches$f
+"
+      done < <(find "$lab_root/behavior/evals" -name evals.json | sort)
+      [ -n "$matches" ] || { echo "no evals.json for skill: $sk" >&2; exit 2; }
+      [ "$(printf '%s' "$matches" | grep -c .)" -eq 1 ] || {
+        echo "ambiguous --skill '$sk'" >&2; exit 2; }
+      evals_files+=("$(printf '%s' "$matches")")
     done
   fi
   total_cases=0
@@ -216,6 +222,7 @@ _record_dir() { # $1 label -> prints the record dir or fails
 
 if [ "$cmd" = "new" ]; then
   label="${1:-}"; [ -n "$label" ] || { echo "new needs a label" >&2; exit 2; }; shift
+  case "$label" in *[!A-Za-z0-9-]*|"") echo "label allows [A-Za-z0-9-] only: $label" >&2; exit 2;; esac
   plugin=""; harness=""; arms=""; base=""; suite=""; scenarios=""; runs=""; tier=""
   harnessdir_override=""; scenariodir_override=""
   while [ "$#" -gt 0 ]; do

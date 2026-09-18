@@ -142,9 +142,11 @@ EOF
   # modified files would pull the fixture's own pre-existing comments into
   # scope and make the comment check unfalsifiable), plus full contents of
   # untracked files, which the diff cannot see.
-  local untracked_src; untracked_src="$(git status --porcelain -uall -- src/ 2>/dev/null | awk '$1=="??"{print $2}')"
+  # Porcelain quote-wraps paths with spaces: strip the XY prefix and any
+  # surrounding quotes so spaced filenames survive intact.
+  local untracked_src; untracked_src="$(git status --porcelain -uall -- src/ 2>/dev/null | awk '$1=="??"{p=substr($0,4); if (p ~ /^".*"$/) {sub(/^"/,"",p); sub(/"$/,"",p)} print p}')"
   local new_code; new_code="$( { git diff "$root" -- src/ 2>/dev/null | grep -E '^\+' | grep -v '^+++' || true; \
-                                 for f in $untracked_src; do [ -f "$f" ] && cat "$f"; done; } )"
+                                 printf '%s\n' "$untracked_src" | while IFS= read -r f; do [ -n "$f" ] && [ -f "$f" ] && cat "$f"; done; } )"
   if [ -z "${new_code// }" ]; then
     fail "touched the pricing code — no src change found at all"
   else

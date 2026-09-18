@@ -6,7 +6,7 @@ set -uo pipefail
 root="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$root" || exit 1
 
-echo "check: skeleton stub — remaining sections arrive with E-4..E-7, E-14"
+echo "check: skeleton — static entry point"
 echo "check: .gitignore honors plans, raw runs, workspaces, secrets"
 
 # E-3: harness launcher contract (headers, required functions, opencode parsing)
@@ -35,7 +35,7 @@ for f in behavior/scenarios/*.sh; do
   cmp -s "/tmp/check-manifest-$n.json" "behavior/checks-manifest/$n.json" \
     || { echo "check: FAIL stale manifest for $n (run bin/check --update-manifests)"; exit 1; }
   rm -f "/tmp/check-manifest-$n.json"
-  grep -qx "$n" behavior/suites/all.txt 2>/dev/null \
+  grep -qxF "$n" behavior/suites/all.txt 2>/dev/null \
     || { echo "check: FAIL $n not listed in behavior/suites/all.txt"; exit 1; }
 done
 if find behavior/scenarios -type f -perm -111 | grep -q .; then
@@ -46,9 +46,9 @@ echo "check: behavior ok"
 
 # E-8: suite coherence — routing rows name listed scenarios
 if [ -f behavior/suites/routing.txt ]; then
-  while read -r r; do
+  while IFS= read -r r || [ -n "$r" ]; do
     [ -n "$r" ] || continue
-    grep -qx "$r" behavior/suites/all.txt \
+    grep -qxF "$r" behavior/suites/all.txt \
       || { echo "check: FAIL routing scenario not in suite: $r"; exit 1; }
   done < behavior/suites/routing.txt
   echo "check: suites ok"
@@ -107,6 +107,9 @@ done < <(find "$desc_root/holdout" -name '*.json' -type f 2>/dev/null | sort)
 echo "check: descriptions ok"
 
 # E-14: docs/ and results/ hold records and guidance, never runtime code.
+# Enforced as no-exec-bit + no-shebang: a non-executable, shebang-less
+# script file would pass, so treat this as the realistic-vectors proxy it
+# is and keep code out of both trees by review, not just by gate.
 docs_root="${DOCS_ROOT:-docs}"
 if find "$docs_root" results -type f -perm -111 2>/dev/null | grep -q .; then
   echo "check: FAIL executable under docs/ or results/ (records and guidance only)"
