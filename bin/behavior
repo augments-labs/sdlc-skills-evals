@@ -80,7 +80,7 @@ source "$lab_root/lib/home-env.sh"
 
 scenario="" harness="" arm="" plugin="" base="" record_dir=""
 timeout_s="${BH_DEFAULT_TIMEOUT:-1800}"
-tier_override="" keep="" scenario_dir="" harness_dir=""
+tier_override="" keep="" scenario_dir="" harness_dir="" harnessdir_given=""
 for a in "$@"; do
   [ "$a" = "-h" ] || [ "$a" = "--help" ] && { usage; exit 0; }
 done
@@ -96,12 +96,16 @@ while [ "$#" -gt 0 ]; do
     --keep) keep="1"; shift;;
     --record) record_dir="$2"; shift 2;;
     --scenario-dir) scenario_dir="$2"; shift 2;;
-    --harness-dir) harness_dir="$2"; shift 2;;
+    --harness-dir) harness_dir="$2"; harnessdir_given="1"; shift 2;;
     *) echo "unknown argument: $1" >&2; exit 2;;
   esac
 done
 scenario_dir="${scenario_dir:-$lab_root/behavior/scenarios}"
 harness_dir="${harness_dir:-$lab_root/harnesses}"
+# A `fake` harness name routes to the offline test double for self-tests.
+if [ "$harness" = fake ] && [ -z "$harnessdir_given" ]; then
+  harness_dir="$lab_root/lib/tests/fake-cli"
+fi
 
 [ -n "$scenario" ] || { echo "needs --scenario NAME" >&2; exit 2; }
 [ -n "$harness" ] || { echo "needs --harness NAME" >&2; exit 2; }

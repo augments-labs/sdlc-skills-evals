@@ -44,6 +44,16 @@ if find behavior/scenarios -type f -perm -111 | grep -q .; then
 fi
 echo "check: behavior ok"
 
+# E-8: suite coherence — routing rows name listed scenarios
+if [ -f behavior/suites/routing.txt ]; then
+  while read -r r; do
+    [ -n "$r" ] || continue
+    grep -qx "$r" behavior/suites/all.txt \
+      || { echo "check: FAIL routing scenario not in suite: $r"; exit 1; }
+  done < behavior/suites/routing.txt
+  echo "check: suites ok"
+fi
+
 # E-5: query-set shape — what the old README asked readers to check.
 # Root override for tests: DESCRIPTIONS_ROOT (default descriptions/).
 desc_root="${DESCRIPTIONS_ROOT:-descriptions}"
