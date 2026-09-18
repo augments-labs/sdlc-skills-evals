@@ -45,11 +45,11 @@ EOF
 scenario_setup() { fixture_buggy_api "$1"; }
 
 scenario_assert() {
-  local d="$1" first_edit pair_ok=0
+  local d="$1" first_edit
   cd "$d" || return 2
 
-  # $stream is the run-behavioral.sh event log. Ordering needs the raw sequence,
-  # so this reads it directly rather than using the deduped chain in the report.
+  # Ordering needs the raw event sequence, so this reads the adapter's
+  # normalized events rather than the deduped chain in the report.
   if [ ! -s "${stream:-}" ]; then
     echo "  no event stream to judge — inconclusive"
     return 2
@@ -57,12 +57,7 @@ scenario_assert() {
 
   # One ordered line per relevant event: "SKILL <name>" or "EDIT <path>".
   local events
-  events="$(jq -r 'select(.type=="assistant") | .message.content[]?
-      | select(.type=="tool_use")
-      | if   .name=="Skill" then "SKILL " + (.input.skill // "")
-        elif (.name=="Write" or .name=="Edit" or .name=="MultiEdit")
-        then "EDIT " + (.input.file_path // .input.path // "")
-        else empty end' "$stream" 2>/dev/null)"
+  events="$(adapter_behavioral_events "$stream")"
 
   # The first code edit is the boundary the pair has to lead. Non-code writes
   # (notes, plans, docs) are not implementation and do not close the window —
@@ -84,21 +79,20 @@ scenario_assert() {
   local s
   for s in test-driven-development yagni; do
     if printf '%s\n' "$before" | grep -q "^SKILL .*$s\$"; then
-      echo "  ok    $s led the first code edit"
+      pass "$s led the first code edit"
     else
-      echo "  FAIL  $s did NOT fire before the first code edit"
-      pair_ok=1
+      fail "$s did NOT fire before the first code edit"
     fi
   done
 
   # Routing itself: with the body resident the agent should NOT need to spend a
   # call re-invoking the router. Reported, never failed — either way is correct.
   if printf '%s\n' "$events" | grep -q '^SKILL .*using-sdlc-skills$'; then
-    echo "  note  re-invoked using-sdlc-skills (resident body was not enough to skip the call)"
+    note "re-invoked using-sdlc-skills (resident body was not enough to skip the call)"
   else
-    echo "  note  did not re-invoke using-sdlc-skills (resident body was sufficient)"
+    note "did not re-invoke using-sdlc-skills (resident body was sufficient)"
   fi
 
   echo "  full event order:"; printf '%s\n' "$events" | sed 's/^/    /'
-  return "$pair_ok"
+  assert_result
 }

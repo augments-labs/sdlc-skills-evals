@@ -41,11 +41,18 @@ probe 127 "not on a 127 stays 127" not assert_file
 # `not` itself exists as a function (not a coincidental command-not-found)
 expect_eq "$(command -v not)" "not" "not is a defined function"
 
-# counter: real checks increment it; reporting does not
+# counter: judgments count (directly or via the predicates); commentary
+# and reporting do not
 _lab_checks_run=0
+pass "direct judgment" >/dev/null 2>&1
+expect_eq "$_lab_checks_run" 1 "pass increments the counter once"
+fail "direct non-judgment" >/dev/null 2>&1
+expect_eq "$_lab_checks_run" 2 "fail increments the counter once"
+note "commentary" >/dev/null 2>&1
+expect_eq "$_lab_checks_run" 2 "note does not increment the counter"
 assert_contains "hello" "ell" "counter hit" >/dev/null 2>&1
-expect_eq "$_lab_checks_run" 1 "one assert_* increments the counter once"
+expect_eq "$_lab_checks_run" 3 "one assert_* increments the counter once (via pass)"
 assert_result >/dev/null 2>&1
-expect_eq "$_lab_checks_run" 1 "assert_result does not increment the counter"
+expect_eq "$_lab_checks_run" 3 "assert_result does not increment the counter"
 
 exit "$fails"

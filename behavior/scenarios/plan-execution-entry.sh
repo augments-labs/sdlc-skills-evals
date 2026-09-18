@@ -51,7 +51,7 @@ scenario_assert() {
   cd "$d" || return 2
   [ -s "${stream:-}" ] || { echo "no event stream to judge — inconclusive"; return 2; }
 
-  local events first_edit before fails=0
+  local events first_edit before
   events="$(adapter_behavioral_events "$stream")"
 
   first_edit="$(printf '%s\n' "$events" | grep -n '^EDIT ' |
@@ -67,10 +67,9 @@ scenario_assert() {
   require_before() { # skill
     local skill="$1"
     if printf '%s\n' "$before" | grep -q "^SKILL .*$skill$"; then
-      echo "ok    $skill led the first code edit"
+      pass "$skill led the first code edit"
     else
-      echo "FAIL  $skill did not lead the first code edit"
-      fails=1
+      fail "$skill did not lead the first code edit"
     fi
   }
   for skill in ui-ux-design writing-plans executing-plans test-driven-development yagni; do
@@ -89,13 +88,12 @@ scenario_assert() {
      [ "$design_n" -lt "$plan_n" ] && [ "$plan_n" -lt "$executor_n" ] &&
      printf '%s\n' "$after_executor" | grep -q '^SKILL .*test-driven-development$' &&
      printf '%s\n' "$after_executor" | grep -q '^SKILL .*yagni$'; then
-    echo "ok    UI/UX → plan → executor → TDD/YAGNI ordering held"
+    pass "UI/UX → plan → executor → TDD/YAGNI ordering held"
   else
-    echo "FAIL  required skill ordering did not hold"
-    fails=1
+    fail "required skill ordering did not hold"
   fi
 
   echo "full event order:"
   printf '%s\n' "$events" | sed 's/^/  /'
-  return "$fails"
+  assert_result
 }

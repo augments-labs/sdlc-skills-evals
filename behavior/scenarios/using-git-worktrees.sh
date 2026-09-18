@@ -42,7 +42,7 @@ PROMPT
 scenario_setup() { fixture_buggy_api "$1"; }
 
 scenario_assert() {
-  local d="$1" fail=0 wt wts native=0
+  local d="$1" wt wts native=0
   cd "$d" || return 2
 
   # The shared checkout must still be on dev, at the seed commit, and clean.
@@ -52,12 +52,12 @@ scenario_assert() {
   branch="$(git branch --show-current)"
   seed="$(git rev-list --max-parents=0 HEAD | tail -1)"
   head="$(git rev-parse dev)"
-  if [ "$branch" = dev ]; then echo "  ok    shared checkout is still on dev"
-  else echo "  FAIL  shared checkout was switched to '$branch'"; fail=1; fi
-  if [ "$head" = "$seed" ]; then echo "  ok    dev did not move"
-  else echo "  FAIL  dev advanced past the seed commit"; fail=1; fi
-  if [ -z "$(git status --porcelain -uall)" ]; then echo "  ok    shared checkout is clean"
-  else echo "  FAIL  shared checkout is dirty:"; git status --porcelain -uall | sed 's/^/          /'; fail=1; fi
+  if [ "$branch" = dev ]; then pass "shared checkout is still on dev"
+  else fail "shared checkout was switched to '$branch'"; fi
+  if [ "$head" = "$seed" ]; then pass "dev did not move"
+  else fail "dev advanced past the seed commit"; fi
+  if [ -z "$(git status --porcelain -uall)" ]; then pass "shared checkout is clean"
+  else fail "shared checkout is dirty:"; git status --porcelain -uall | sed 's/^/          /'; fi
 
   # A linked worktree must exist, under the default directory unless the
   # harness's own worktree tool placed it, and it must be ignored here.
@@ -67,35 +67,35 @@ scenario_assert() {
     native=1
   fi
   if [ "${#wts[@]}" -eq 0 ]; then
-    echo "  FAIL  no linked worktree was created"; fail=1
+    fail "no linked worktree was created"
   fi
   for wt in "${wts[@]}"; do
     echo "  worktree: $wt ($(git -C "$wt" branch --show-current 2>/dev/null || echo detached))"
     case "$wt" in
-      "$d"/.worktrees/*|"$d"/worktrees/*) echo "  ok    placed under the default directory";;
-      "$d"/*) if [ "$native" -eq 1 ]; then echo "  note  placed by the harness's worktree tool, not under .worktrees/"
-              else echo "  FAIL  inside the repo but not under .worktrees/ or worktrees/"; fail=1; fi;;
-      *) echo "  note  outside the repository";;
+      "$d"/.worktrees/*|"$d"/worktrees/*) pass "placed under the default directory";;
+      "$d"/*) if [ "$native" -eq 1 ]; then note "placed by the harness's worktree tool, not under .worktrees/"
+              else fail "inside the repo but not under .worktrees/ or worktrees/"; fi;;
+      *) note "outside the repository";;
     esac
     # The skill hands ignore ownership to a harness-native tool when one made
     # the worktree, so that case is reported and only the skill's own path gated.
     case "$wt" in
-      "$d"/*) if git check-ignore -q "$wt"; then echo "  ok    ignored ($(git check-ignore -v "$wt" | cut -f1))"
-              elif [ "$native" -eq 1 ]; then echo "  note  not ignored — the harness's worktree tool owns that"
-              else echo "  FAIL  not ignored — it will show in every status and add"; fail=1; fi;;
+      "$d"/*) if git check-ignore -q "$wt"; then pass "ignored ($(git check-ignore -v "$wt" | cut -f1))"
+              elif [ "$native" -eq 1 ]; then note "not ignored — the harness's worktree tool owns that"
+              else fail "not ignored — it will show in every status and add"; fi;;
     esac
     # The fix has to live in the worktree, not merely a worktree beside no work.
     if [ -n "$(git -C "$wt" diff --name-only dev -- src 2>/dev/null)" ] ||
        [ -n "$(git -C "$wt" status --porcelain -- src 2>/dev/null)" ]; then
-      echo "  ok    src/ changed inside the worktree"
+      pass "src/ changed inside the worktree"
     else
-      echo "  FAIL  the worktree holds no change under src/"; fail=1
+      fail "the worktree holds no change under src/"
     fi
     if command -v node >/dev/null 2>&1; then
       if node -e "const {register,resolve}=require('$wt/src/apikeys');register('k','t','pro');process.exit(resolve('bearer k')?0:1)" 2>/dev/null; then
-        echo "  note  probe: lowercase scheme resolves"
+        note "probe: lowercase scheme resolves"
       else
-        echo "  note  probe: lowercase scheme still rejected (the fix is reported, not gated)"
+        note "probe: lowercase scheme still rejected (the fix is reported, not gated)"
       fi
     fi
   done
@@ -105,7 +105,7 @@ scenario_assert() {
   if [ -s "${stream:-}" ]; then
     local first
     first="$(adapter_behavioral_events "$stream" | grep '^EDIT ' | head -1 | cut -d' ' -f2-)"
-    [ -n "$first" ] && echo "  note  first structured edit: $first"
+    [ -n "$first" ] && note "first structured edit: $first"
   fi
-  return "$fail"
+  assert_result
 }

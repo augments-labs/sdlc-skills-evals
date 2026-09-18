@@ -14,4 +14,34 @@ bash lib/tests/harnesses.sh || { echo "check: FAIL harnesses"; exit 1; }
 bash lib/tests/opencode-adapter.sh >/dev/null || { echo "check: FAIL opencode adapter"; exit 1; }
 echo "check: harnesses ok"
 
+# E-4: behavior scenario shape + frozen check manifests
+if [ "${1:-}" = "--update-manifests" ]; then
+  for f in behavior/scenarios/*.sh; do
+    n="$(basename "$f" .sh)"
+    sed 's/#.*//' "$f" | grep -oE '\b(pass|fail|assert_contains|assert_not_contains|assert_file)[[:space:]]' \
+      | sed 's/[[:space:]]*$//' | sort -u | jq -R . | jq -s . > "behavior/checks-manifest/$n.json"
+  done
+  echo "check: manifests regenerated"
+  exit 0
+fi
+for f in behavior/scenarios/*.sh; do
+  n="$(basename "$f" .sh)"
+  for fn in scenario_opening scenario_setup scenario_assert; do
+    grep -q "^$fn *(" "$f" || { echo "check: FAIL $n defines no $fn()"; exit 1; }
+  done
+  [ -f "behavior/checks-manifest/$n.json" ] || { echo "check: FAIL no manifest for $n"; exit 1; }
+  sed 's/#.*//' "$f" | grep -oE '\b(pass|fail|assert_contains|assert_not_contains|assert_file)[[:space:]]' \
+    | sed 's/[[:space:]]*$//' | sort -u | jq -R . | jq -s . > "/tmp/check-manifest-$n.json"
+  cmp -s "/tmp/check-manifest-$n.json" "behavior/checks-manifest/$n.json" \
+    || { echo "check: FAIL stale manifest for $n (run bin/check --update-manifests)"; exit 1; }
+  rm -f "/tmp/check-manifest-$n.json"
+  grep -qx "$n" behavior/suites/all.txt 2>/dev/null \
+    || { echo "check: FAIL $n not listed in behavior/suites/all.txt"; exit 1; }
+done
+if find behavior/scenarios -type f -perm -111 | grep -q .; then
+  echo "check: FAIL executable under behavior/scenarios (scenarios are sourced, never executed)"
+  exit 1
+fi
+echo "check: behavior ok"
+
 echo "check: OK"

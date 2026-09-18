@@ -1,0 +1,16 @@
+containment-before-diagnosis
+data-model
+debugging
+done-boundary-routing
+hollow-floor-routing
+implementation-entry-routing
+pending-decision-authority
+plan-execution-entry
+test-driven-development
+ui-ux-design
+using-git-worktrees
+verification-before-completion
+verification-strategy
+viewing-artifacts
+writing-specs
+yagni
