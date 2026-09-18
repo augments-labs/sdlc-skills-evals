@@ -7,6 +7,7 @@ implementation-entry-routing
 pending-decision-authority
 plan-execution-entry
 release-routing
+subagent-driven-development
 test-driven-development
 ui-ux-design
 using-git-worktrees

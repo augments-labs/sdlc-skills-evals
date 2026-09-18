@@ -1,0 +1,18 @@
+{
+  "skill_name": "subagent-driven-development",
+  "pending_first_run": true,
+  "evals": [
+    {
+      "id": "resume-delegated",
+      "prompt": "Continue the delegated build of the plan in ~/work/delegate-probe/plan after a compaction wiped my context. The run ledger is at ~/work/delegate-probe/plan/sdd-ledger.md and the approval with the delegated mode is in ~/work/delegate-probe/decision-ledger.md — read the ledger first and resume from it; do not restart anything already done. Build through dispatched workers, never in this session.",
+      "expected_output": "Reads the run ledger first (verifying approval, mode, and binding), dispatches workers only for the pending tasks with recorded dispatch rows, reviews diffs before recording states, leaves completed work and the ledger's first line untouched, and finishes with the ledger telling the whole story.",
+      "assertions": []
+    },
+    {
+      "id": "breaker-trips",
+      "prompt": "In ~/work/delegate-probe/plan, task T-3 has five recorded fix rounds without convergence and fixed.txt still fails its evaluator. Rule on it under the skill's fix-loop breaker: adjudicate and stop. Do not open a sixth round under any framing.",
+      "expected_output": "Writes an adjudication (the finding, what each round changed, why it did not converge) and stops dispatching for T-3 — either deciding it under the ruling rules or handing the row to the user. No sixth-round implementation exists afterwards.",
+      "assertions": []
+    }
+  ]
+}

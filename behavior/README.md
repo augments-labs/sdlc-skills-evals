@@ -112,7 +112,7 @@ One row per chain (`E-10` fills the rows):
 | --- | --- |
 | bug-fix | debugging |
 | new-feature | test-driven-development |
-| plan-execution | plan-execution-entry |
+| plan-execution | subagent-driven-development |
 | incident | containment-before-diagnosis |
 | release | release-routing |
 
