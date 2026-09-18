@@ -358,9 +358,9 @@ created="$(jq -r '.created' "$dir/campaign.json")"
   while read -r sc; do
     while read -r an; do
       files="$(find "$dir/runs" -name "$sc-$an-*.json" | sort)"
-      n="$(printf '%s' "$files" | grep -c .)"
-      p="$(printf '%s' "$files" | while read -r f; do jq -r 'select(.verdict == "pass") | "x"' "$f" 2>/dev/null; done | wc -l)"
-      ind="$(printf '%s' "$files" | while read -r f; do jq -r 'select(.verdict == "indeterminate") | "x"' "$f" 2>/dev/null; done | wc -l)"
+      n="$(printf '%s\n' "$files" | grep -c .)"
+      p="$(printf '%s\n' "$files" | while read -r f; do [ -n "$f" ] && jq -r 'select(.verdict == "pass") | "x"' "$f" 2>/dev/null; done | wc -l)"
+      ind="$(printf '%s\n' "$files" | while read -r f; do [ -n "$f" ] && jq -r 'select(.verdict == "indeterminate") | "x"' "$f" 2>/dev/null; done | wc -l)"
       if [ "$p" = "$n" ] && [ "$n" -gt 0 ]; then res="pass";
       elif [ "$ind" = "$n" ] && [ "$n" -gt 0 ]; then res="indeterminate";
       else res="fail"; fi

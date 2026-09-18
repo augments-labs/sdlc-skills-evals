@@ -391,14 +391,15 @@ if [ -n "$record_dir" ]; then
   fi
   [ -n "$toks" ] && tokens_json="$toks" || tokens_json=null
   [ -n "$plugin_commit" ] && commit_json="\"$plugin_commit\"" || commit_json=null
+  # The assertion log is evidence: counts alone cannot show what held.
   jq -n --arg scenario "$scenario" --arg arm "$arm" --arg harness "$harness" \
     --argjson plugin_commit "$commit_json" --arg verdict "$verdict" \
     --argjson stage "$stage_json" --argjson checks_run "${checks_run:-0}" \
     --argjson tokens "$tokens_json" --argjson duration_ms "$duration_ms" \
-    --arg workdir "$workdir" \
+    --arg workdir "$workdir" --arg log "${asserts_out:-}" \
     '{scenario:$scenario, arm:$arm, harness:$harness, plugin_commit:$plugin_commit,
       verdict:$verdict, stage:$stage, checks_run:$checks_run, tokens:$tokens,
-      duration_ms:$duration_ms, workdir:$workdir}' \
+      duration_ms:$duration_ms, workdir:$workdir, log:$log}' \
     > "$record_dir/runs/$scenario-$arm-$n.json" || exit 2
 fi
 

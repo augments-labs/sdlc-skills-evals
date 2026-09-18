@@ -36,6 +36,16 @@ adapter_ran "$stream" \
 [ "$(adapter_usage "$stream")" = "100" ] \
   && ok "usage reports the step total" || bad "usage reports the step total (got $(adapter_usage "$stream"))"
 
+# a long session emits one step-finish per step: usage takes the last
+# cumulative total, never a concatenation of every step
+multi="$fix/multi.jsonl"
+cp "$stream" "$multi"
+cat >> "$multi" <<'EOF'
+{"type":"step_finish","timestamp":6,"sessionID":"ses_test","part":{"id":"p6","messageID":"m1","sessionID":"ses_test","type":"step-finish","reason":"stop","tokens":{"total":250,"input":200,"output":50,"reasoning":0,"cache":{"write":0,"read":25}},"cost":0}}
+EOF
+[ "$(adapter_usage "$multi")" = "250" ] \
+  && ok "usage takes the last step total" || bad "usage takes the last step total (got $(adapter_usage "$multi"))"
+
 # empty and error-shaped streams stay silent, never phantom
 empty="$fix/empty.jsonl"
 : > "$empty"

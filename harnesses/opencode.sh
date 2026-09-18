@@ -86,11 +86,13 @@ adapter_ran() { # $1 stream file
 }
 
 # COST: the step-finish part carries the run's own totals (observed keys:
-# total/input/output/reasoning/cache.read/cache.write). The explicit total
-# wins; otherwise sum what is present. Silent when absent, so a timed-out
-# or refused run reports no number rather than a misleading zero.
+# total/input/output/reasoning/cache.read/cache.write). A long session emits
+# one step-finish per step, so slurp the whole stream and take the LAST
+# totals (cumulative). The explicit total wins; otherwise sum what is
+# present. Silent when absent, so a timed-out or refused run reports no
+# number rather than a misleading zero — and never a concatenation.
 adapter_usage() { # $1 stream file
-  jq '[.. | objects | select(.type == "step-finish" and (.tokens | type == "object")) | .tokens] | last
+  jq -s '[.[] | .. | objects | select(.type == "step-finish" and (.tokens | type == "object")) | .tokens] | last
       | select(. != null)
       | .total // ((.input // 0) + (.output // 0) + (.reasoning // 0)
                    + ((.cache.read // 0) + (.cache.write // 0)))' "$1" 2>/dev/null
