@@ -1,2 +1,16 @@
 # local working artifacts — plans, ledgers, specs (writing-plans, executing-plans)
 .sdlc-skills/
+
+# campaign records and self-test runs are never committed (records live in
+# results/ only when a maintainer deliberately records one; see results/README.md)
+results/*-selftest-*/
+results/**/raw/
+workspaces/*
+!workspaces/README.md
+
+# secrets and credentials are never committed (see SECURITY.md)
+.env
+*.jsonl
+*.log
+.credentials.json
+auth.json

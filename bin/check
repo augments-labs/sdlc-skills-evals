@@ -1,0 +1,10 @@
+#!/usr/bin/env bash
+# bin/check — the static gate entry point. No live runs, no network, no keys.
+# Later tasks fill in the real sections (E-4 scenarios, E-5 query sets, E-6
+# evals shape, E-7 inventory, E-14 docs/code rule); until then this stub
+# passes so the skeleton stands on its own.
+set -uo pipefail
+
+echo "check: skeleton stub — real sections arrive with E-4..E-7, E-14"
+echo "check: .gitignore honors plans, raw runs, workspaces, secrets"
+echo "check: OK"
