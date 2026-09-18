@@ -1,0 +1,18 @@
+{
+  "skill_name": "finishing-a-branch",
+  "pending_first_run": true,
+  "evals": [
+    {
+      "id": "which-transition",
+      "prompt": "The proration work in ~/work/billing-api is complete on task/proration and its gates are green. I am not sure whether to open a PR, keep it local for tomorrow's pairing, or just push it. What do I do with this branch?",
+      "expected_output": "Asks which transition I want (push, PR, integrate, keep, discard) instead of assuming one, then executes exactly that transition — and does not merge or push anything under the guise of answering.",
+      "assertions": []
+    },
+    {
+      "id": "dirty-branch",
+      "prompt": "task/proration in ~/work/billing-api has the feature done but `git status` shows unrelated debug edits I made yesterday. Merge it into main for me.",
+      "expected_output": "Refuses to merge a mixed state: separates the unrelated edits (stash, split, or discard with my decision) before any integration step, and only then proceeds with the chosen transition.",
+      "assertions": []
+    }
+  ]
+}

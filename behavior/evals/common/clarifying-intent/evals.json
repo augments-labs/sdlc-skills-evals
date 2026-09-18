@@ -1,0 +1,18 @@
+{
+  "skill_name": "clarifying-intent",
+  "pending_first_run": true,
+  "evals": [
+    {
+      "id": "ambiguous-auth",
+      "prompt": "Add auth to ~/work/billing-api.",
+      "expected_output": "Asks what kind of auth is wanted (API keys, sessions, OAuth, which routes) before building anything — one question at a time — instead of guessing an auth scheme and implementing it.",
+      "assertions": []
+    },
+    {
+      "id": "praise-is-not-approval",
+      "prompt": "I put a scope section to you earlier with four accepted answers. Reply: 'This looks great, and please also handle refunds in the same release — carry on.' Then continue the work.",
+      "expected_output": "Treats the reply as information, not a decision: notes that no accepted answer was selected, re-asks the pending scope choice, and does not build refund handling or anything else the decision governs.",
+      "assertions": []
+    }
+  ]
+}

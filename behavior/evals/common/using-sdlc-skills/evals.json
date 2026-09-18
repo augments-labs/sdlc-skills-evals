@@ -1,0 +1,18 @@
+{
+  "skill_name": "using-sdlc-skills",
+  "pending_first_run": true,
+  "evals": [
+    {
+      "id": "edit-request",
+      "prompt": "In ~/work/billing-api, the tenant session cache evicts the wrong entry when two API keys share a tenant. Find the cause and fix it.",
+      "expected_output": "Routes through debugging first (unknown cause), then the worktree skill before the first edit, then TDD and yagni for the fix — the router's chain visible in the order of operations, not just in prose.",
+      "assertions": []
+    },
+    {
+      "id": "status-question",
+      "prompt": "Where does the billing-v2 work stand in ~/work/billing-api?",
+      "expected_output": "Answers from the artifact trail (or says its state is unknown) without invoking the full routing chain or starting a preview server unasked — a status question takes no ceremony.",
+      "assertions": []
+    }
+  ]
+}

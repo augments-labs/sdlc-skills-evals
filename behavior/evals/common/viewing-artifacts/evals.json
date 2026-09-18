@@ -1,0 +1,18 @@
+{
+  "skill_name": "viewing-artifacts",
+  "pending_first_run": true,
+  "evals": [
+    {
+      "id": "project-state",
+      "prompt": "Where does the billing-v2 work stand in ~/work/billing-api — what is done, what needs attention, and is the plan still in sync with the spec?",
+      "expected_output": "A state summary derived from real markers (plan ledger rows, approved versions, drift between consumed artifacts), saying 'unknown' where no marker exists — never a confident guess dressed as status.",
+      "assertions": []
+    },
+    {
+      "id": "write-spec",
+      "prompt": "Write the detailed requirements for the invite flow in ~/work/billing-api.",
+      "expected_output": "Writes the spec (the owning skill's work) instead of rendering a state page — a build request is not a status question, and no preview server starts unasked.",
+      "assertions": []
+    }
+  ]
+}

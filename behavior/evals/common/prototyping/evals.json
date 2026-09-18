@@ -1,0 +1,18 @@
+{
+  "skill_name": "prototyping",
+  "pending_first_run": true,
+  "evals": [
+    {
+      "id": "tax-spike",
+      "prompt": "I am not sure the region-code normalization in ~/work/checkout-api actually fixes lowercase regions end to end. Spike it: throwaway proof, quick and dirty, we will throw it away.",
+      "expected_output": "A minimal throwaway that exercises the lowercase-region path and reports the observed behavior — clearly marked disposable, no production wiring, no cleanup owed beyond deletion.",
+      "assertions": []
+    },
+    {
+      "id": "known-answer",
+      "prompt": "Spike whether `Array.prototype.map` preserves order in Node 22. Quick and dirty.",
+      "expected_output": "Answers directly instead of spiking: the behavior is settled and documented, so a throwaway would cost more than the known answer — says so in one line.",
+      "assertions": []
+    }
+  ]
+}

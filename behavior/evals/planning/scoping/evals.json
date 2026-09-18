@@ -1,0 +1,18 @@
+{
+  "skill_name": "scoping",
+  "pending_first_run": true,
+  "evals": [
+    {
+      "id": "reporting-scope",
+      "prompt": "Goals for tenant reporting in ~/work/billing-api are set: self-serve invoice history and CSV export. Define the delivery boundary — what is in, what is out, and what counts as sufficient for the goal. The team keeps adding chart widgets to the proposal.",
+      "expected_output": "A scope statement with explicit in/out lists that excludes the chart widgets with reasoning tied to the goal, plus a sufficiency bar (what done looks like) that stops scope growth during delivery.",
+      "assertions": []
+    },
+    {
+      "id": "midstream-growth",
+      "prompt": "We are halfway through the multi-tenancy work in ~/work/billing-api and product just asked to add per-tenant custom domains to this release because 'we are already touching tenants'. Revise the scope.",
+      "expected_output": "Treats the addition as a scope change to be decided, not absorbed: states what moves out or slips if custom domains move in (or defers them to a follow-up), with the trade-off explicit rather than a quiet yes.",
+      "assertions": []
+    }
+  ]
+}

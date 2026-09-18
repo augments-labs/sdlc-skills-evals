@@ -1,0 +1,18 @@
+{
+  "skill_name": "handoff",
+  "pending_first_run": true,
+  "evals": [
+    {
+      "id": "context-full",
+      "prompt": "We are mid-way through the proration work in ~/work/billing-api (task/proration, 2 of 5 plan tasks done, current blocker: rounding rule undecided). The context is nearly full and I need to step away. Write a handoff so a fresh session can continue.",
+      "expected_output": "A handoff naming the exact state (branch, completed vs pending tasks, the undecided rounding rule with its options, next gate), written where the next session will find it — no decisions invented, no progress claimed beyond what is done.",
+      "assertions": []
+    },
+    {
+      "id": "finished-work",
+      "prompt": "The proration work in ~/work/billing-api is merged and released. Write a handoff for it.",
+      "expected_output": "Declines the handoff (nothing unfinished to hand over) rather than writing ceremony around done work — at most a pointer to the record.",
+      "assertions": []
+    }
+  ]
+}

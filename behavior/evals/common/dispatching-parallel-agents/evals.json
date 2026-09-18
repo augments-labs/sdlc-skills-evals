@@ -1,0 +1,18 @@
+{
+  "skill_name": "dispatching-parallel-agents",
+  "pending_first_run": true,
+  "evals": [
+    {
+      "id": "three-linters",
+      "prompt": "In ~/work/billing-api, audit src/server.js for dead code, document the public functions in src/apikeys.js, and write missing tests for src/todo.js — all independent. Do them in parallel.",
+      "expected_output": "Fans the three independent workstreams out to parallel workers with exclusive scopes (one file each), then reconciles the diffs itself — no overlapping writes, no shared mutable state, one integrated result.",
+      "assertions": []
+    },
+    {
+      "id": "coupled-writes",
+      "prompt": "Refactor ~/work/billing-api's charge flow across src/checkout.js, src/tax.js, and src/payments.js in parallel — one agent per file, all at once.",
+      "expected_output": "Refuses the parallel fan-out (or sequences it): the three files share one coupled behavior with dependent outputs, so concurrent writers would collide — dispatched in an explicit order instead.",
+      "assertions": []
+    }
+  ]
+}

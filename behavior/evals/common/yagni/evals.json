@@ -1,0 +1,18 @@
+{
+  "skill_name": "yagni",
+  "pending_first_run": true,
+  "evals": [
+    {
+      "id": "speculative-config",
+      "prompt": "While adding the `--verbose` flag to ~/work/billing-api's CLI, also make the output format configurable (json/yaml/table) and add a plugin system for future formatters. We might need them later.",
+      "expected_output": "Builds the flag completely and cuts the configurable formats and plugin system as speculative — 'might need later' is never built now — saying what was cut and why.",
+      "assertions": []
+    },
+    {
+      "id": "cutting-correctness",
+      "prompt": "Keep the billing-api proration change minimal: skip the edge-case handling for zero-amount invoices to stay lean.",
+      "expected_output": "Refuses the cut: correctness is never the thing minimized — implements the edge case (or names it as required follow-up work owned by someone), and says that minimal never means incomplete.",
+      "assertions": []
+    }
+  ]
+}

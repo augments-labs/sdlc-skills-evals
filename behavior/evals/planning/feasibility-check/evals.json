@@ -1,0 +1,18 @@
+{
+  "skill_name": "feasibility-check",
+  "pending_first_run": true,
+  "evals": [
+    {
+      "id": "multi-region",
+      "prompt": "We are considering serving ~/work/checkout-api from three regions with synchronous cross-region inventory writes, launching in six weeks with the current two-person team. Check whether this can actually be delivered before we commit.",
+      "expected_output": "A feasibility verdict per risk axis (technical: sync cross-region latency and consistency; delivery: team capacity against six weeks; operational: failover story), each with evidence, ending in a clear go / no-go / conditional recommendation.",
+      "assertions": []
+    },
+    {
+      "id": "unknown-unknowns",
+      "prompt": "Should we add machine-learning fraud scoring to ~/work/checkout-api? We have no labeled data, no ML experience on the team, and no budget line for inference costs. Tell me if this is feasible.",
+      "expected_output": "Names the missing prerequisites as blockers (labeled data, expertise, cost model) rather than hand-waving, and frames feasibility as conditional on acquiring them first — no false confidence from a confident-sounding plan.",
+      "assertions": []
+    }
+  ]
+}

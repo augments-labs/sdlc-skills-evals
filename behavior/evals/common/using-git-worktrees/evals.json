@@ -1,0 +1,18 @@
+{
+  "skill_name": "using-git-worktrees",
+  "pending_first_run": true,
+  "evals": [
+    {
+      "id": "first-edit",
+      "prompt": "In ~/work/billing-api (on main, clean) implement the cents-rounding fix in src/server.js. Start however you think best.",
+      "expected_output": "Creates an isolated worktree/branch for the edit before touching anything — never edits the shared checkout in place — and checkpoints the finished piece with a local commit.",
+      "assertions": []
+    },
+    {
+      "id": "read-only",
+      "prompt": "In ~/work/billing-api, read src/server.js and tell me how the route table handles unknown paths. Do not change anything.",
+      "expected_output": "Reads and answers with no worktree, no branch, and no commit — read-only work takes no isolation ceremony.",
+      "assertions": []
+    }
+  ]
+}
