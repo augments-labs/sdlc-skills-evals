@@ -70,7 +70,7 @@ scenario_assert() {
   # Read the chain through the harness's own binding. Hand-rolled jq here is a
   # bug waiting to happen: one harness's stream shape scores every other harness
   # as a silent miss, which reads as a routing failure that never occurred.
-  events="$(bh_chain "$stream" 2>/dev/null)"
+  events="$(adapter_chain "$stream" 2>/dev/null)"
 
   if printf '%s\n' "$events" | grep -q 'verification-before-completion'; then
     pass "verification-before-completion fired before the run reported done"

@@ -169,10 +169,13 @@ fi
 # --- scenario ----------------------------------------------------------------
 scenario_file="$scenario_dir/$scenario.sh"
 [ -f "$scenario_file" ] || { echo "no scenario at $scenario_file" >&2; exit 2; }
-# The runner sources the assertion library BEFORE the scenario; scenarios
-# themselves source nothing and stay byte-identical across layouts.
+# The runner sources the assertion library AND the fixtures BEFORE the
+# scenario; scenarios themselves source nothing and stay byte-identical
+# across layouts.
 # shellcheck source=../lib/prelude.sh
 source "$lab_root/lib/prelude.sh"
+# shellcheck source=/dev/null
+source "$lab_root/fixtures/fixtures.sh"
 # shellcheck source=/dev/null
 source "$scenario_file"
 for fn in scenario_opening scenario_setup scenario_assert; do
