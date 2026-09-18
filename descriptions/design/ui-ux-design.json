@@ -26,7 +26,7 @@
    "query": "Change the primary button colour to #0B5FFF. Design already signed off on the exact hex."},
   {"split": "train", "should_trigger": false, "expect": "none",
    "query": "What's the WCAG minimum contrast ratio for body text? AA level."},
-  {"split": "train", "should_trigger": false, "expect": "spec-it",
+  {"split": "train", "should_trigger": false, "expect": "writing-specs",
    "query": "What does the export feature have to do functionally? Not asking about the interface yet."},
   {"split": "train", "should_trigger": false, "expect": "test-driven-development",
    "query": "Wire up the API call behind the save button. The whole UI is already designed and implemented."},

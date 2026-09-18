@@ -26,7 +26,7 @@
    "query": "I'm writing the export feature now and I keep wanting to add hooks nobody asked for."},
   {"split": "train", "should_trigger": false, "expect": "requesting-code-review",
    "query": "Review this specific diff — it's a finished candidate, not a codebase-wide question."},
-  {"split": "train", "should_trigger": false, "expect": "zoom-out",
+  {"split": "train", "should_trigger": false, "expect": "mapping-the-codebase",
    "query": "I don't know this area at all. Map out how the scheduler is wired before I go near it."},
   {"split": "train", "should_trigger": false, "expect": "none",
    "query": "What's the difference between cyclomatic and cognitive complexity as metrics?"},

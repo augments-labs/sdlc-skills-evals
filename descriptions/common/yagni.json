@@ -24,7 +24,7 @@
    "query": "Do a read-only pass over src/scheduler/ and tell me which of those abstractions are actually carrying their weight. Don't change anything yet."},
   {"split": "train", "should_trigger": false, "expect": "refactor-architecture",
    "query": "The structure of our billing module means every small change touches six files. I want to redesign how it's laid out."},
-  {"split": "train", "should_trigger": false, "expect": "spec-it",
+  {"split": "train", "should_trigger": false, "expect": "writing-specs",
    "query": "Write up the requirements for the data export feature — what it has to do and how we'd verify each one."},
   {"split": "train", "should_trigger": false, "expect": "prototyping",
    "query": "I want to spike a throwaway script to see how fast the parquet reader actually is on our files. Just get me numbers, I'm deleting it after."},

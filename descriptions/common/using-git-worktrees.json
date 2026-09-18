@@ -58,7 +58,7 @@
   {
     "split": "train",
     "should_trigger": false,
-    "expect": "zoom-out",
+    "expect": "mapping-the-codebase",
     "query": "Before we touch anything, help me understand how the permissions system is wired up. I've never worked in that part of the repo."
   },
   {
@@ -100,7 +100,7 @@
   {
     "split": "train",
     "should_trigger": false,
-    "expect": "zoom-out",
+    "expect": "mapping-the-codebase",
     "query": "I don't know this part of the codebase at all. Map src/ and its callers for me before I touch anything."
   },
   {

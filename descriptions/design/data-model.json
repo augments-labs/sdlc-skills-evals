@@ -88,13 +88,13 @@
   {
     "split": "validation",
     "should_trigger": false,
-    "expect": "zoom-out",
+    "expect": "mapping-the-codebase",
     "query": "Show me what tables the reporting module actually reads from. I don't know this area."
   },
   {
     "split": "validation",
     "should_trigger": false,
-    "expect": "spec-it",
+    "expect": "writing-specs",
     "query": "The domain's already modelled and agreed. Write the requirements for the subscription upgrade flow."
   },
   {

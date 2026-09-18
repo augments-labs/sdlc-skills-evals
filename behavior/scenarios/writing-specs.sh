@@ -1,13 +1,13 @@
 #!/usr/bin/env bash
-# Behavioural scenario: spec-it.
+# Behavioural scenario: writing-specs.
 #
 # One file: the fixture, the opening, and the assertions. Sourced by any
 # adapter's run-behavioral.sh, which supplies the harness plumbing.
 #
-# What this proves that an activation test cannot: `spec-it` says a behavioural
+# What this proves that an activation test cannot: `writing-specs` says a behavioural
 # requirement's acceptance criterion should take an EXECUTABLE form, and that
 # what you name must actually be built and RUN. A test that asks the agent to
-# *describe* spec-it would pass an agent that recites it perfectly and still
+# *describe* writing-specs would pass an agent that recites it perfectly and still
 # ships a spec promising verification it never wrote. This runs the skill and
 # reads the artifact.
 #

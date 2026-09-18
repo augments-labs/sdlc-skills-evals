@@ -58,9 +58,9 @@ Exit codes: 0 the scenario's own assertions passed · 1 they failed
             2 bad or missing arguments · 3 harness or tooling unavailable
 
 Examples:
-  tests/run-behavioral.sh --harness claude-code --scenario spec-it --arm green
-  tests/run-behavioral.sh --harness claude-code --scenario spec-it --arm none
-  tests/run-behavioral.sh --harness codex --scenario spec-it --arm red --base origin/dev
+  tests/run-behavioral.sh --harness claude-code --scenario writing-specs --arm green
+  tests/run-behavioral.sh --harness claude-code --scenario writing-specs --arm none
+  tests/run-behavioral.sh --harness codex --scenario writing-specs --arm red --base origin/dev
 EOF
 }
 

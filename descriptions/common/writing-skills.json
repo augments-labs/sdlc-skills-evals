@@ -28,7 +28,7 @@
    "query": "Add a `--json` flag to scripts/sh/check-skill.sh so it prints machine-readable output."},
   {"split": "train", "should_trigger": false, "expect": "none",
    "query": "What's the difference between a skill and a slash command in an agent harness? General question."},
-  {"split": "train", "should_trigger": false, "expect": "spec-it",
+  {"split": "train", "should_trigger": false, "expect": "writing-specs",
    "query": "Write the requirements for the export feature. Nothing to do with skills — it's a product feature."},
   {"split": "validation", "should_trigger": false, "expect": "debugging",
    "query": "The skill validator script exits 1 but prints no errors. Find out why."},

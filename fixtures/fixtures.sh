@@ -80,7 +80,7 @@ EOF
 # simply not exist here, and matching area nouns in natural language
 # false-positives too badly to be worth automating at all. Both stay a review
 # question, and the prose half was always the harder one. Ask it
-# where the SKILL ITSELF has to read existing code — zoom-out orienting in an
+# where the SKILL ITSELF has to read existing code — mapping-the-codebase orienting in an
 # area, refactor-architecture grounding a proposal in the current structure. A
 # query that only DESIGNS something ("model the entities for the permissions
 # system") presupposes nothing and needs no fixture.

@@ -20,9 +20,9 @@
   {"split": "validation", "should_trigger": true,
    "query": "kicking off a new project next week to give partners an API for their own dashboards. can you help me pin down what success looks like before i brief the team"},
 
-  {"split": "train", "should_trigger": false, "expect": "scope-it",
+  {"split": "train", "should_trigger": false, "expect": "scoping",
    "query": "Objectives and success measures are agreed and written down. Now draw the line around what ships in v1."},
-  {"split": "train", "should_trigger": false, "expect": "spec-it",
+  {"split": "train", "should_trigger": false, "expect": "writing-specs",
    "query": "The goal is settled — reduce checkout abandonment. Write the requirements for the one-page checkout."},
   {"split": "train", "should_trigger": false, "expect": "feasibility-check",
    "query": "Leadership wants real-time sync across three systems by Q3. Before I commit to that, can we actually do it?"},
@@ -36,7 +36,7 @@
    "query": "Implement the feature flag service we agreed on in last week's design review."},
   {"split": "validation", "should_trigger": false, "expect": "post-mortem",
    "query": "That whole project missed every milestone. I want to understand why our process let it drift for two months."},
-  {"split": "train", "should_trigger": false, "expect": "scope-it",
+  {"split": "train", "should_trigger": false, "expect": "scoping",
    "query": "The objective and success measures for the partner API are signed off. Now I need to decide what's in the first release and what waits."},
   {"split": "validation", "should_trigger": false, "expect": "feasibility-check",
    "query": "Leadership wants to commit to shipping offline sync by Q3. Before anyone signs up to that, can we actually do it with the team and stack we have?"}

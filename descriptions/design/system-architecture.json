@@ -34,7 +34,7 @@
    "query": "Explain the difference between hexagonal architecture and clean architecture. I keep mixing them up."},
   {"split": "validation", "should_trigger": false, "expect": "writing-plans",
    "query": "The architecture is agreed and documented. Now break it into implementable tasks."},
-  {"split": "validation", "should_trigger": false, "expect": "zoom-out",
+  {"split": "validation", "should_trigger": false, "expect": "mapping-the-codebase",
    "query": "I've never worked in the payments area. Map out how it's currently structured before I change anything."},
   {"split": "train", "should_trigger": false, "expect": "refactor-architecture",
    "query": "Our existing billing module's structure means every change touches six files. I want to redesign the layout we already have."},

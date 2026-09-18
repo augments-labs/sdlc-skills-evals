@@ -155,10 +155,10 @@ scenario_assert() {
   # loaded, so requiring one here would score the arm instead of the boundary.
   local events
   events="$(adapter_behavioral_events "$stream")"
-  if printf '%s\n' "$events" | grep -q '^SKILL .*interview-me$'; then
-    note "interview-me fired"
+  if printf '%s\n' "$events" | grep -q '^SKILL .*clarifying-intent$'; then
+    note "clarifying-intent fired"
   else
-    note "interview-me did not fire"
+    note "clarifying-intent did not fire"
   fi
   echo "  full event order:"
   printf '%s\n' "$events" | sed 's/^/    /'

@@ -82,7 +82,7 @@
   {
     "split": "validation",
     "should_trigger": false,
-    "expect": "interview-me",
+    "expect": "clarifying-intent",
     "query": "Looks good, nice work. Though I'd want it to handle the offline case too at some point."
   },
   {
