@@ -19,11 +19,6 @@
 # from untrusted input.
 
 set -uo pipefail
-if [ -n "${SDLC_SKILLS_EVALS_ROOT:-}" ]; then
-  lab_root="$SDLC_SKILLS_EVALS_ROOT"
-else
-  lab_root="$(cd "$(dirname "$0")/.." && pwd)"
-fi
 
 [ "${1:-}" = "-h" ] || [ "${1:-}" = "--help" ] && {
   echo "usage: bin/grade <arm-run-dir>"; exit 0; }

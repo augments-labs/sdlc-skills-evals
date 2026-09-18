@@ -10,6 +10,8 @@ fails=0
 ok() { printf '  ok    %s\n' "$1"; }
 bad() { printf '  FAIL  %s\n' "$1"; fails=1; }
 has_fn() { # $1 file $2 function — 0 iff defined after sourcing
+  # $1 is a test input (our own launcher files), not a fixed path.
+  # shellcheck disable=SC1090
   ( source "$1" >/dev/null 2>&1 && command -v "$2" >/dev/null 2>&1 )
 }
 

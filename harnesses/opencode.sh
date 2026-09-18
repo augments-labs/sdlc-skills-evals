@@ -1,4 +1,7 @@
 #!/usr/bin/env bash
+# shellcheck disable=SC2034,SC2154
+# Contract: headers are read by runners via grep; globals (timeout_s, errlog,
+# plugin_dir, harness_home) are set by the runner sourcing this file.
 # OpenCode CLI adapter. Sourced by the runners — never executed directly.
 #
 # This file holds only what is true of the `opencode` CLI: how the plugin is

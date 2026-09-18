@@ -1,4 +1,7 @@
 #!/usr/bin/env bash
+# shellcheck disable=SC2034
+# ASSERT_MATCH is public API: scenarios read it after assert_file.
+# (File-wide: the assignments share lines with verdict calls.)
 # Assertion helpers for behavioural scenarios. Sourced, never executed.
 #
 # A scenario's assertions decide the verdict, and the verdict is this script's

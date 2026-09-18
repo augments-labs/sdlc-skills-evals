@@ -1,4 +1,7 @@
 #!/usr/bin/env bash
+# shellcheck disable=SC2034,SC2154
+# Contract: headers are read by runners via grep; globals (timeout_s, errlog,
+# plugin_dir, harness_home) are set by the runner sourcing this file.
 # Fake harness adapter for offline runner tests. Sourced, never executed.
 #
 # A TEST DOUBLE, not a model of any CLI: its canned stream is bare

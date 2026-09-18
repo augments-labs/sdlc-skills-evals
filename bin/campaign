@@ -176,8 +176,11 @@ if [ "${1:-}" = "--evals" ]; then
         elif [ "$arm" = old_skill ]; then src="$old_src"; else src=""; fi
         adapter_install "$src" || { echo "adapter install failed" >&2; exit 2; }
         if [ -n "${LAB_CREDENTIAL_SEED:-}" ] && [ -f "$LAB_CREDENTIAL_SEED/$harness/env" ]; then
-          # shellcheck source=/dev/null
-          set -a; source "$LAB_CREDENTIAL_SEED/$harness/env"; set +a
+          # Operator-owned seed file (KEY=VALUE lines); the path is validated above.
+          set -a
+          # shellcheck disable=SC1090
+          source "$LAB_CREDENTIAL_SEED/$harness/env"
+          set +a
         fi
         lab_seed_credentials "$run_base" "$harness" 2>/dev/null
         prompt_file="$(mktemp)"; printf '%s' "$prompt" > "$prompt_file"

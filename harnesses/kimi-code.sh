@@ -1,4 +1,7 @@
 #!/usr/bin/env bash
+# shellcheck disable=SC2034,SC2154
+# Contract: headers are read by runners via grep; globals (timeout_s, errlog,
+# plugin_dir, harness_home) are set by the runner sourcing this file.
 # Kimi Code CLI adapter. Sourced by the runners under tests/ — behavioural,
 # plugin-smoke, and trigger-eval — never executed directly.
 

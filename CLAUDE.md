@@ -19,8 +19,7 @@ whether a skill changes what gets built, one skill on one harness at a time.
   prices; the live loop runs nowhere here.
 - **Never spend tokens while building**: build tasks are verified offline
   (self-tests against a fake CLI, JSON shape, `shellcheck`). A live run
-  starts only after the maintainer records a go in
-  `.sdlc-skills/decision-ledger.md`.
+  starts only after the maintainer's recorded go.
 
 ## Always
 

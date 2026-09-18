@@ -1,4 +1,7 @@
 #!/usr/bin/env bash
+# shellcheck disable=SC2034
+# timeout_s/maxturns are consumed by adapters in this shell (and shape the
+# isolated opencode config); referenced indirectly, never in this file.
 # Trigger eval — scores a DESCRIPTION, not a run.
 #
 # THIS IS AN OPTIMIZATION INSTRUMENT, NOT A TEST. It lives under

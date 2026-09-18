@@ -31,7 +31,8 @@ rm -rf "$d"
 # lab_root is the directory above lib/
 [ "$(lab_root)" = "$(cd "$here/../.." && pwd -P)" ] \
   && ok "lab_root is the repo root" || bad "lab_root is the repo root (got $(lab_root))"
-# ... and the override wins
+# ... and the override wins (read indirectly by lab_root in lib/common.sh).
+# shellcheck disable=SC2034
 SDLC_SKILLS_EVALS_ROOT=/tmp/lab-root-override-sdlc-skills-evals
 [ "$(lab_root)" = "/tmp/lab-root-override-sdlc-skills-evals" ] \
   && ok "SDLC_SKILLS_EVALS_ROOT overrides lab_root" || bad "SDLC_SKILLS_EVALS_ROOT overrides lab_root"

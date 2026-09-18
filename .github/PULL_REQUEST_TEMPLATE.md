@@ -19,7 +19,7 @@ Low-evidence, speculative, or bundled PRs will be closed.
 
 ## Security and eval-lab checklist
 - [ ] This PR does not commit API keys, `.env` files, session logs, `results/`, or other run artifacts
-- [ ] This PR does not cause CI to run live agent evals, call model APIs, or require `ANTHROPIC_API_KEY` / `OPENAI_API_KEY`
+- [ ] This PR does not cause CI to run live agent evals or call model APIs, and needs no credentials or secrets in CI (this lab uses none — harnesses authenticate through the operator's own CLI setup, never through keys in the repo)
 - [ ] If this touches dangerous-mode backend flags, shell execution, environment inheritance, or log collection, the risk is explained below
 - [ ] If this adds or changes a scenario, setup helper, or assertion command, I considered how untrusted input could affect shell execution
 
@@ -32,7 +32,7 @@ Risk notes:
 
 ## Tests
 <!-- Paste exact commands and outcomes. At minimum, explain whether these ran:
-     shellcheck bin/* lib/*.sh harnesses/*.sh fixtures/*.sh
+     shellcheck -S warning <the explicit file list in .github/workflows/static.yml>
      bash bin/check
      per-file: bash lib/tests/<name>.sh
 
@@ -42,7 +42,3 @@ Risk notes:
 
 ## Human review
 - [ ] A maintainer has reviewed the complete proposed diff before merge
-
-## Record
-<!-- If this PR records a campaign, name the record directory under results/. -->
-- Record path: <!-- e.g. results/2026-09-18-sdd-opencode/ or "none" -->

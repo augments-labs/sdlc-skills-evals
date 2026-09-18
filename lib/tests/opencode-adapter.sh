@@ -63,6 +63,8 @@ adapter_ran "$fix/err.jsonl" && bad "error stream did not run" || ok "error stre
 plug="$fix/plugin-src"
 mkdir -p "$plug"
 maxturns=6 adapter_install "$plug"
+# Set by adapter_install (sourced above).
+# shellcheck disable=SC2154
 cfg="$harness_home/xdg/opencode/opencode.json"
 jq -e --arg p "$plug/.opencode/plugins/sdlc-skills.js" \
   '.plugin[0] == $p and .agent.build.steps == 6' "$cfg" >/dev/null \
