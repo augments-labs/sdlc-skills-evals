@@ -4,7 +4,7 @@
   "evals": [
     {
       "id": "ambiguous-auth",
-      "prompt": "Add auth to ~/work/billing-api.",
+      "prompt": "Add auth to ~/work/billing-api. Tenants will call it from their own backends, and the mobile app needs to keep users signed in across restarts.",
       "expected_output": "Asks what kind of auth is wanted (API keys, sessions, OAuth, which routes) before building anything — one question at a time — instead of guessing an auth scheme and implementing it.",
       "assertions": []
     },

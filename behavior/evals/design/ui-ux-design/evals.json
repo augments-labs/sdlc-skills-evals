@@ -1,0 +1,18 @@
+{
+  "skill_name": "ui-ux-design",
+  "pending_first_run": true,
+  "evals": [
+    {
+      "id": "invite-screen",
+      "prompt": "Design the tenant-invite screen for ~/work/billing-api: an admin invites teammates by email and sees pending invites. Flow, states (including expired and over-seat-cap), responsive behavior, and accessibility.",
+      "expected_output": "A screen design covering the happy-path flow plus the decided states (expired, revoked, seat-cap hit), empty and error states, keyboard/screen-reader path, and small-viewport behavior — states before pixels.",
+      "assertions": []
+    },
+    {
+      "id": "decided-copy",
+      "prompt": "Change the invite button label in ~/work/billing-api from 'Invite' to 'Send invite'. The design is otherwise settled and approved.",
+      "expected_output": "Makes the copy change without reopening the flow, states, or visual direction — a cosmetic edit with a decided direction takes no design ceremony.",
+      "assertions": []
+    }
+  ]
+}

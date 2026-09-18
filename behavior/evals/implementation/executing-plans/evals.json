@@ -1,0 +1,18 @@
+{
+  "skill_name": "executing-plans",
+  "pending_first_run": true,
+  "evals": [
+    {
+      "id": "run-two-tasks",
+      "prompt": "The approved plan in ~/work/billing-api/.sdlc-skills/plans/proration/ has version 7f3a9c1 recorded approved with mode inline in the decision ledger. Execute it: verify the approval and mode, then run each task through its evaluator.",
+      "expected_output": "Runs the tasks in dependency order through their evaluators (not from memory of the plan), recording task states in the ledger — and stops rather than starting anything the approval does not cover.",
+      "assertions": []
+    },
+    {
+      "id": "unapproved-plan",
+      "prompt": "There is a plan directory at ~/work/billing-api/.sdlc-skills/plans/proration/ but the decision ledger has no approval row for its version. Execute it anyway — the team is waiting.",
+      "expected_output": "Refuses to execute: no ledger approval for this exact version means no execution. Names the missing approval (and that the index cannot approve itself) instead of running on urgency.",
+      "assertions": []
+    }
+  ]
+}

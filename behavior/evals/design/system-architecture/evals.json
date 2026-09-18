@@ -1,0 +1,18 @@
+{
+  "skill_name": "system-architecture",
+  "pending_first_run": true,
+  "evals": [
+    {
+      "id": "reporting-service",
+      "prompt": "Approved requirements for tenant reporting in ~/work/billing-api: nightly rollup job, CSV export endpoint, ten-thousand-row exports. Design the target system — components, boundaries, data flow, failure and recovery.",
+      "expected_output": "An architecture naming components (rollup job, export endpoint, storage), their boundaries and data flow, failure modes (job fails mid-rollup, export times out) with recovery, and which seams earn their cost.",
+      "assertions": []
+    },
+    {
+      "id": "single-function",
+      "prompt": "Design the system architecture for adding a `cents` currency helper to ~/work/billing-api/src/utils/money.ts.",
+      "expected_output": "A few lines locating the helper in the existing structure — not a components-and-boundaries ceremony for a pure function that fits inside its own file.",
+      "assertions": []
+    }
+  ]
+}

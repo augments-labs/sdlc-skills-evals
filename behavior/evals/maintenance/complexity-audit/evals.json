@@ -1,0 +1,18 @@
+{
+  "skill_name": "complexity-audit",
+  "pending_first_run": true,
+  "evals": [
+    {
+      "id": "charge-maze",
+      "prompt": "Every change to ~/work/checkout-api/src/checkout.js now touches four files and breaks something unrelated. Audit it for accidental complexity: what is over-engineered, mis-owned, or custom machinery a library already provides?",
+      "expected_output": "An audit naming the specific accidental complexity (dead abstractions, wrong-layer logic, unused flexibility, reinvented helpers) with what to remove or relocate — and what to keep because it earns its place.",
+      "assertions": []
+    },
+    {
+      "id": "simple-module",
+      "prompt": "Audit ~/work/billing-api/src/utils/money.ts (a single pure cents() function, 3 lines) for accidental complexity.",
+      "expected_output": "Reports nothing to remove: three lines with no abstraction, no ownership, and no flexibility cannot be over-engineered — a clean bill, not findings invented to fill a report.",
+      "assertions": []
+    }
+  ]
+}

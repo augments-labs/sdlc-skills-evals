@@ -1,0 +1,18 @@
+{
+  "skill_name": "refactor-architecture",
+  "pending_first_run": true,
+  "evals": [
+    {
+      "id": "tangled-totals",
+      "prompt": "Every totals change in ~/work/checkout-api touches checkout.js, tax.js, and payments.js, and pricing logic lives in the HTTP layer. Redesign the structure so one small change stops touching many files.",
+      "expected_output": "A structural proposal with new boundaries (pricing out of the HTTP layer), what moves where, the migration order, and what stays — redesigning the structure because the structure is what makes change expensive.",
+      "assertions": []
+    },
+    {
+      "id": "local-cleanup",
+      "prompt": "The `handle` function in ~/work/billing-api/src/server.js has an unused variable and a long line. Refactor the architecture.",
+      "expected_output": "Cleans the function locally instead of redesigning anything: two lines of drift are a cleanup, not an architecture problem — says so and does the small thing.",
+      "assertions": []
+    }
+  ]
+}

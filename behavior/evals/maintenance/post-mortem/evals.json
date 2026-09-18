@@ -1,0 +1,18 @@
+{
+  "skill_name": "post-mortem",
+  "pending_first_run": true,
+  "evals": [
+    {
+      "id": "checkout-outage",
+      "prompt": "Last week's ~/work/checkout-api outage (lowercase regions mispriced, payments declined for six hours) is contained. Explain how it reached production and what prevents the next one — the suite was green the whole time.",
+      "expected_output": "A post-mortem tracing the escape path (tests only used uppercase regions, so the green suite proved nothing about the failing input), why impact grew (no region-canary, slow flag response), and concrete prevention — process and technical, not blame.",
+      "assertions": []
+    },
+    {
+      "id": "ordinary-bug",
+      "prompt": "Write a post-mortem for the typo fix in ~/work/billing-api/src/server.js yesterday (rout vs route, caught by the linter before commit).",
+      "expected_output": "Declines the post-mortem: an ordinary bug caught before production is not a production escape — no incident, no containment, no process failure to explain.",
+      "assertions": []
+    }
+  ]
+}

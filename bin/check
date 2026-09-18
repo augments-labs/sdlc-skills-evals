@@ -119,4 +119,22 @@ if grep -rl '^#!' "$docs_root" 2>/dev/null | grep -q .; then
 fi
 echo "check: docs ok"
 
+# E-7: evals inventory — every skill on the pinned plugin has an evals.json.
+# Scoped by --plugin <tree> (the tree to compare against); without it the
+# section is skipped with a note, so CI without a plugin checkout stays green.
+check_plugin=""
+[ "${1:-}" = "--plugin" ] && { check_plugin="${2:-}"; }
+if [ -n "$check_plugin" ]; then
+  while IFS= read -r sk; do
+    # implementation/subagent-driven-development is owned by E-12's
+    # evaluator (it authors the file); every other skill is E-7's.
+    [ "$sk" = "implementation/subagent-driven-development" ] && continue
+    [ -f "behavior/evals/$sk/evals.json" ] \
+      || { echo "check: FAIL missing evals for $sk"; exit 1; }
+  done < <(find "$check_plugin/skills" -name SKILL.md | sed 's|.*/skills/||; s|/SKILL.md||' | sort)
+  echo "check: evals inventory ok"
+else
+  echo "check: evals inventory skipped (no --plugin tree)"
+fi
+
 echo "check: OK"

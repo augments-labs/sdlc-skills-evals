@@ -1,0 +1,18 @@
+{
+  "skill_name": "data-model",
+  "pending_first_run": true,
+  "evals": [
+    {
+      "id": "invite-model",
+      "prompt": "Before implementing tenant invites in ~/work/billing-api, define the domain model: what an invite is, its states (pending/accepted/expired/revoked), the transitions, and the invariants (seat cap, expiry, single use).",
+      "expected_output": "A data-model section naming concepts, relationships, allowed state transitions, and invariants (e.g. expired invites never accept, seat count never exceeds cap) — semantics settled before implementation.",
+      "assertions": []
+    },
+    {
+      "id": "stateless-pricing",
+      "prompt": "Define the data model for the proration pricing rule in ~/work/billing-api: it is a pure function of (plan, days-used, days-in-cycle) with no stored state. There are no entities.",
+      "expected_output": "Models the stateless rule as stated (inputs, formula, rounding, edge inputs like zero-day cycles) without inventing entities or tables to fill a template — the model fits the domain, not vice versa.",
+      "assertions": []
+    }
+  ]
+}

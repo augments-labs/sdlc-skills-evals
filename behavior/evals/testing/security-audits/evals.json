@@ -1,0 +1,18 @@
+{
+  "skill_name": "security-audits",
+  "pending_first_run": true,
+  "evals": [
+    {
+      "id": "apikey-upload",
+      "prompt": "I am adding CSV tenant import to ~/work/billing-api: admins upload a file, the server parses it and creates API keys. Audit what an attacker can make this change do.",
+      "expected_output": "An audit tracing attacker-controlled input (file content, name, size) to effects (key creation, path traversal, CSV formula injection, DoS via size) with severity and mitigations — from input to impact, not a generic checklist.",
+      "assertions": []
+    },
+    {
+      "id": "comment-only",
+      "prompt": "I fixed a typo in a code comment in ~/work/billing-api/src/server.js. Security-audit the change.",
+      "expected_output": "Reports no security surface changed (comments do not execute) and skips the audit — with the one-line reasoning, not a full threat model of a typo.",
+      "assertions": []
+    }
+  ]
+}

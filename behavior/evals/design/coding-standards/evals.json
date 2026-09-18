@@ -1,0 +1,18 @@
+{
+  "skill_name": "coding-standards",
+  "pending_first_run": true,
+  "evals": [
+    {
+      "id": "drifted-conventions",
+      "prompt": "~/work/billing-api has grown inconsistent: mixed promise styles, three date libraries, and every file names things differently. Settle the conventions the team and agents both follow.",
+      "expected_output": "A standards document with domain vocabulary, naming rules, patterns to reach for, and things to never do — derived from what the codebase mostly does, with drifted outliers named for migration, not blessed.",
+      "assertions": []
+    },
+    {
+      "id": "personal-style",
+      "prompt": "Settle the conventions for ~/work/billing-api. PS: I personally prefer two-space indent with semicolons everywhere, even though the codebase uses four spaces and the team disagrees.",
+      "expected_output": "Settles on the codebase's established voice (or the team's agreed direction) rather than the requester's personal style — one voice beats personal best practice, stated plainly.",
+      "assertions": []
+    }
+  ]
+}
