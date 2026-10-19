@@ -153,10 +153,17 @@ if [ -z "$plugin" ]; then
     echo "no usable upstream pin: config/upstream-inventory.json names no commit" >&2; exit 2; }
   plugin_defaulted="1"
 fi
+# The tree a run installs, and where it came from. A directory is the
+# operator's own working tree and is used as it is, so the tree is the
+# path; a ref is pinned into a worktree, so the tree is the commit it
+# names. The runner names the tree, never a commit it would describe
+# content the run never measured.
 if [ -n "$plugin_defaulted" ]; then
+  plugin_tree="$plugin"
   plugin_note="config/upstream-inventory.json"
 else
-  plugin_note="--plugin $plugin"
+  plugin_tree="$(lab_pin_tree "$plugin" 2>/dev/null)" || plugin_tree="$plugin"
+  plugin_note="$(lab_pin_note --plugin "$plugin")"
 fi
 [ -n "$harnessdir_override" ] && harnessdir="$harnessdir_override"
 
@@ -175,17 +182,16 @@ sel='.[] | select($split == "all" or .split == $split)'
 
 if [ -n "$dry" ]; then
   # The plan, priced: no pin, no checkout, no CLI, no credential, no
-  # model. It names the pin a live run would use and the exact command
-  # it would be.
-  plan_pin="$(lab_pin_commit_of "$plugin" 2>/dev/null)" || plan_pin=""
-  [ -n "$plan_pin" ] || plan_pin="$plugin"
+  # model. It names the tree a live run would install and the exact
+  # command it would be.
   plan_cmd="bin/triggering --harness $(printf '%q' "$harness")"
   if [ -n "$all" ]; then plan_cmd="$plan_cmd --all"; else plan_cmd="$plan_cmd --skill $(printf '%q' "$skill")"; fi
   plan_cmd="$plan_cmd --plugin $(printf '%q' "$plugin") --runs $runs --jobs $jobs --split $split"
   plan_cmd="$plan_cmd --timeout $timeout_s --max-turns $maxturns"
   [ -n "$jsonout" ] && plan_cmd="$plan_cmd --json $(printf '%q' "$jsonout")"
   [ -z "$fixture" ] && plan_cmd="$plan_cmd --no-fixture"
-  echo "plugin   : $plan_pin  ($plugin_note)"
+  [ -n "$harnessdir_override" ] && plan_cmd="$plan_cmd --harness-dir $(printf '%q' "$harnessdir_override")"
+  echo "plugin   : $plugin_tree  ($plugin_note)"
   echo "harness  : $harness"
   echo "command  : $plan_cmd"
   total=0
@@ -329,10 +335,9 @@ if [ ! -d "$plugin" ]; then
     echo "cannot pin --plugin '$plugin' (the plugin checkout has no such commit)" >&2; exit 2; }
   plugin_src="$pin_dir/plugin"
 fi
-# The pin this run uses, named in the output: a commit, never a ref that
-# could move between the plan and the run.
-plugin_commit="$(lab_pin_commit_of "$plugin" 2>/dev/null)" || plugin_commit=""
-printf 'plugin   : %s  (%s)\n' "${plugin_commit:-$plugin}" "$plugin_note"
+# The tree this run installs, named in the output: a working tree when the
+# plugin is a directory, the pinned commit when it is a ref.
+printf 'plugin   : %s  (%s)\n' "$plugin_tree" "$plugin_note"
 
 for f in "${sets[@]}"; do
   subject="$(basename "$f" .json)"

@@ -109,6 +109,39 @@ else
   bad "a run pinned by commit does not use the moving checkout (installed '$install_path')"
 fi
 
+# --- what a run installs -----------------------------------------------------
+#
+# A directory plugin is the operator's own working tree and is used as it
+# is, so the runner names THAT TREE — not a commit it would describe
+# content the run never measured. A ref is pinned into a worktree, so the
+# tree is the commit it names.
+
+plugdir="$work/plugdir"
+mkdir -p "$plugdir"
+git -C "$plugdir" init -q
+git -C "$plugdir" -c user.name=t -c user.email=t@example.invalid commit -q --allow-empty -m tree
+out="$("$here/bin/triggering" --harness fake --harness-dir "$fake_h" --plugin "$plugdir" --skill yagni --dry-run 2>&1)"
+printf '%s' "$out" | grep -qF "plugin   : $plugdir" \
+  && ok "the dry run names the tree a directory plugin installs" \
+  || bad "the dry run names the tree a directory plugin installs"
+launch_log2="$work/launch2.log"
+out="$(SDLC_SKILLS_ROOT="$standin" FAKE_LAUNCH_LOG="$launch_log2" \
+  DESCRIPTIONS_ROOT="$work/descriptions" \
+  "$here/bin/triggering" --harness fake --harness-dir "$fake_h" --skill probe \
+  --plugin "$plugdir" --runs 1 --split train 2>&1)"
+printf '%s' "$out" | grep -qF "plugin   : $plugdir" \
+  && ok "a live run names the tree it installs" || bad "a live run names the tree it installs"
+if grep -q "^install $plugdir\$" "$launch_log2" 2>/dev/null; then
+  ok "a directory plugin installs the tree it names"
+else
+  bad "a directory plugin installs the tree it names"
+fi
+
+# the dry run names every option the live path honours
+out="$("$here/bin/triggering" --harness fake --harness-dir "$fake_h" --skill yagni --dry-run 2>&1)"
+printf '%s' "$out" | grep -qF -- "--harness-dir $fake_h" \
+  && ok "the dry run names the harness directory" || bad "the dry run names the harness directory"
+
 # --- the non-launching paths -------------------------------------------------
 #
 # A sentinel real CLI stands on PATH: it fails and records that it was
