@@ -238,15 +238,27 @@ git -C "$tag_repo" tag selftest-campaign-tag
 git -C "$tag_repo" -c user.name=t -c user.email=t@example.invalid commit -q --allow-empty -m two
 two="$(git -C "$tag_repo" rev-parse HEAD)"
 l4="selftest-tag-$$"
-SDLC_SKILLS_ROOT="$tag_repo" "$here/bin/campaign" new "$l4" --plugin selftest-campaign-tag \
+out="$(SDLC_SKILLS_ROOT="$tag_repo" "$here/bin/campaign" new "$l4" --plugin selftest-campaign-tag \
   --harness fake --arms green --scenarios probe-ok --runs 1 \
-  --scenario-dir "$here/lib/tests/fake-cli/scenarios" >/dev/null 2>&1
+  --scenario-dir "$here/lib/tests/fake-cli/scenarios" 2>&1)"
 d4="$(ls -d "$here"/results/*-"$l4" 2>/dev/null | head -1)"
 if [ -n "$d4" ] && jq -e --arg c "$one" '.plugin_commit == $c' "$d4/campaign.json" >/dev/null 2>&1; then
   ok "the campaign froze the commit the tag named"
 else
   bad "the campaign froze the commit the tag named"
 fi
+# the plan carries the COMMIT the ref named, not the ref: a ref that
+# moves after the campaign was prepared cannot become what the run
+# installs
+tag_plan="$(printf '%s\n' "$out" | sed -n 's/^command    : //p' | head -1)"
+case "$tag_plan" in
+  *"--plugin $one"*) ok "the campaign's plan carries the commit a ref names";;
+  *) bad "the campaign's plan carries the commit a ref names (got '$tag_plan')";;
+esac
+case "$tag_plan" in
+  *"--plugin selftest-campaign-tag"*) bad "the campaign's plan carries the commit, not the ref";;
+  *) ok "the campaign's plan carries the commit, not the ref";;
+esac
 git -C "$tag_repo" tag -f selftest-campaign-tag "$two" >/dev/null 2>&1
 SDLC_SKILLS_ROOT="$tag_repo" "$here/bin/campaign" run "$l4" >/dev/null 2>&1
 if [ -n "$d4" ] && jq -e --arg c "$one" '.plugin_commit == $c' \
@@ -541,7 +553,21 @@ eval_live_commit="$(git -C "$eval_live_repo" rev-parse HEAD)"
 eval_live_ws="selftest-evallive-$$"
 eval_live_log="$work/evallive.log"
 rm -f "$eval_live_log"
-eval_live_out="$(SDLC_SKILLS_ROOT="$eval_live_repo" FAKE_LAUNCH_LOG="$eval_live_log" \
+# the double keeps the real adapters' redirect: without it, the case
+# below would prove nothing about a real harness
+redirect_probe="$work/redirect.errlog"
+rm -f "$redirect_probe"
+bash -c 'set -uo pipefail; source "$1"; timeout_s=3; errlog="$2"; adapter_run_behavioral /tmp /tmp /tmp' \
+  _ "$here/lib/tests/fake-cli/fake.sh" "$redirect_probe" >/dev/null 2>&1
+if [ -f "$redirect_probe" ]; then
+  ok "the double keeps the real adapters' stderr redirect"
+else
+  bad "the double keeps the real adapters' stderr redirect (the launch wrote no errlog)"
+fi
+# a private TMPDIR, so the launch's own temporary files are observable
+eval_live_tmp="$work/evallive-tmp"
+mkdir -p "$eval_live_tmp"
+eval_live_out="$(TMPDIR="$eval_live_tmp" SDLC_SKILLS_ROOT="$eval_live_repo" FAKE_LAUNCH_LOG="$eval_live_log" \
   "$here/bin/campaign" --evals --harness fake --harness-dir "$here/lib/tests/fake-cli" \
   --plugin "$eval_live_commit" --skill yagni --campaign "$eval_live_ws" 2>&1)"
 eval_live_rc="$?"
@@ -562,9 +588,22 @@ else
   bad "the eval live path launches through the redirecting adapter (the launch never ran: no stream content)"
 fi
 case "$eval_live_out" in
-  *"errlog"*) bad "the eval live path launches with errlog set";;
+  *"unbound variable"*) bad "the eval live path launches with errlog set";;
   *) ok "the eval live path launches with errlog set";;
 esac
+# the campaign reports the launch's own status: a launch that died
+# before the CLI was called is not a run that exited 0
+case "$eval_live_out" in
+  *"run exit 0"*) ok "the eval live path reports a successful run";;
+  *) bad "the eval live path reports a successful run (got '$eval_live_out')";;
+esac
+# the launch's temporary files are removed on every exit path: the
+# errlog the redirect writes to must not outlive the campaign
+if [ -z "$(find "$eval_live_tmp" -maxdepth 1 -name 'tmp.*' -type f 2>/dev/null | head -1)" ]; then
+  ok "the eval live path leaves no launch file behind"
+else
+  bad "the eval live path leaves no launch file behind (a temporary file survived)"
+fi
 rm -rf "$here/workspaces/$eval_live_ws"
 
 # --- the live eval path stops before any launch ------------------------------
@@ -580,10 +619,16 @@ rc="$?"
   || bad "the live eval path refuses a default pin it cannot resolve (exit $rc)"
 printf '%s' "$out" | grep -qF "$inv_commit" \
   && ok "the refusal names the committed pin" || bad "the refusal names the committed pin"
-"$here/bin/campaign" --evals --harness fake --skill yagni --without old \
-  --campaign "$eval_ws_live" >/dev/null 2>&1
-[ "$?" -eq 2 ] && ok "the live eval path refuses --without old with no --old-plugin" \
-  || bad "the live eval path refuses --without old with no --old-plugin"
+out="$("$here/bin/campaign" --evals --harness fake --skill yagni --without old \
+  --campaign "$eval_ws_live" 2>&1)"
+rc="$?"
+# the refusal NAMES the missing option: an exit 2 alone would be
+# satisfied by any later refusal
+if [ "$rc" -eq 2 ] && printf '%s' "$out" | grep -qF -- "--old-plugin"; then
+  ok "the live eval path refuses --without old with no --old-plugin"
+else
+  bad "the live eval path refuses --without old with no --old-plugin (exit $rc, got '$out')"
+fi
 rm -rf "$here/workspaces/$eval_ws_live"
 
 # --- a campaign with no usable pin refuses -----------------------------------
@@ -635,14 +680,19 @@ rm -rf "$here"/results/*-"$l_nopin" "$here/workspaces/$eval_ws_live"
 # account") is not a figure and is not matched.
 
 money_re='(\$[0-9])|(\bUSD\b)|(\bEUR\b)|(\bGBP\b)|(€)|(£)'
-for text in "$("$here/bin/campaign" --help 2>&1)" \
-            "$("$here/bin/campaign" --evals --dry-run --harness fake --skill yagni 2>&1)"; do
-  if printf '%s\n' "$text" | grep -qE "$money_re"; then
-    bad "the help and the campaign preparation carry no monetary figure"
-  else
-    ok "the help and the campaign preparation carry no monetary figure"
-  fi
-done
+# The help and the preparation are checked apart: one label for two
+# texts would let a figure in either of them pass unnoticed.
+if printf '%s\n' "$("$here/bin/campaign" --help 2>&1)" | grep -qE "$money_re"; then
+  bad "the help carries no monetary figure"
+else
+  ok "the help carries no monetary figure"
+fi
+if printf '%s\n' "$("$here/bin/campaign" --evals --dry-run --harness fake --skill yagni 2>&1)" \
+    | grep -qE "$money_re"; then
+  bad "the campaign preparation carries no monetary figure"
+else
+  ok "the campaign preparation carries no monetary figure"
+fi
 
 # --- the non-launching paths -------------------------------------------------
 #
