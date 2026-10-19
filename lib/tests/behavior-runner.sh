@@ -135,10 +135,14 @@ printf '%s' "$out" | grep -qF -- "--timeout 1800" \
   --scenario-dir "$fake_s" --dry-run >/dev/null 2>&1
 [ "$?" -eq 2 ] && ok "the dry run refuses --arm none with --plugin" \
   || bad "the dry run refuses --arm none with --plugin"
-"$here/bin/behavior" --harness opencode --scenario no-such-scenario --arm green \
-  --scenario-dir "$fake_s" --dry-run >/dev/null 2>&1
-[ "$?" -eq 2 ] && ok "the dry run refuses a missing scenario" \
-  || bad "the dry run refuses a missing scenario"
+out="$("$here/bin/behavior" --harness opencode --scenario no-such-scenario --arm green \
+  --scenario-dir "$fake_s" --dry-run 2>&1)"
+rc="$?"
+if [ "$rc" -eq 2 ] && printf '%s' "$out" | grep -qF "no scenario at"; then
+  ok "the dry run refuses a missing scenario"
+else
+  bad "the dry run refuses a missing scenario (exit $rc, got '$out')"
+fi
 
 # the dry run reaches neither a real CLI nor the fake launcher
 launch_log="$work/launch.log"
