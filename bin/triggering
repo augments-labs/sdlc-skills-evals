@@ -186,7 +186,10 @@ if [ -n "$dry" ]; then
   # command it would be.
   plan_cmd="bin/triggering --harness $(printf '%q' "$harness")"
   if [ -n "$all" ]; then plan_cmd="$plan_cmd --all"; else plan_cmd="$plan_cmd --skill $(printf '%q' "$skill")"; fi
-  plan_cmd="$plan_cmd --plugin $(printf '%q' "$plugin") --runs $runs --jobs $jobs --split $split"
+  # The command carries the TREE the plan names — a commit for a ref, a
+  # path for a directory — so a ref that moves after the plan cannot
+  # change what the plan installs.
+  plan_cmd="$plan_cmd --plugin $(printf '%q' "$plugin_tree") --runs $runs --jobs $jobs --split $split"
   plan_cmd="$plan_cmd --timeout $timeout_s --max-turns $maxturns"
   [ -n "$jsonout" ] && plan_cmd="$plan_cmd --json $(printf '%q' "$jsonout")"
   [ -z "$fixture" ] && plan_cmd="$plan_cmd --no-fixture"

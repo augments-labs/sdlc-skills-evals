@@ -246,8 +246,11 @@ if [ -n "$dry" ]; then
     fi
   fi
   plan_cmd="bin/behavior --harness $(printf '%q' "$harness") --scenario $(printf '%q' "$scenario") --arm $arm"
-  [ "$arm" = green ] && plan_cmd="$plan_cmd --plugin $(printf '%q' "$plugin")"
-  [ "$arm" = red ] && plan_cmd="$plan_cmd --base $(printf '%q' "$base")"
+  # The command carries the TREE the plan names — a commit for a ref, a
+  # path for a directory — so a ref that moves after the plan cannot
+  # change what the plan installs.
+  [ "$arm" = green ] && plan_cmd="$plan_cmd --plugin $(printf '%q' "$plan_pin")"
+  [ "$arm" = red ] && plan_cmd="$plan_cmd --base $(printf '%q' "$plan_pin")"
   plan_cmd="$plan_cmd --timeout $timeout_s"
   [ -n "$tier_override" ] && plan_cmd="$plan_cmd --tier $(printf '%q' "$tier_override")"
   [ -n "$keep" ] && plan_cmd="$plan_cmd --keep"

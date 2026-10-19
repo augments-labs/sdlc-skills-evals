@@ -63,9 +63,21 @@ out="$("$here/bin/triggering" --harness codex --skill yagni --dry-run 2>&1)"
 out="$("$here/bin/triggering" --harness fake --skill yagni --dry-run 2>&1)"
 printf '%s' "$out" | grep -qF "$inv_commit" \
   && ok "the dry run names the pinned commit" || bad "the dry run names the pinned commit"
-printf '%s' "$out" | grep -qF "command  : bin/triggering --harness fake --skill yagni --plugin $inv_commit" \
-  && ok "the dry run names the exact planned invocation" \
-  || bad "the dry run names the exact planned invocation"
+
+# the plan is the whole command, option by option: a prefix match would
+# let a plan that drops an option pass
+plan_cmd() { # $1 output — the printed command line and nothing else
+  printf '%s\n' "$1" | sed -n 's/^command  : //p'
+}
+out="$("$here/bin/triggering" --harness fake --harness-dir "$fake_h" --skill yagni \
+  --runs 2 --jobs 1 --split train --timeout 30 --max-turns 4 --json "$work/out.json" \
+  --no-fixture --dry-run 2>&1)"
+want="bin/triggering --harness fake --skill yagni --plugin $inv_commit --runs 2 --jobs 1 --split train --timeout 30 --max-turns 4 --json $work/out.json --no-fixture --harness-dir $fake_h"
+if [ "$(plan_cmd "$out")" = "$want" ]; then
+  ok "the dry run names the whole planned invocation"
+else
+  bad "the dry run names the whole planned invocation (got '$(plan_cmd "$out")')"
+fi
 
 # an explicit plugin is named as it was given
 out="$("$here/bin/triggering" --harness fake --skill yagni --plugin "$standin" --dry-run 2>&1)"
@@ -141,6 +153,56 @@ fi
 out="$("$here/bin/triggering" --harness fake --harness-dir "$fake_h" --skill yagni --dry-run 2>&1)"
 printf '%s' "$out" | grep -qF -- "--harness-dir $fake_h" \
   && ok "the dry run names the harness directory" || bad "the dry run names the harness directory"
+
+# --- a ref plugin: the plan names a commit, and the plan installs it --------
+#
+# A ref moves. The plan resolves it once and its command carries the
+# commit it named, so a tag that moves afterwards cannot change what the
+# plan installs.
+
+tagrepo="$work/tags"
+mkdir -p "$tagrepo"
+git -C "$tagrepo" init -q
+git -C "$tagrepo" -c user.name=t -c user.email=t@example.invalid commit -q --allow-empty -m one
+tag_one="$(git -C "$tagrepo" rev-parse HEAD)"
+git -C "$tagrepo" tag selftest-plan-tag
+git -C "$tagrepo" -c user.name=t -c user.email=t@example.invalid commit -q --allow-empty -m two
+tag_two="$(git -C "$tagrepo" rev-parse HEAD)"
+out="$(SDLC_SKILLS_ROOT="$tagrepo" "$here/bin/triggering" --harness fake --harness-dir "$fake_h" \
+  --skill yagni --plugin selftest-plan-tag --dry-run 2>&1)"
+printf '%s' "$out" | grep -qF "plugin   : $tag_one" \
+  && ok "the dry run names the commit a ref resolves to" \
+  || bad "the dry run names the commit a ref resolves to"
+plan="$(plan_cmd "$out")"
+case "$plan" in
+  *"--plugin $tag_one"*) ok "the planned command carries the commit, not the ref";;
+  *) bad "the planned command carries the commit, not the ref (got '$plan')";;
+esac
+# the tag moves: the plan's command still resolves to the commit it named
+git -C "$tagrepo" tag -f selftest-plan-tag "$tag_two" >/dev/null 2>&1
+resolved="$(SDLC_SKILLS_ROOT="$tagrepo" "$here/bin/triggering" --harness fake --harness-dir "$fake_h" \
+  --skill yagni --plugin "$tag_one" --dry-run 2>&1 | sed -n 's/^plugin   : //p')"
+case "$resolved" in
+  "$tag_one"*) ok "the planned command still names the commit the plan froze";;
+  *) bad "the planned command still names the commit the plan froze (got '$resolved')";;
+esac
+
+# --- no invented monetary cost ----------------------------------------------
+#
+# The offline paths report the plan, never a price. The pattern is a
+# currency symbol followed by a digit, or a three-letter currency code —
+# the pricing LANGUAGE the help carries ("COST:", "priced") is not a
+# figure and is not matched.
+
+money_re='(\$[0-9])|(\bUSD\b)|(\bEUR\b)|(\bGBP\b)|(€)|(£)'
+for text in "$("$here/bin/triggering" --help 2>&1)" \
+            "$("$here/bin/triggering" --harness fake --skill yagni --dry-run 2>&1)"; do
+  if printf '%s\n' "$text" | grep -qE "$money_re"; then
+    bad "the help and the dry run carry no monetary figure"
+  else
+    ok "the help and the dry run carry no monetary figure"
+  fi
+done
 
 # --- the non-launching paths -------------------------------------------------
 #

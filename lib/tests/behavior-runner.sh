@@ -194,4 +194,143 @@ SDLC_SKILLS_ROOT="$standin" "$here/bin/behavior" --harness fake --scenario probe
 [ "$?" -eq 2 ] && ok "a run that cannot resolve the default pin refuses" \
   || bad "a run that cannot resolve the default pin refuses"
 
+# --- the plan is the whole command, option by option -------------------------
+#
+# The plan advertises the exact invocation. A prefix match would let a plan
+# that drops --record, --tier, --keep or a directory override pass, so the
+# whole line is compared.
+
+plan_cmd() { # $1 output — the printed command line and nothing else
+  printf '%s\n' "$1" | sed -n 's/^command    : //p'
+}
+
+rec3="$(mktemp -d)"
+out="$("$here/bin/behavior" --harness fake --scenario probe-ok --arm green --plugin "$standin" \
+  --tier small --keep --record "$rec3" --scenario-dir "$fake_s" --harness-dir "$fake_h" \
+  --timeout 60 --dry-run 2>&1)"
+want="bin/behavior --harness fake --scenario probe-ok --arm green --plugin $standin --timeout 60 --tier small --keep --record $rec3 --scenario-dir $fake_s --harness-dir $fake_h"
+if [ "$(plan_cmd "$out")" = "$want" ]; then
+  ok "the dry run names the whole planned invocation"
+else
+  bad "the dry run names the whole planned invocation (got '$(plan_cmd "$out")')"
+fi
+rm -rf "$rec3"
+
+# --- a ref plugin: the plan names a commit, and the plan installs it --------
+#
+# A ref moves. The plan resolves it once and its command carries the
+# commit it named, so a tag that moves afterwards cannot change what the
+# plan installs.
+
+tagrepo="$work/tags"
+mkdir -p "$tagrepo"
+git -C "$tagrepo" init -q
+git -C "$tagrepo" -c user.name=t -c user.email=t@example.invalid commit -q --allow-empty -m one
+tag_one="$(git -C "$tagrepo" rev-parse HEAD)"
+git -C "$tagrepo" tag selftest-plan-tag
+git -C "$tagrepo" -c user.name=t -c user.email=t@example.invalid commit -q --allow-empty -m two
+tag_two="$(git -C "$tagrepo" rev-parse HEAD)"
+out="$(SDLC_SKILLS_ROOT="$tagrepo" "$here/bin/behavior" --harness fake --scenario probe-ok \
+  --arm green --plugin selftest-plan-tag --dry-run "${base[@]}" 2>&1)"
+printf '%s' "$out" | grep -qF "pin        : $tag_one" \
+  && ok "the dry run names the commit a ref resolves to" \
+  || bad "the dry run names the commit a ref resolves to"
+plan="$(plan_cmd "$out")"
+case "$plan" in
+  *"--plugin $tag_one"*) ok "the planned command carries the commit, not the ref";;
+  *) bad "the planned command carries the commit, not the ref (got '$plan')";;
+esac
+# the tag moves: the plan's command still installs the commit it named
+git -C "$tagrepo" tag -f selftest-plan-tag "$tag_two" >/dev/null 2>&1
+rec4="$(mktemp -d)"
+( cd "$here" && SDLC_SKILLS_ROOT="$tagrepo" eval "$plan --record '$rec4'" ) >/dev/null 2>&1
+if [ -f "$rec4/runs/probe-ok-green-1.json" ]; then
+  jq -e --arg c "$tag_one" '.plugin_commit == $c' "$rec4/runs/probe-ok-green-1.json" >/dev/null \
+    && ok "the planned command installs the commit it named, not the moved tag" \
+    || bad "the planned command installs the commit it named, not the moved tag"
+else
+  bad "the planned command installs the commit it named, not the moved tag (no record)"
+fi
+rm -rf "$rec4"
+
+# --- the dry run's other arms -----------------------------------------------
+#
+# The none arm loads no skills, the red arm loads the base's tree, and an
+# unrunnable harness is reported rather than refused.
+
+out="$("$here/bin/behavior" --harness fake --scenario probe-ok --arm none --dry-run "${base[@]}" 2>&1)"
+printf '%s' "$out" | grep -qF "pin        : (none)" \
+  && ok "the dry run's none arm names no plugin" || bad "the dry run's none arm names no plugin"
+case "$(plan_cmd "$out")" in
+  *--plugin*) bad "the dry run's none arm command carries no --plugin";;
+  *) ok "the dry run's none arm command carries no --plugin";;
+esac
+
+out="$("$here/bin/behavior" --harness fake --scenario probe-ok --arm red --base "$plug_commit" \
+  --dry-run "${base[@]}" 2>&1)"
+printf '%s' "$out" | grep -qF "pin        : $plug_commit" \
+  && ok "the dry run's red arm names the base's tree" \
+  || bad "the dry run's red arm names the base's tree"
+plan="$(plan_cmd "$out")"
+case "$plan" in
+  *"--base $plug_commit"*) ok "the dry run's red arm command carries --base";;
+  *) bad "the dry run's red arm command carries --base (got '$plan')";;
+esac
+case "$plan" in
+  *--plugin*) bad "the dry run's red arm command carries no --plugin";;
+  *) ok "the dry run's red arm command carries no --plugin";;
+esac
+
+out="$("$here/bin/behavior" --harness codex --scenario probe-ok --arm green \
+  --scenario-dir "$fake_s" --dry-run 2>&1)"
+rc="$?"
+[ "$rc" -eq 0 ] && ok "the dry run reports an unrunnable harness" \
+  || bad "the dry run reports an unrunnable harness (exit $rc)"
+printf '%s' "$out" | grep -qF "unrunnable" \
+  && ok "the dry run names the unrunnable state" || bad "the dry run names the unrunnable state"
+
+# --- the default pin, end to end --------------------------------------------
+#
+# The pin a run resolves when the caller names none is the committed
+# commit. A stand-in clone that has it, and an inventory that names it,
+# make that path observable offline.
+
+default_repo="$work/default-root"
+mkdir -p "$default_repo"
+git -C "$default_repo" init -q
+git -C "$default_repo" -c user.name=t -c user.email=t@example.invalid commit -q --allow-empty -m pinned
+default_commit="$(git -C "$default_repo" rev-parse HEAD)"
+default_inv="$work/default-inventory.json"
+jq --arg c "$default_commit" '.upstream.commit = $c' "$here/config/upstream-inventory.json" > "$default_inv"
+rec5="$(mktemp -d)"
+INVENTORY_PATH="$default_inv" SDLC_SKILLS_ROOT="$default_repo" \
+  "$here/bin/behavior" --harness fake --scenario probe-ok --arm green --record "$rec5" "${base[@]}" \
+  >/dev/null 2>&1
+if [ -f "$rec5/runs/probe-ok-green-1.json" ]; then
+  jq -e --arg c "$default_commit" '.plugin_commit == $c and .verdict == "pass"' \
+    "$rec5/runs/probe-ok-green-1.json" >/dev/null \
+    && ok "a live run resolves the default pin end to end" \
+    || bad "a live run resolves the default pin end to end"
+else
+  bad "a live run resolves the default pin end to end (no record)"
+fi
+rm -rf "$rec5"
+
+# --- no invented monetary cost ----------------------------------------------
+#
+# The offline paths report the plan, never a price. The pattern is a
+# currency symbol followed by a digit, or a three-letter currency code —
+# the pricing LANGUAGE the help carries ("COST:", "priced") is not a
+# figure and is not matched.
+
+money_re='(\$[0-9])|(\bUSD\b)|(\bEUR\b)|(\bGBP\b)|(€)|(£)'
+for text in "$("$here/bin/behavior" --help 2>&1)" \
+            "$("$here/bin/behavior" --harness fake --scenario probe-ok --arm green --plugin "$standin" --dry-run "${base[@]}" 2>&1)"; do
+  if printf '%s\n' "$text" | grep -qE "$money_re"; then
+    bad "the help and the dry run carry no monetary figure"
+  else
+    ok "the help and the dry run carry no monetary figure"
+  fi
+done
+
 exit "$fails"
