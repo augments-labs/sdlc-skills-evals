@@ -25,6 +25,32 @@ run_check() { # $1 inventory path, $2 docs root, rest: extra bin/check arguments
     && check_rc=0 || check_rc=$?
 }
 
+run_check_full() { # $1 inventory path, $2 docs root — the whole gate, no --inventory
+  local inv="$1" docs="$2"
+  check_out="$(INVENTORY_PATH="$inv" DOCS_ROOT="$docs" bash bin/check 2>&1)" \
+    && check_rc=0 || check_rc=$?
+}
+
+record_field() { # $1 the table row's label — the number that row states
+  sed -n "s/^| $1 | \([0-9][0-9]*\).*/\1/p" "$DOC" | head -1
+}
+
+record_heading_count() { # $1 the heading text — the count its heading states
+  sed -n "s/^### $1 (\([0-9][0-9]*\))$/\1/p" "$DOC" | head -1
+}
+
+record_bullets() { # $1 the heading text — the paths the section under it lists
+  awk -v h="$1" '
+    index($0, "### " h " (") == 1 { inside = 1; next }
+    inside && /^##/ { inside = 0 }
+    inside && /^- `/ {
+      line = $0
+      sub(/^- `/, "", line)
+      sub(/`.*$/, "", line)
+      print line
+    }' "$DOC"
+}
+
 expect_pass() { # $1 label
   if [ "$check_rc" -eq 0 ]; then
     ok "$1"
@@ -95,6 +121,11 @@ if printf '%s\n' "$check_out" | grep -q "pinned scope only"; then
 else
   bad "the partial run says it ran the pinned scope only"
 fi
+
+# the default CI path runs the inventory check: a missing inventory fails
+# the whole gate, not only the --inventory mode
+run_check_full "$work/there-is-no-such-inventory.json" docs
+expect_fail "the default CI path runs the inventory check" "no upstream inventory"
 
 # --- drift against a tree built from the inventory --------------------------
 
@@ -311,5 +342,83 @@ if printf '%s\n' "$check_out" \
 else
   bad "the gate says so when there are no coverage gaps"
 fi
+
+# --- the inventory and the coverage record agree ----------------------------
+#
+# The record is the one statement in the repository that is independent of
+# the inventory, so it is what the inventory's membership is checked
+# against. The counts come from the record, never from a literal here.
+
+if [ -f "$DOC" ]; then
+  record_skills="$(record_field 'Canonical skills')"
+  record_harnesses="$(record_field 'Upstream harnesses')"
+  inventory_skills="$(jq '.skills | length' "$INV")"
+  inventory_harnesses="$(jq '.harnesses | length' "$INV")"
+  if [ "$record_skills" = "$inventory_skills" ] && [ "$record_harnesses" = "$inventory_harnesses" ]; then
+    ok "the inventory's counts equal the counts the coverage record states"
+  else
+    bad "the inventory's counts equal the counts the coverage record states (record $record_skills/$record_harnesses, inventory $inventory_skills/$inventory_harnesses)"
+  fi
+
+  record_eval_list="$(record_bullets 'Skills with no eval definition' | sort)"
+  record_adapter_list="$(record_bullets 'Harnesses with no lab adapter' | sort)"
+  record_eval_count="$(record_heading_count 'Skills with no eval definition')"
+  record_desc_count="$(record_heading_count 'Skills with no description set')"
+  record_adapter_count="$(record_heading_count 'Harnesses with no lab adapter')"
+
+  if [ "$record_eval_list" = "$reported_eval_gaps" ]; then
+    ok "the gate's eval-definition gaps equal the record's list"
+  else
+    bad "the gate's eval-definition gaps equal the record's list"
+  fi
+  # the record says the description gaps are the same skills
+  if [ "$record_eval_list" = "$reported_desc_gaps" ]; then
+    ok "the gate's description-set gaps equal the record's list"
+  else
+    bad "the gate's description-set gaps equal the record's list"
+  fi
+  if [ "$record_adapter_list" = "$reported_adapter_gaps" ]; then
+    ok "the gate's adapter gaps equal the record's list"
+  else
+    bad "the gate's adapter gaps equal the record's list"
+  fi
+  if [ "$record_eval_count" = "$record_desc_count" ] \
+      && [ "$(printf '%s\n' "$record_eval_list" | grep -c .)" = "$record_eval_count" ] \
+      && [ "$(printf '%s\n' "$record_adapter_list" | grep -c .)" = "$record_adapter_count" ]; then
+    ok "the record's own counts match the lists it enumerates"
+  else
+    bad "the record's own counts match the lists it enumerates"
+  fi
+fi
+
+# --- no skill is exempt from the coverage scan ------------------------------
+
+exempt_paths=""
+while IFS= read -r sk; do
+  if grep -qF -- "$sk" bin/check; then exempt_paths="$exempt_paths $sk"; fi
+done < <(jq -r '.skills[]' "$INV")
+if [ -z "$exempt_paths" ]; then
+  ok "bin/check names no inventory skill path (no skill is exempt from the coverage scan)"
+else
+  bad "bin/check names an inventory skill path (exempt:$exempt_paths)"
+fi
+
+# --- the shape predicates reject a malformed inventory ----------------------
+
+if mutate '.skills = []' "$work/m.json"; then
+  run_check "$work/m.json" docs
+  expect_fail "an inventory with no skills is rejected" "needs a non-empty skills array"
+fi
+if mutate '.harnesses = []' "$work/m.json"; then
+  run_check "$work/m.json" docs
+  expect_fail "an inventory with no harnesses is rejected" "needs a non-empty harnesses array"
+fi
+if mutate '.harnesses[0] = "tests/harnesses/x.sh"' "$work/m.json"; then
+  run_check "$work/m.json" docs
+  expect_fail "a harness row that is not a plain name is rejected" "harness rows must be plain names"
+fi
+mkdir -p "$work/not-a-tree"
+run_check "$INV" docs --plugin "$work/not-a-tree"
+expect_fail "a directory that is not an upstream tree is rejected" "is not an upstream tree"
 
 exit "$fails"
