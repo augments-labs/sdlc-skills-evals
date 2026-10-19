@@ -31,6 +31,10 @@ run_check_full() { # $1 inventory path, $2 docs root — the whole gate, no --in
     && check_rc=0 || check_rc=$?
 }
 
+run_check_ci() { # the gate exactly as CI runs it: no environment override at all
+  check_out="$(bash bin/check 2>&1)" && check_rc=0 || check_rc=$?
+}
+
 record_field() { # $1 the table row's label — the number that row states
   sed -n "s/^| $1 | \([0-9][0-9]*\).*/\1/p" "$DOC" | head -1
 }
@@ -127,6 +131,17 @@ fi
 run_check_full "$work/there-is-no-such-inventory.json" docs
 expect_fail "the default CI path runs the inventory check" "no upstream inventory"
 
+# the gate as CI runs it: no environment override, so the committed
+# inventory and the committed record are the ones that are checked
+run_check_ci
+expect_pass "the gate passes the way CI runs it"
+if printf '%s\n' "$check_out" | grep -q "^check: inventory ok$" \
+    && printf '%s\n' "$check_out" | grep -q "^check: OK$"; then
+  ok "the CI-shaped run resolves the committed inventory and ends with check: OK"
+else
+  bad "the CI-shaped run resolves the committed inventory and ends with check: OK"
+fi
+
 # --- drift against a tree built from the inventory --------------------------
 
 tree="$work/tree"
@@ -163,6 +178,16 @@ while IFS= read -r sk; do
 done < <(jq -r '.skills[]' "$INV")
 run_check "$INV" docs --plugin "$mirror"
 expect_pass "a packaged mirror is not counted as a canonical skill"
+
+# the upstream tree carries a README.md beside its harnesses: it is not a
+# harness, at any depth
+readme_tree="$work/readme-tree"
+cp -r "$tree" "$readme_tree"
+printf '# upstream harnesses\n' >"$readme_tree/tests/harnesses/README.md"
+mkdir -p "$readme_tree/tests/harnesses/nested"
+printf '# nested\n' >"$readme_tree/tests/harnesses/nested/README.md"
+run_check "$INV" docs --plugin "$readme_tree"
+expect_pass "a tree's harness README is not collected as a harness"
 
 # --- mutations of the inventory are rejected --------------------------------
 
@@ -270,6 +295,11 @@ if [ -f "$DOC" ]; then
   run_check "$INV" "$work/docs"
   expect_fail "a coverage record that drops a task mapping is rejected" "does not map E-7"
 
+  # the default CI path reaches the record check: a valid inventory and a
+  # record that lost a row must fail the whole gate
+  run_check_full "$INV" "$work/docs"
+  expect_fail "the default CI path checks the coverage record" "does not map E-7"
+
   # the mapping is read from the Verdict cell: a verdict word in another
   # cell of the row does not satisfy it
   mkdir -p "$work/docs-empty-verdict"
@@ -331,6 +361,22 @@ else
   bad "the gate reports exactly the skills without a description set"
 fi
 
+# the printed counters are the signal V3-CORPORA reads when it re-arms the
+# list: each must equal the length of the list it summarises
+counters_of() { # $1 gate output — the three numbers of the coverage line
+  printf '%s\n' "$1" \
+    | sed -n 's/^check: coverage checked: \([0-9][0-9]*\) skills without an eval definition, \([0-9][0-9]*\) without a description set, \([0-9][0-9]*\) without a lab adapter.*/\1 \2 \3/p'
+}
+list_length() { # $1 list — how many entries it has
+  printf '%s\n' "$1" | grep -c .
+}
+if [ "$(counters_of "$check_out")" = \
+    "$(list_length "$reported_eval_gaps") $(list_length "$reported_desc_gaps") $(list_length "$reported_adapter_gaps")" ]; then
+  ok "the coverage counters equal the reported lists' lengths"
+else
+  bad "the coverage counters equal the reported lists' lengths (counters '$(counters_of "$check_out")')"
+fi
+
 # the coverage line is printed even when there is nothing to report: an
 # empty result is an explicit zero, not the absence of a scan
 zero_inv="$work/zero-gap-inventory.json"
@@ -341,6 +387,11 @@ if printf '%s\n' "$check_out" \
   ok "the gate says so when there are no coverage gaps"
 else
   bad "the gate says so when there are no coverage gaps"
+fi
+if [ "$(counters_of "$check_out")" = "0 0 0" ]; then
+  ok "the zero-gap run's counters are zero"
+else
+  bad "the zero-gap run's counters are zero (counters '$(counters_of "$check_out")')"
 fi
 
 # --- the inventory and the coverage record agree ----------------------------
@@ -391,16 +442,35 @@ if [ -f "$DOC" ]; then
   fi
 fi
 
-# --- no skill is exempt from the coverage scan ------------------------------
+# --- no skill is excluded from the coverage scan ----------------------------
+#
+# The guard reads the gate's code, not its prose: a comment that names a
+# skill path is not an exclusion, and only an exclusion may name one.
 
-exempt_paths=""
-while IFS= read -r sk; do
-  if grep -qF -- "$sk" bin/check; then exempt_paths="$exempt_paths $sk"; fi
-done < <(jq -r '.skills[]' "$INV")
+skill_paths_named_in() { # $1 file — the inventory skill paths it names outside a comment
+  local file="$1" sk found="" code
+  code="$(sed -e 's/^[[:space:]]*#.*$//' -e 's/[[:space:]]#.*$//' "$file")"
+  while IFS= read -r sk; do
+    if printf '%s\n' "$code" | grep -qF -- "$sk"; then found="$found $sk"; fi
+  done < <(jq -r '.skills[]' "$INV")
+  printf '%s' "$found"
+}
+
+exempt_paths="$(skill_paths_named_in bin/check)"
 if [ -z "$exempt_paths" ]; then
-  ok "bin/check names no inventory skill path (no skill is exempt from the coverage scan)"
+  ok "bin/check names no inventory skill path (no skill is excluded from the coverage scan)"
 else
-  bad "bin/check names an inventory skill path (exempt:$exempt_paths)"
+  bad "bin/check names an inventory skill path outside a comment:$exempt_paths"
+fi
+
+# a comment naming a skill path is not an exclusion
+cp bin/check "$work/check-with-comment"
+printf '# the implementation/subagent-driven-development scenario is authored by E-12\n' \
+  >>"$work/check-with-comment"
+if [ -z "$(skill_paths_named_in "$work/check-with-comment")" ]; then
+  ok "a comment naming a skill path is not an exclusion"
+else
+  bad "a comment naming a skill path is not an exclusion"
 fi
 
 # --- the shape predicates reject a malformed inventory ----------------------
