@@ -16,6 +16,17 @@ fails=0
 ok() { printf '  ok    %s\n' "$1"; }
 bad() { printf '  FAIL  %s\n' "$1"; fails=1; }
 
+# The operator's own home and session bus, captured BEFORE the test replaces
+# HOME: an adapter must hand its CLI no route to either. The Linux secret
+# service — where the Antigravity CLI keeps its account token — is reachable
+# only through the session bus, so a bus address that points at the
+# operator's is a route to the operator's credential.
+OPERATOR_HOME="${HOME:-}"
+OPERATOR_DBUS="${DBUS_SESSION_BUS_ADDRESS:-}"
+
+# Every agent CLI name the adapters drive, and the name the fake answers to.
+CLI_NAMES="agy claude codex cursor-agent devin grok hermes kimi muse opencode pi"
+
 INVENTORY="${INVENTORY_PATH:-$lab/config/upstream-inventory.json}"
 command -v jq >/dev/null 2>&1 || { echo "needs \`jq\`" >&2; exit 2; }
 [ -f "$INVENTORY" ] || { echo "no upstream inventory at $INVENTORY" >&2; exit 2; }
@@ -38,6 +49,8 @@ fi
 # usage:   the number the activation fixture must yield, or "-"
 # resume:  yes when the adapter implements adapter_continue_behavioral
 # tier:    yes when the adapter implements adapter_model
+# cli:     the name the CLI answers to — the fake is installed under it, and
+#          it is the only agent CLI the adapter may reach
 expect() { # $1 harness  $2 key
   case "$1/$2" in
     antigravity/skill) echo "using-sdlc-skills";;
@@ -46,66 +59,77 @@ expect() { # $1 harness  $2 key
     antigravity/usage) echo "125";;
     antigravity/resume) echo "yes";;
     antigravity/tier) echo "no";;
+    antigravity/cli) echo "agy";;
     claude-code/skill) echo "using-sdlc-skills";;
     claude-code/install) echo "";;
     claude-code/launch) echo "claude";;
     claude-code/usage) echo "165";;
     claude-code/resume) echo "yes";;
     claude-code/tier) echo "yes";;
+    claude-code/cli) echo "claude";;
     codex/skill) echo "sdlc-skills:using-sdlc-skills";;
     codex/install) echo "codex plugin marketplace add";;
     codex/launch) echo "codex exec";;
     codex/usage) echo "60";;
     codex/resume) echo "yes";;
     codex/tier) echo "no";;
+    codex/cli) echo "codex";;
     cursor/skill) echo "using-sdlc-skills";;
     cursor/install) echo "";;
     cursor/launch) echo "cursor-agent";;
     cursor/usage) echo "-";;
     cursor/resume) echo "yes";;
     cursor/tier) echo "no";;
+    cursor/cli) echo "cursor-agent";;
     devin/skill) echo "using-sdlc-skills";;
     devin/install) echo "devin plugins install";;
     devin/launch) echo "devin";;
     devin/usage) echo "81";;
     devin/resume) echo "yes";;
     devin/tier) echo "no";;
+    devin/cli) echo "devin";;
     grok/skill) echo "using-sdlc-skills";;
     grok/install) echo "grok plugin install";;
     grok/launch) echo "grok";;
     grok/usage) echo "120";;
     grok/resume) echo "no";;
     grok/tier) echo "no";;
+    grok/cli) echo "grok";;
     hermes/skill) echo "sdlc-skills:using-sdlc-skills";;
     hermes/install) echo "hermes plugins install";;
     hermes/launch) echo "hermes";;
     hermes/usage) echo "102";;
     hermes/resume) echo "yes";;
     hermes/tier) echo "no";;
+    hermes/cli) echo "hermes";;
     kimi-code/skill) echo "sdlc-skills:using-sdlc-skills";;
     kimi-code/install) echo "";;
     kimi-code/launch) echo "kimi";;
     kimi-code/usage) echo "-";;
     kimi-code/resume) echo "yes";;
     kimi-code/tier) echo "no";;
+    kimi-code/cli) echo "kimi";;
     muse/skill) echo "using-sdlc-skills";;
     muse/install) echo "";;
     muse/launch) echo "muse exec";;
     muse/usage) echo "90";;
     muse/resume) echo "yes";;
     muse/tier) echo "no";;
+    muse/cli) echo "muse";;
     opencode/skill) echo "using-git-worktrees";;
     opencode/install) echo "";;
     opencode/launch) echo "opencode run";;
     opencode/usage) echo "100";;
     opencode/resume) echo "yes";;
     opencode/tier) echo "no";;
+    opencode/cli) echo "opencode";;
     pi/skill) echo "using-sdlc-skills";;
     pi/install) echo "pi install";;
     pi/launch) echo "pi";;
     pi/usage) echo "120";;
     pi/resume) echo "yes";;
     pi/tier) echo "no";;
+    pi/cli) echo "pi";;
     *) echo "";;
   esac
 }
@@ -166,6 +190,25 @@ EOS
   # The fake CLI is the ONLY agent CLI on PATH: the real ones are not
   # reachable, so an adapter that reaches one fails instead of launching it.
   export PATH="$bin:/usr/bin:/bin"
+
+  # --- the real CLIs are not reachable: PROVED, not assumed -----------------
+  # Every agent CLI name must resolve into the fake's own bin directory. A
+  # real CLI of the same name that shadowed the fake — a PATH built the
+  # other way round, or an operator's bin directory ahead of the fake's —
+  # fails here, loudly, instead of being launched.
+  local cli resolved shadowed=""
+  for cli in $CLI_NAMES; do
+    resolved="$(command -v "$cli" 2>/dev/null)"
+    case "$resolved" in
+      "$bin/$cli") ;;
+      *) shadowed="$shadowed $cli(${resolved:-none})";;
+    esac
+  done
+  if [ -z "$shadowed" ]; then
+    ok "every agent CLI name resolves into the fake's bin directory"
+  else
+    bad "every agent CLI name resolves into the fake's bin directory — not the fake:$shadowed"
+  fi
 
   # shellcheck source=/dev/null
   source "$hh/$h.sh" || { bad "$h sources"; return 1; }
@@ -244,6 +287,97 @@ EOS
     bad "$h behavioural launch succeeds against the fake CLI (see $work/beh.err)"
   fi
   unset FAKE_STDOUT
+
+  # --- which CLI answered, and what it was handed ---------------------------
+  # The fake logs to $FAKE_HARNESS_LOG when the environment carries it, and to
+  # $HOME/.fake-harness.log when it does not: several adapters launch their
+  # CLI with a cleared environment, and the log has to survive that. Both
+  # sources are read here, in one file, so the assertions below see every
+  # call the adapter made.
+  cat "$log" 2>/dev/null > "$work/all.log"
+  cat "$harness_home/.fake-harness.log" 2>/dev/null >> "$work/all.log"
+  # The fake records three things per invocation: the call, the RESOLVED path
+  # of the binary that answered, and the environment it was launched with.
+  # Together they are the proof that the CLI the adapter reached is the fake
+  # in this test's bin directory, and that no other agent CLI was reached.
+  local want_cli; want_cli="$(expect "$h" cli)"
+  local called; called="$(awk '/^call /{print $2}' "$work/all.log" 2>/dev/null | sort -u | tr '\n' ' ')"
+  if [ "$called" = "$want_cli " ]; then
+    ok "$h reached only $want_cli, and nothing else"
+  else
+    bad "$h reached only $want_cli, and nothing else (reached: ${called:-none})"
+  fi
+  if awk -v b="$bin/" '/^at /{ if (index($3, b) == 1) found = 1 } END { exit !found }' "$work/all.log"; then
+    ok "$h the CLI that answered is the fake in this test's bin directory"
+  else
+    bad "$h the CLI that answered is the fake in this test's bin directory"
+  fi
+
+  # --- the operator's own credential is out of reach -------------------------
+  # The throwaway home holds no credential — the fake writes none — so the
+  # only credential a launch could use is the operator's. A CLI that is
+  # pointed at a directory inside the operator's home is therefore a run that
+  # can read the operator's token, so none of the variables a CLI keeps its
+  # home in may point there.
+  #
+  # The environment of the LAST invocation — the behavioural launch. The
+  # install may probe the CLI (a version check) outside the isolated
+  # environment, and that probe is not the launch under test.
+  local envlines="$work/env.txt"
+  awk '/^call /{ n = 0; delete e } /^env /{ e[++n] = $0 }
+       END { for (i = 1; i <= n; i++) print e[i] }' "$work/all.log" > "$envlines" 2>/dev/null || true
+  local launched_home
+  launched_home="$(sed -n "s/^env $want_cli HOME=//p" "$envlines" | tail -1)"
+  if [ -n "$launched_home" ] && [ "$launched_home" != "$OPERATOR_HOME" ]; then
+    ok "$h the CLI ran with a home that is not the operator's"
+  else
+    bad "$h the CLI ran with a home that is not the operator's (HOME=${launched_home:-none})"
+  fi
+  local leaks="" key val
+  for key in HOME XDG_CONFIG_HOME XDG_DATA_HOME XDG_CACHE_HOME XDG_RUNTIME_DIR \
+             CODEX_HOME CLAUDE_CONFIG_DIR KIMI_CODE_HOME GROK_HOME HERMES_HOME; do
+    val="$(sed -n "s/^env $want_cli $key=//p" "$envlines" | tail -1)"
+    case "$val" in
+      "$OPERATOR_HOME"|"$OPERATOR_HOME"/*) leaks="$leaks $key";;
+    esac
+  done
+  if [ -z "$leaks" ]; then
+    ok "$h no home the CLI was given points into the operator's home"
+  else
+    bad "$h no home the CLI was given points into the operator's home (leaks:$leaks)"
+  fi
+  if [ "$h" = "antigravity" ]; then
+    # The Antigravity CLI authenticates from the operating system's secure
+    # keyring — on Linux the secret service, reached over the D-Bus session
+    # bus — so a bus address that points at the operator's session is a route
+    # to the operator's account, and no HOME redirect reaches it.
+    if [ -n "$OPERATOR_DBUS" ] && grep -qF "$OPERATOR_DBUS" "$envlines" 2>/dev/null; then
+      bad "antigravity the launch cannot reach the operator's session bus"
+    else
+      ok "antigravity the launch cannot reach the operator's session bus"
+    fi
+    # The CLI writes into ~/.gemini/, so the isolation has to hold for the
+    # directories it uses, and the self-updater has to be off.
+    local agy_dirs_ok=1
+    for key in XDG_CONFIG_HOME XDG_DATA_HOME XDG_CACHE_HOME XDG_RUNTIME_DIR DBUS_SESSION_BUS_ADDRESS; do
+      val="$(sed -n "s/^env $want_cli $key=//p" "$envlines" | tail -1)"
+      val="${val#unix:path=}"
+      case "$val" in
+        "$harness_home"/*) ;;
+        *) agy_dirs_ok=0;;
+      esac
+    done
+    if [ "$agy_dirs_ok" -eq 1 ]; then
+      ok "antigravity every directory the CLI uses is inside the throwaway home"
+    else
+      bad "antigravity every directory the CLI uses is inside the throwaway home"
+    fi
+    if grep -qx "env $want_cli AGY_CLI_DISABLE_AUTO_UPDATE=true" "$envlines"; then
+      ok "antigravity the self-updater is disabled"
+    else
+      bad "antigravity the self-updater is disabled"
+    fi
+  fi
 
   # --- the parsers -----------------------------------------------------------
   local skill; skill="$(expect "$h" skill)"

@@ -32,13 +32,67 @@
 #     lib/tests/fixtures/harnesses/antigravity/. No skill-loading run has
 #     been recorded on this machine, so `runnable` stays `no` until a real
 #     run replaces the label.
+#
+# ISOLATION — where the CLI's credential and its writes live, and how this
+# adapter keeps both inside the throwaway home. Read from the official CLI
+# documentation on 2026-10-20 (docs/install, docs/cli/troubleshooting,
+# docs/cli/features, docs/settings) and from the pinned upstream's measured
+# install path:
+#
+#   1. THE HOME. The CLI keeps its configuration, its plugins and its state
+#      under `~/.gemini/` — `~/.gemini/antigravity-cli/settings.json`,
+#      `~/.gemini/antigravity-cli/plugins/<plugin>/`,
+#      `~/.gemini/config/config.json`. HOME and every XDG directory below
+#      point into the throwaway home, so those paths are read and written
+#      there. The upstream measured the install path at
+#      `$HOME/.gemini/config/plugins/` on agy 1.3.3 (upstream 638040d).
+#   2. THE KEYRING. The CLI authenticates from the operating system's secure
+#      keyring — on Linux the secret service, reached over the D-Bus session
+#      bus: "the CLI attempts to access your operating system's native secure
+#      keyring ... If a valid token profile is found, the CLI authenticates
+#      your session silently" (docs/install). That store belongs to the
+#      operator's session and no HOME redirect reaches it, so the bus is
+#      pointed at a socket inside the throwaway home that nothing serves, and
+#      XDG_RUNTIME_DIR — where a secret-service client looks for the bus when
+#      it is given no address — points there too. The operator's bus is
+#      unreachable: the launch finds no token profile and cannot sign in as
+#      the operator, which is what a probe under a throwaway HOME did once
+#      (one real model call, disclosed in the task report).
+#   3. THE SELF-UPDATER. It writes into `~/.gemini/antigravity-cli/updater/`
+#      and runs in the background; the documented AGY_CLI_DISABLE_AUTO_UPDATE
+#      switch turns it off (docs/cli/troubleshooting).
+#
+# NOT PROVED HERE: agy 1.4.0's own resolution of the home when $HOME is
+# overridden — the upstream measured it for the install path on 1.3.3, and
+# the credential path was never observed on this machine. If 1.4.0 resolves
+# `~` from the passwd database instead, no environment variable redirects it
+# and a real run on this machine is the only thing that settles it. That is
+# why `runnable` stays `no` and why antigravity is named as needing context
+# in the task report.
 
 adapter_name='antigravity'
 
 runnable=no
-runnable_reason="agy 1.4.0 is on PATH and its print-mode envelope was observed here, but no skill-loading run has been recorded on this machine"
+runnable_reason="agy 1.4.0 is on PATH and its print-mode envelope was observed here, but no skill-loading run has been recorded on this machine and agy 1.4.0's own resolution of the home directory is not established offline"
 permission_flags="--mode accept-edits"
 capabilities="subagent-loads-skills=unknown(documentation) nesting-depth=unknown(documentation) tier-settable=no(documentation) session-start-event=no(documentation) post-compaction-event=no(documentation)"
+
+# The isolation assignments, read by agy_env below. Kept as a function
+# because harness_home is only known after adapter_install has run.
+AGY_ENV=()
+agy_env() { # fills AGY_ENV with the isolation assignments (see the header)
+  AGY_ENV=(
+    "HOME=$harness_home"
+    "XDG_CONFIG_HOME=$harness_home/.config"
+    "XDG_DATA_HOME=$harness_home/.local/share"
+    "XDG_CACHE_HOME=$harness_home/.cache"
+    "XDG_RUNTIME_DIR=$harness_home/.runtime"
+    "DBUS_SESSION_BUS_ADDRESS=unix:path=$harness_home/.runtime/bus"
+    "AGY_CLI_DISABLE_AUTO_UPDATE=true"
+  )
+  mkdir -p "$harness_home/.runtime" "$harness_home/.config" \
+           "$harness_home/.local/share" "$harness_home/.cache"
+}
 
 _libdir="$(cd "$(dirname "${BASH_SOURCE[0]}")/../lib" && pwd)"
 # shellcheck source=../lib/common.sh
@@ -54,6 +108,12 @@ adapter_check() {
 # there satisfies, and the root's AGENTS.md and GEMINI.md would load as
 # rules.
 #
+# The install runs under the isolation environment (see the header): it
+# inherits nothing, so it can reach neither the operator's config home nor
+# the operator's keyring bus. The install itself needs no sign-in and no
+# network (measured by the upstream on agy 1.3.3), so isolation costs it
+# nothing.
+#
 # The plugin's always-on rule is the routing channel on this CLI — the
 # upstream records that antigravity runs no session-start hook from a plugin
 # — so its presence in the installed copy is checked here: a plugin that
@@ -63,7 +123,9 @@ adapter_check() {
 adapter_install() { # $1 plugin source ("" = NONE arm, load nothing)
   harness_home="$(mktemp -d)"
   [ -n "${1:-}" ] || return 0
-  ( cd "$harness_home" && HOME="$harness_home" agy plugin install "$1/plugins/sdlc-skills" \
+  agy_env
+  ( cd "$harness_home" && exec env -i PATH="$PATH" "${AGY_ENV[@]}" \
+      TMPDIR="${TMPDIR:-/tmp}" agy plugin install "$1/plugins/sdlc-skills" \
       </dev/null ) >>"$errlog" 2>&1 || {
     echo "agy plugin install failed (see $errlog)" >&2; return 1; }
   local installed="$harness_home/.gemini/config/plugins/sdlc-skills"
@@ -130,14 +192,16 @@ adapter_usage() { # $1 stream file
 
 # Activation probe: one query, bounded by the wall clock. `--mode plan` is
 # antigravity's read-only execution mode; the workdir is a disposable
-# fixture and HOME is the throwaway run home.
+# fixture and the launch runs under the isolation environment (header), so
+# the operator's credential is not within reach.
 #
 # `--print` takes the prompt AS ITS VALUE: a space-separated `--print` takes
 # the next flag as its prompt (agy 1.4.0 says so itself), so the prompt is
 # attached.
 adapter_run_activation() { # $1 workdir  $2 prompt  $3 stream  $4... extra flags
   local wd="$1" prompt="$2" stream="$3"; shift 3
-  ( cd "$wd" && exec timeout "$timeout_s" env -i PATH="$PATH" HOME="$harness_home" \
+  agy_env
+  ( cd "$wd" && exec timeout "$timeout_s" env -i PATH="$PATH" "${AGY_ENV[@]}" \
       TMPDIR="${TMPDIR:-/tmp}" \
       agy --output-format stream-json --mode plan "$@" --print="$prompt" ) \
     < /dev/null > "$stream" 2>>"$errlog"
@@ -145,9 +209,10 @@ adapter_run_activation() { # $1 workdir  $2 prompt  $3 stream  $4... extra flags
 
 # WRITE access — a behavioural arm must be able to produce artifacts. Safe:
 # the run happens in a disposable fixture copy under TMPDIR, never in a real
-# checkout, under the throwaway run home.
+# checkout, under the throwaway run home and the isolation environment.
 adapter_run_behavioral() { # $1 workdir  $2 opening file  $3 stream
-  ( cd "$1" && exec timeout "$timeout_s" env -i PATH="$PATH" HOME="$harness_home" \
+  agy_env
+  ( cd "$1" && exec timeout "$timeout_s" env -i PATH="$PATH" "${AGY_ENV[@]}" \
       TMPDIR="${TMPDIR:-/tmp}" \
       agy --output-format stream-json --mode accept-edits --print="$(cat "$2")" ) \
     < /dev/null > "$3" 2>>"$errlog"
@@ -162,7 +227,8 @@ adapter_continue_behavioral() { # $1 workdir  $2 prompt  $3 new stream  $4 prior
   conversation_id="$(jq -r 'select(.conversation_id? != null) | .conversation_id' \
     "$prior" 2>/dev/null | head -1)"
   [ -n "$conversation_id" ] || { echo "Antigravity stream contains no resumable conversation id" >&2; return 2; }
-  ( cd "$wd" && exec timeout "$timeout_s" env -i PATH="$PATH" HOME="$harness_home" \
+  agy_env
+  ( cd "$wd" && exec timeout "$timeout_s" env -i PATH="$PATH" "${AGY_ENV[@]}" \
       TMPDIR="${TMPDIR:-/tmp}" \
       agy --output-format stream-json --mode accept-edits \
         --conversation "$conversation_id" --print="$prompt" ) \

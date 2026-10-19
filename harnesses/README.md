@@ -76,7 +76,7 @@ that has never seen this CLI's own stream.
 
 | Harness | Stream format | Parser shape grounded in | Fixture provenance | Runtime status |
 | --- | --- | --- | --- | --- |
-| antigravity | `agy --output-format stream-json` (NDJSON) | the envelope observed on **agy 1.4.0**; the skill record's field names are the CLI's own `localagentcore.OutputEvent` tags (`skill_name`, `tool_name`) in the 1.4.0 binary | synthetic, mirroring the observed envelope | envelope observed; **skill record unverified** |
+| antigravity | `agy --output-format stream-json` (NDJSON) | the envelope observed on **agy 1.4.0**; the skill record's field names are the CLI's own `localagentcore.OutputEvent` tags (`skill_name`, `tool_name`) in the 1.4.0 binary; the isolation mechanism is the official CLI documentation (docs/install, docs/cli/troubleshooting), read 2026-10-20 | synthetic, mirroring the observed envelope | envelope observed; **skill record and isolation unverified** |
 | claude-code | `claude -p --output-format stream-json` | **observed** on Claude Code 2.1.x (assistant `tool_use` records, terminal `result` usage) | synthetic, mirroring an observed stream | observed |
 | codex | `codex exec --json` | **observed** on codex-cli 0.163.0 (`item.*` records, `turn.completed` usage) | synthetic, mirroring an observed stream | observed |
 | cursor | `cursor-agent --print --output-format stream-json` | the emitter in **cursor-agent 2026.10.01's own shipped bundle** (`assistant`, `tool_call` with `tool_call.toolName` / `argsJson`) | synthetic | **unverified** |
@@ -109,12 +109,31 @@ where it is neither, the runner exports `$LAB_CREDENTIAL_SEED/<harness>/env`
 before invoking. Raw homes and credential files are never committed, and
 the adapter tests never read one: they run against a throwaway `HOME`.
 
+**Antigravity is the odd one: its token is not a file.** The Antigravity CLI
+authenticates from the operating system's secure keyring — on Linux the
+secret service, reached over the D-Bus session bus ("the CLI attempts to
+access your operating system's native secure keyring … If a valid token
+profile is found, the CLI authenticates your session silently",
+<https://antigravity.google/docs/install>, read 2026-10-20). That store
+belongs to the operator's session, and no home redirect reaches it, so the
+`antigravity` adapter launches the CLI with the session bus pointed at a
+socket inside the throwaway home that nothing serves, and with
+`XDG_RUNTIME_DIR` inside the throwaway home as well (where a secret-service
+client looks for the bus when it is given no address). The operator's bus is
+therefore unreachable from a launch, and a launch has no credential at all.
+The self-updater, which writes into `~/.gemini/antigravity-cli/updater/`, is
+switched off with the documented `AGY_CLI_DISABLE_AUTO_UPDATE`
+(<https://antigravity.google/docs/cli/troubleshooting>). A real run of this
+harness needs a credential the adapter deliberately does not carry; that is
+part of what the verification procedure below settles.
+
 ## The adapter tests
 
 - `lib/tests/harnesses.sh` — the contract: the adapter set equals the
   inventory exactly, every launcher defines the five required functions and
-  the four header fields, and every `permission_flags` value names a flag
-  the file passes.
+  the four header fields, every `permission_flags` value names a flag
+  the file passes, and no launcher names a literal path to a CLI
+  installation.
 - `lib/tests/harness-adapters.sh` — the matrix: for every harness, a fake
   CLI on `PATH` proves the install, the none arm's isolation, the launch,
   the positive and negative activation, the malformed, empty, refused and
@@ -126,3 +145,10 @@ the adapter tests never read one: they run against a throwaway `HOME`.
 
 The fake CLI records every invocation, and the real CLIs are not on the
 tests' `PATH`: an adapter that reaches one fails instead of launching it.
+The matrix test proves that rather than assuming it — every agent CLI name
+must resolve into the fake's own bin directory, the fake's log must show
+that the binary which answered was the fake, and no other agent CLI may
+appear in that log at all. The same log carries the environment each launch
+was given, so the test can show that no home the CLI was handed points into
+the operator's home, and that the Antigravity launch cannot reach the
+operator's session bus.

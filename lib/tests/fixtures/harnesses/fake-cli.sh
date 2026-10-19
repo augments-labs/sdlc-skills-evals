@@ -11,6 +11,15 @@
 # The log goes to $FAKE_HARNESS_LOG when the environment carries it, and to
 # $HOME/.fake-harness.log when it does not: several adapters launch their CLI
 # with a cleared environment (HOME only), and the log has to survive that.
+#
+# Three records per invocation, so a test can PROVE which binary answered and
+# what it was handed:
+#   call <name> <args>   — the invocation itself
+#   at   <name> <path>   — the resolved path of this binary, so the log shows
+#                          the fake answered and not a real CLI
+#   env  <name> KEY=VAL  — the environment the CLI was launched with, one
+#                          variable per line (so a value with spaces stays
+#                          readable)
 set -uo pipefail
 
 self="$(basename "$0")"
@@ -18,9 +27,8 @@ _log="${FAKE_HARNESS_LOG:-}"
 [ -n "$_log" ] || { [ -n "${HOME:-}" ] && _log="$HOME/.fake-harness.log"; }
 if [ -n "$_log" ]; then
   printf 'call %s %s\n' "$self" "$*" >> "$_log" 2>/dev/null || true
-  printf 'env %s HOME=%s CODEX_HOME=%s GROK_HOME=%s HERMES_HOME=%s XDG_CONFIG_HOME=%s XDG_DATA_HOME=%s\n' \
-    "$self" "${HOME:-}" "${CODEX_HOME:-}" "${GROK_HOME:-}" "${HERMES_HOME:-}" \
-    "${XDG_CONFIG_HOME:-}" "${XDG_DATA_HOME:-}" >> "$_log" 2>/dev/null || true
+  printf 'at %s %s\n' "$self" "$0" >> "$_log" 2>/dev/null || true
+  env | sort | sed "s/^/env $self /" >> "$_log" 2>/dev/null || true
 fi
 
 _state="${HOME:-}/.fake-state"

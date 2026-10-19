@@ -67,6 +67,17 @@ for h in "${adapters[@]}"; do
   else
     bad "$name capabilities carry their evidence class"
   fi
+  # an adapter reaches its CLI by NAME, through PATH. A literal path to a
+  # home or a system directory would reach the operator's real CLI whatever
+  # the caller's PATH says, so it is refused here: every path an adapter
+  # names is a variable expansion.
+  literal="$(grep -nE '(^|[^$[:alnum:]_./-])/(home|Users|root|opt|srv|var|Applications)(/|[^[:alnum:]_.-]|$)' \
+    "$hh/$name" | head -3)"
+  if [ -z "$literal" ]; then
+    ok "$name names no literal path to a CLI installation"
+  else
+    bad "$name names no literal path to a CLI installation: $literal"
+  fi
 done
 
 # --- runnable values are honest -----------------------------------------------
