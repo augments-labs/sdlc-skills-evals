@@ -76,11 +76,19 @@ _fake_body() { # $1 workdir $2 prompt $3 stream — the canned behavior
 adapter_run_activation() { # $1 workdir $2 prompt $3 stream
   # Mirrors the real adapters: the wall clock bounds the run, and the
   # runner sees 124 on timeout.
+  # FAKE_LAUNCH_LOG records that the launcher was reached, so a test can
+  # tell a run that launched from a path that only planned.
+  if [ -n "${FAKE_LAUNCH_LOG:-}" ]; then
+    printf 'activation %s\n' "$1" >> "$FAKE_LAUNCH_LOG"
+  fi
   export -f _fake_body _fake_emit_ok
   timeout "${timeout_s:-5}" bash -c '_fake_body "$@"' _ "$@"
 }
 
 adapter_run_behavioral() { # $1 workdir $2 opening file $3 stream
+  if [ -n "${FAKE_LAUNCH_LOG:-}" ]; then
+    printf 'behavioral %s\n' "$1" >> "$FAKE_LAUNCH_LOG"
+  fi
   adapter_run_activation "$1" "behavioral" "$3"
 }
 

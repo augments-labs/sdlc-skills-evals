@@ -26,6 +26,14 @@
 # One skill on one harness is the primary flow:
 #   bin/behavior --harness opencode --scenario subagent-driven-development --arm green
 #
+# The pin a run uses is the committed upstream commit
+# (config/upstream-inventory.json) unless --plugin names another: a
+# commit, never a mutable tag, so a run never selects new work from a
+# moving ref.
+#
+# --dry-run plans a run and launches nothing: no CLI, no credential, no
+# model. It names the pin and the exact command a live run would be.
+#
 # Real API calls, roughly a full agent task per arm. Manual tool, never CI.
 
 set -uo pipefail
@@ -40,7 +48,9 @@ bin/behavior — did the skill change what got BUILT?
                       green  skills from --plugin <path|ref>
                       red    skills from a worktree at --base
                       none   no skills at all (--plugin rejected)
-  --plugin P        path or git ref of the plugin tree (green arm, required)
+  --plugin P        path or git ref of the plugin tree (green arm;
+                    default: the pinned upstream commit, a commit and
+                    never a tag)
   --base REF        git ref the red arm checks out in SDLC_SKILLS_ROOT
                     (red arm, required; supersedes --plugin for red)
   --timeout SEC     per-arm wall clock                           (default: 1800)
@@ -52,6 +62,8 @@ bin/behavior — did the skill change what got BUILT?
                     a test seam for offline runs)
   --harness-dir D   harness directory (default: harnesses;
                     a test seam for offline runs)
+  --dry-run         print the plan — the pin and the exact command — and
+                    launch nothing: no CLI, no credential, no model
   --help            this text
 
 Exit codes: 0 the scenario's own assertions passed · 1 they failed
@@ -60,7 +72,21 @@ Exit codes: 0 the scenario's own assertions passed · 1 they failed
 Examples:
   bin/behavior --harness opencode --scenario writing-specs --arm green --plugin ../sdlc-skills
   bin/behavior --harness opencode --scenario writing-specs --arm none
+  bin/behavior --harness opencode --scenario writing-specs --arm green --dry-run
 EOF
+  _pin_line
+}
+
+# The pin a run uses when the caller names none: the committed upstream
+# commit, read from config/upstream-inventory.json. It is a commit, never
+# a mutable tag, so a run never selects new work from a moving ref.
+_pin_line() {
+  local pin
+  if pin="$(lab_inventory_commit 2>/dev/null)"; then
+    printf 'default pin: %s  (config/upstream-inventory.json)\n' "$pin"
+  else
+    printf 'default pin: (unreadable — config/upstream-inventory.json names no commit)\n'
+  fi
 }
 
 # --- roots and seams ---------------------------------------------------------
@@ -81,6 +107,7 @@ source "$lab_root/lib/home-env.sh"
 scenario="" harness="" arm="" plugin="" base="" record_dir=""
 timeout_s="${BH_DEFAULT_TIMEOUT:-1800}"
 tier_override="" keep="" scenario_dir="" harness_dir="" harnessdir_given=""
+scenariodir_given="" dry=""
 for a in "$@"; do
   [ "$a" = "-h" ] || [ "$a" = "--help" ] && { usage; exit 0; }
 done
@@ -95,8 +122,9 @@ while [ "$#" -gt 0 ]; do
     --tier) tier_override="$2"; shift 2;;
     --keep) keep="1"; shift;;
     --record) record_dir="$2"; shift 2;;
-    --scenario-dir) scenario_dir="$2"; shift 2;;
+    --scenario-dir) scenario_dir="$2"; scenariodir_given="1"; shift 2;;
     --harness-dir) harness_dir="$2"; harnessdir_given="1"; shift 2;;
+    --dry-run) dry="1"; shift;;
     *) echo "unknown argument: $1" >&2; exit 2;;
   esac
 done
@@ -114,8 +142,12 @@ case "$timeout_s" in ''|*[!0-9]*|0) echo "--timeout needs a positive integer" >&
 if [ "$arm" = none ] && [ -n "$plugin" ]; then
   echo "--arm none loads no skills: --plugin rejected" >&2; exit 2
 fi
+# The green arm's plugin: the caller's, or the pinned upstream commit.
+plugin_defaulted=""
 if [ "$arm" = green ] && [ -z "$plugin" ]; then
-  echo "--arm green needs --plugin <path|ref>" >&2; exit 2
+  plugin="$(lab_inventory_commit 2>/dev/null)" || {
+    echo "no usable upstream pin: config/upstream-inventory.json names no commit" >&2; exit 2; }
+  plugin_defaulted="1"
 fi
 if [ "$arm" = red ] && [ -z "$base" ]; then
   echo "--arm red needs --base REF" >&2; exit 2
@@ -126,13 +158,100 @@ harness_file="$harness_dir/$harness.sh"
 # shellcheck source=/dev/null
 source "$harness_file"
 
-# An unrunnable harness is indeterminate, never launched.
+# An unrunnable harness is indeterminate, never launched. A dry run reports
+# the state instead of refusing it: the plan is still worth reading.
+harness_state="runnable"
 if [ "$(grep '^runnable=' "$harness_file" | sed 's/^runnable=//')" != "yes" ]; then
   reason="$(grep '^runnable_reason=' "$harness_file" | sed 's/^runnable_reason=//')"
+  harness_state="unrunnable — ${reason:-unrunnable}"
+  if [ -z "$dry" ]; then
+    echo "scenario   : $scenario"
+    echo "adapter    : $harness"
+    echo "verdict    : indeterminate(stage=harness) — ${reason:-unrunnable}"
+    exit 2
+  fi
+fi
+
+# --- scenario ----------------------------------------------------------------
+scenario_file="$scenario_dir/$scenario.sh"
+[ -f "$scenario_file" ] || { echo "no scenario at $scenario_file" >&2; exit 2; }
+# The runner sources the assertion library AND the fixtures BEFORE the
+# scenario; scenarios themselves source nothing and stay byte-identical
+# across layouts.
+# shellcheck source=../lib/prelude.sh
+source "$lab_root/lib/prelude.sh"
+# shellcheck source=/dev/null
+source "$lab_root/fixtures/fixtures.sh"
+# shellcheck source=/dev/null
+source "$scenario_file"
+for fn in scenario_opening scenario_setup scenario_assert; do
+  command -v "$fn" >/dev/null 2>&1 || { echo "$scenario.sh defines no $fn()" >&2; exit 2; }
+done
+if command -v scenario_followups >/dev/null 2>&1; then need_continue=1; followups=(); else need_continue=""; followups=(); fi
+if [ -n "${tier_override:-}" ]; then scenario_model_tier="$tier_override"; fi
+if [ -n "${scenario_model_tier:-}" ] && ! command -v adapter_model >/dev/null 2>&1; then
+  echo "$scenario asks for model tier '$scenario_model_tier' and $harness binds no tiers" >&2; exit 2
+fi
+if [ -n "${scenario_harnesses:-}" ]; then
+  case " ${scenario_harnesses} " in
+    *" $harness "*) : ;;
+    *) echo "$scenario is bound to: $scenario_harnesses — not $harness" >&2; exit 2;;
+  esac
+fi
+if [ -n "$need_continue" ] && ! command -v adapter_continue_behavioral >/dev/null 2>&1; then
+  echo "$harness adapter cannot continue a multi-turn behavioural session" >&2; exit 2
+fi
+
+# --- the plan, and nothing else ----------------------------------------------
+#
+# A dry run resolves the pin, names the exact command a live run would be,
+# and launches nothing: no CLI, no credential, no model, no run home.
+
+if [ -n "$dry" ]; then
+  plan_pin=""; plan_note=""; plan_ref=""
+  case "$arm" in
+    none)
+      plan_pin="(none)"
+      plan_note="the none arm loads no skills"
+      ;;
+    red)
+      plan_ref="$base"
+      plan_note="--base $base"
+      ;;
+    green)
+      plan_ref="$plugin"
+      if [ -n "$plugin_defaulted" ]; then
+        plan_note="config/upstream-inventory.json"
+      else
+        plan_note="--plugin $plugin"
+      fi
+      ;;
+  esac
+  if [ -n "$plan_ref" ]; then
+    resolved="$(lab_pin_commit_of "$plan_ref" 2>/dev/null)" || resolved=""
+    if [ -n "$resolved" ]; then
+      plan_pin="$resolved"
+    else
+      plan_pin="$plan_ref"
+      plan_note="$plan_note; a run resolves it against the plugin checkout"
+    fi
+  fi
+  plan_cmd="bin/behavior --harness $(printf '%q' "$harness") --scenario $(printf '%q' "$scenario") --arm $arm"
+  [ "$arm" = green ] && plan_cmd="$plan_cmd --plugin $(printf '%q' "$plugin")"
+  [ "$arm" = red ] && plan_cmd="$plan_cmd --base $(printf '%q' "$base")"
+  [ -n "$tier_override" ] && plan_cmd="$plan_cmd --tier $(printf '%q' "$tier_override")"
+  [ -n "$keep" ] && plan_cmd="$plan_cmd --keep"
+  [ -n "$record_dir" ] && plan_cmd="$plan_cmd --record $(printf '%q' "$record_dir")"
+  [ -n "$scenariodir_given" ] && plan_cmd="$plan_cmd --scenario-dir $(printf '%q' "$scenario_dir")"
+  [ -n "$harnessdir_given" ] && plan_cmd="$plan_cmd --harness-dir $(printf '%q' "$harness_dir")"
   echo "scenario   : $scenario"
-  echo "adapter    : $harness"
-  echo "verdict    : indeterminate(stage=harness) — ${reason:-unrunnable}"
-  exit 2
+  echo "adapter    : $harness ($harness_state)"
+  echo "arm        : $arm"
+  echo "pin        : $plan_pin  ($plan_note)"
+  echo "planned    : 1 run"
+  echo "command    : $plan_cmd"
+  echo "note       : a dry run plans only — no CLI is called, no credential is read, no model is called"
+  exit 0
 fi
 
 # Millisecond clock without `date +%N` (not portable: uutils ignores the
@@ -164,36 +283,6 @@ eval "$(lab_home_env "$run_dir")" || exit 2
 require_tool jq timeout || exit 2
 if ! adapter_check; then
   echo "verdict    : indeterminate(stage=harness) — adapter unavailable" >&2; exit 2
-fi
-
-# --- scenario ----------------------------------------------------------------
-scenario_file="$scenario_dir/$scenario.sh"
-[ -f "$scenario_file" ] || { echo "no scenario at $scenario_file" >&2; exit 2; }
-# The runner sources the assertion library AND the fixtures BEFORE the
-# scenario; scenarios themselves source nothing and stay byte-identical
-# across layouts.
-# shellcheck source=../lib/prelude.sh
-source "$lab_root/lib/prelude.sh"
-# shellcheck source=/dev/null
-source "$lab_root/fixtures/fixtures.sh"
-# shellcheck source=/dev/null
-source "$scenario_file"
-for fn in scenario_opening scenario_setup scenario_assert; do
-  command -v "$fn" >/dev/null 2>&1 || { echo "$scenario.sh defines no $fn()" >&2; exit 2; }
-done
-if command -v scenario_followups >/dev/null 2>&1; then need_continue=1; followups=(); else need_continue=""; followups=(); fi
-if [ -n "${tier_override:-}" ]; then scenario_model_tier="$tier_override"; fi
-if [ -n "${scenario_model_tier:-}" ] && ! command -v adapter_model >/dev/null 2>&1; then
-  echo "$scenario asks for model tier '$scenario_model_tier' and $harness binds no tiers" >&2; exit 2
-fi
-if [ -n "${scenario_harnesses:-}" ]; then
-  case " ${scenario_harnesses} " in
-    *" $harness "*) : ;;
-    *) echo "$scenario is bound to: $scenario_harnesses — not $harness" >&2; exit 2;;
-  esac
-fi
-if [ -n "$need_continue" ] && ! command -v adapter_continue_behavioral >/dev/null 2>&1; then
-  echo "$harness adapter cannot continue a multi-turn behavioural session" >&2; exit 2
 fi
 
 # Track which assertion verbs actually ran, for the manifest check. The
