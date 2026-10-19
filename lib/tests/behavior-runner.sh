@@ -169,7 +169,10 @@ FAKE_LAUNCH_LOG="$launch_log" "$here/bin/behavior" --harness fake --scenario pro
 # the commit, never a ref that could move.
 
 rec2="$(mktemp -d)"
-SDLC_SKILLS_ROOT="$standin" "$here/bin/behavior" --harness fake --scenario probe-ok \
+install_log="$work/install.log"
+rm -f "$install_log"
+SDLC_SKILLS_ROOT="$standin" FAKE_LAUNCH_LOG="$install_log" \
+  "$here/bin/behavior" --harness fake --scenario probe-ok \
   --arm green --plugin "$plug_commit" --record "$rec2" "${base[@]}" >/dev/null 2>&1
 f2="$rec2/runs/probe-ok-green-1.json"
 if [ -f "$f2" ]; then
@@ -179,7 +182,54 @@ if [ -f "$f2" ]; then
 else
   bad "a run pinned by commit is recorded"
 fi
+# the tree the run INSTALLED is the tree the pin names: a run can pin
+# the right commit, record the right commit, and measure another tree
+green_install="$(sed -n 's/^install //p' "$install_log" 2>/dev/null | head -1)"
+green_head="$(sed -n 's/^install-head //p' "$install_log" 2>/dev/null | head -1)"
+if [ "$green_head" = "$plug_commit" ]; then
+  ok "the run installs the tree the pin names"
+else
+  bad "the run installs the tree the pin names (installed '$green_install' at '$green_head')"
+fi
+if [ -n "$green_install" ] && [ "$green_install" != "$standin" ]; then
+  ok "the run does not install the moving checkout"
+else
+  bad "the run does not install the moving checkout (installed '$green_install')"
+fi
+if [ -f "$f2" ]; then
+  jq -e --arg c "$green_head" '.plugin_commit == $c' "$f2" >/dev/null \
+    && ok "the record and the installed tree agree" || bad "the record and the installed tree agree"
+else
+  bad "the record and the installed tree agree (no record)"
+fi
 rm -rf "$rec2"
+
+# the red arm installs the BASE's tree: the two arms measure two trees
+base_repo="$work/baserepo"
+mkdir -p "$base_repo"
+git -C "$base_repo" init -q
+git -C "$base_repo" -c user.name=t -c user.email=t@example.invalid commit -q --allow-empty -m base
+base_commit="$(git -C "$base_repo" rev-parse HEAD)"
+rec2b="$(mktemp -d)"
+red_log="$work/redinstall.log"
+rm -f "$red_log"
+SDLC_SKILLS_ROOT="$base_repo" FAKE_LAUNCH_LOG="$red_log" \
+  "$here/bin/behavior" --harness fake --scenario probe-ok \
+  --arm red --base "$base_commit" --record "$rec2b" "${base[@]}" >/dev/null 2>&1
+red_install="$(sed -n 's/^install //p' "$red_log" 2>/dev/null | head -1)"
+red_head="$(sed -n 's/^install-head //p' "$red_log" 2>/dev/null | head -1)"
+if [ "$red_head" = "$base_commit" ]; then
+  ok "the red arm installs the base's tree"
+else
+  bad "the red arm installs the base's tree (installed '$red_install' at '$red_head')"
+fi
+if [ -n "$red_install" ] && [ "$red_install" != "$green_install" ] \
+   && [ "$red_head" != "$green_head" ]; then
+  ok "the green and the red arm install two different trees"
+else
+  bad "the green and the red arm install two different trees (green '$green_install' at '$green_head', red '$red_install' at '$red_head')"
+fi
+rm -rf "$rec2b"
 
 # the default pin is the committed one, and a run that cannot resolve it
 # says so instead of running something else

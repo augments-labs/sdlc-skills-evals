@@ -243,6 +243,27 @@ d10="$(ls -d "$here"/results/*-"$l10" 2>/dev/null | head -1)"
 git -C "$prov_dir" -c user.name=t -c user.email=t@example.invalid commit -q --allow-empty -m two
 prov_two="$(git -C "$prov_dir" rev-parse HEAD)"
 SDLC_SKILLS_ROOT="$base_dir" "$here/bin/campaign" run "$l10" >/dev/null 2>&1
+# the arms are isolated on the TREE, not only on the record's field: the
+# green arm measures the plugin tree, the red arm the base's tree
+arms_log="$work/arms-install.log"
+rm -f "$arms_log"
+SDLC_SKILLS_ROOT="$base_dir" FAKE_LAUNCH_LOG="$arms_log" \
+  "$here/bin/campaign" run "$l10" >/dev/null 2>&1
+green_install="$(sed -n 's/^install //p' "$arms_log" 2>/dev/null | sed -n 1p)"
+red_install="$(sed -n 's/^install //p' "$arms_log" 2>/dev/null | sed -n 2p)"
+green_head="$(sed -n 's/^install-head //p' "$arms_log" 2>/dev/null | sed -n 1p)"
+red_head="$(sed -n 's/^install-head //p' "$arms_log" 2>/dev/null | sed -n 2p)"
+if [ "$green_install" = "$prov_dir" ] && [ "$green_head" = "$prov_two" ]; then
+  ok "the green arm installs the tree the campaign names"
+else
+  bad "the green arm installs the tree the campaign names (installed '$green_install' at '$green_head')"
+fi
+if [ -n "$red_install" ] && [ "$red_head" = "$base_one" ] \
+   && [ "$red_install" != "$green_install" ] && [ "$red_head" != "$green_head" ]; then
+  ok "the red arm installs the base's tree, not the green arm's"
+else
+  bad "the red arm installs the base's tree, not the green arm's (installed '$red_install' at '$red_head')"
+fi
 if [ -n "$d10" ] && "$here/bin/campaign" report "$l10" >/dev/null 2>&1; then
   grep -q "plugin commit measured: $prov_two" "$d10/summary.md" \
     && ok "the summary names the commit the green arm measured" \
