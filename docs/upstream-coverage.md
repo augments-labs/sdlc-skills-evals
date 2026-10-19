@@ -10,9 +10,12 @@ This record answers two questions for whoever picks the lab up next.
    the commit that proves it.
 
 The predecessor plan's task list is entirely unchecked. Those boxes are not
-evidence of absence: the decision ledger rows and the commits below are. A
-campaign that waited for a recorded go was never half-written code — it was
-finished machinery waiting for a run that only the user starts.
+evidence of absence: the decision ledger rows and the commits below are. The
+campaigns that waited for a recorded go were never half-written code — they
+were finished machinery waiting for a run that only the user starts. One
+obligation, E-11, was blocked on a capability that was never built, so it
+was never started at all; the deferred-campaigns section below says which is
+which.
 
 ## The pin
 
@@ -60,18 +63,39 @@ the pull-request feedback round (`2d15beb`) and the merge of the whole lab
 
 Four campaign obligations never ran: the baseline record (E-9), the scenario
 hygiene run (the run half of E-10), the tier table (E-11) and the
-per-plugin-release records (E-13). Each was complete machinery waiting for a
-recorded go to start a live run. The successor drops all four; what it keeps
-is the run boundary, now in the user's hands. Nothing above is half-written.
+per-plugin-release records (E-13). Three of them were complete machinery
+waiting for a recorded go to start a live run: E-9 and E-13 had `bin/campaign`
+to run, which exists from E-8, and the run half of E-10 had the runner and
+the authored scenarios. E-13 also waited on E-9's baseline record, which
+never existed.
+
+E-11 is the one that was never started. It was blocked on a missing
+capability, not on a run: the opencode adapter never bound tiers to models
+(`harnesses/opencode.sh` still declares `tier-settable=documentation`), so
+no tier floor could be set from this lab. Its build half was never written
+either — `behavior/scenarios/tier-probe.sh`, its check manifest, its suite
+row and the tier binding — and the predecessor plan's `11-tier-measurement.md`
+named those files as that task's build half. A deferred campaign and
+unfinished code are different things, and E-11 is the second; the table
+above still records it as removed, and no tier floor is claimed from it.
+
+The successor drops all four obligations; what it keeps is the run boundary,
+now in the user's hands.
 
 ## Gaps against the pin
 
-`bin/check` prints the three asset lists on every run; the lists below are
-their state at this commit. V3-CORPORA closes the two skill gaps,
-V3-HARNESSES the adapter gap. The old evals-coverage gate became this
-reported list so the initial coverage can be recorded without a red cell;
-V3-CORPORA re-arms it when the last definition lands. The last gap is a
-documentation row, so the gate does not print it.
+`bin/check` prints the three asset lists on every run that reaches the
+pinned-scope section — the last section of the full gate — so a run that
+fails earlier prints none of them; the lists below are their state at this
+commit. V3-CORPORA closes the two skill gaps, V3-HARNESSES the adapter gap.
+The old evals-coverage gate became this reported list so the initial
+coverage can be recorded without a red cell: the plan's own clause permits
+it — "Initial coverage may record missing assets; V3-CORPORA closes them"
+(`01-inventory.md`) — and transfers `bin/check` to V3-CORPORA
+(`04-corpora.md`). Re-arming the list as a hard failure is therefore
+V3-CORPORA's obligation when the last definition lands; no task contract
+states it in those words, and this record does not claim one. The last gap
+is a documentation row, so the gate does not print it.
 
 ### Skills with no eval definition (9)
 
