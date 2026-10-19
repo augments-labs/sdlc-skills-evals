@@ -31,8 +31,11 @@ run_check_full() { # $1 inventory path, $2 docs root — the whole gate, no --in
     && check_rc=0 || check_rc=$?
 }
 
-run_check_ci() { # the gate exactly as CI runs it: no environment override at all
-  check_out="$(bash bin/check 2>&1)" && check_rc=0 || check_rc=$?
+run_check_ci() { # the gate exactly as CI runs it: no environment override at
+  # all: the three roots are unset for the child, so an environment that
+  # exports them cannot redirect the run at another artifact
+  check_out="$(env -u INVENTORY_PATH -u DOCS_ROOT -u DESCRIPTIONS_ROOT bash bin/check 2>&1)" \
+    && check_rc=0 || check_rc=$?
 }
 
 record_field() { # $1 the table row's label — the number that row states
@@ -140,6 +143,28 @@ if printf '%s\n' "$check_out" | grep -q "^check: inventory ok$" \
   ok "the CI-shaped run resolves the committed inventory and ends with check: OK"
 else
   bad "the CI-shaped run resolves the committed inventory and ends with check: OK"
+fi
+
+# The CI-shaped run is the invocation CI performs, so an environment that
+# exports a root override must not redirect it at another artifact. The
+# probe exports three overrides that point nowhere and runs the helper in
+# a subshell, so the probe's own exports never reach the rest of the
+# suite and never reach the run that follows it.
+probe_rc_file="$work/ci-probe.rc"
+probe_out_file="$work/ci-probe.out"
+(
+  export INVENTORY_PATH="$work/there-is-no-such-inventory.json"
+  export DOCS_ROOT="$work/there-are-no-docs"
+  export DESCRIPTIONS_ROOT="$work/there-are-no-descriptions"
+  run_check_ci
+  printf '%s\n' "$check_rc" >"$probe_rc_file"
+  printf '%s\n' "$check_out" >"$probe_out_file"
+)
+probe_rc="$(cat "$probe_rc_file")"
+if [ "$probe_rc" -eq 0 ]; then
+  ok "the CI-shaped run ignores the environment's overrides"
+else
+  bad "the CI-shaped run ignores the environment's overrides (exit $probe_rc): $(tail -2 "$probe_out_file" | tr '\n' ' ')"
 fi
 
 # --- drift against a tree built from the inventory --------------------------
@@ -329,6 +354,37 @@ if printf '%s\n' "$check_out" | grep -q "an empty name"; then
   ok "the drift report names an empty member readably"
 else
   bad "the drift report names an empty member readably"
+fi
+
+# An empty list is not a list holding an empty member. A tree that has
+# the two directories and no members in them is drift: the report names
+# the inventory's members as absent, and it carries no blank member line
+# for the tree's empty list.
+#
+# The empty-list half of the gate's helper is invisible in that report:
+# the empty line the helper would print is the only line of an empty
+# list, so the command substitution that holds the report strips it, and
+# the tree's members are collected with an empty name rewritten rather
+# than kept. The helper is therefore read from the gate's own file and
+# run, and the case asserts both halves: the report, and the helper's
+# own contract.
+empty_tree="$work/empty-tree"
+mkdir -p "$empty_tree/skills" "$empty_tree/tests/harnesses"
+run_check "$INV" docs --plugin "$empty_tree"
+list_lines_fn="$(sed -n '/^_list_lines() {/,/^}/p' bin/check)"
+empty_list_lines=""
+if [ -n "$list_lines_fn" ]; then
+  empty_list_lines="$(printf '%s\n%s\n' "$list_lines_fn" '_list_lines "" | wc -l' \
+    | bash 2>/dev/null | tr -d '[:space:]')"
+fi
+if [ "$empty_list_lines" = "0" ] \
+    && [ "$check_rc" -ne 0 ] \
+    && printf '%s\n' "$check_out" | grep -qF "in the inventory, absent from the supplied tree:" \
+    && printf '%s\n' "$check_out" | grep -qF "$(jq -r '.skills[0]' "$INV")" \
+    && ! printf '%s\n' "$check_out" | grep -qE '^[[:space:]]+$'; then
+  ok "an empty tree is drift with no blank member line, and an empty list prints no line"
+else
+  bad "an empty tree is drift with no blank member line, and an empty list prints no line (exit $check_rc, empty list lines: '$empty_list_lines')"
 fi
 
 # --- the coverage record maps every old task --------------------------------
@@ -588,6 +644,25 @@ else
   bad "a comment naming a skill path is not an exclusion"
 fi
 
+# --- the gate never reaches the network -------------------------------------
+#
+# The default CI gate validates the committed inventory offline, so a
+# network command in the gate would make that gate depend on the network.
+# The gate's own file is read and searched for one. Comments are stripped
+# first: a comment naming a command is not a call. The pattern matches the
+# command names in a command position — at the start of a line, after
+# whitespace, after a shell separator, or inside a command substitution —
+# so the pinned repository URL the gate legitimately holds as a string is
+# not matched, and neither is a word that merely ends in a command name.
+
+gate_code="$(sed -e 's/^[[:space:]]*#.*$//' -e 's/[[:space:]]#.*$//' bin/check)"
+if printf '%s\n' "$gate_code" | grep -qE \
+    '(^|[[:space:]]|[;&|(]|\$\()(curl|wget|git[[:space:]]+(fetch|ls-remote|clone|pull|remote))([^[:alnum:]_-]|$)'; then
+  bad "the gate holds no network command"
+else
+  ok "the gate holds no network command"
+fi
+
 # --- the shape predicates reject a malformed inventory ----------------------
 
 if mutate '.skills = []' "$work/m.json"; then
@@ -608,7 +683,9 @@ expect_fail "a directory that is not a plugin tree is rejected" "has no skills/ 
 
 # --- the coverage scan reads the same root the shape check reads ------------
 #
-# The gate has one descriptions root. A caller that moves it moves both.
+# The gate has one descriptions root. A caller that moves it moves both:
+# the E-5 query-set shape check, which decides whether a set is well
+# formed, and the coverage scan, which reports what is missing.
 
 mkdir -p "$work/empty-descriptions"
 check_out="$(DESCRIPTIONS_ROOT="$work/empty-descriptions" bash bin/check --inventory 2>&1)" \
@@ -619,5 +696,19 @@ if [ "$seam_gaps" -eq "$(jq '.skills | length' "$INV")" ]; then
 else
   bad "the coverage scan follows the descriptions root seam ($seam_gaps of $(jq '.skills | length' "$INV") skills)"
 fi
+
+# The shape check is the other reader of that root. The set below is
+# malformed — it holds positives and no negatives, so it is not a query
+# set — and it lives only under the moved root. The default root holds no
+# such set, so the gate can only reject it if the shape check reads the
+# seam. The full gate is run, not the pinned-scope mode: the pinned-scope
+# mode exits before the shape check.
+seam_descriptions="$work/seam-descriptions"
+mkdir -p "$seam_descriptions/common"
+jq -n '[range(20) | {query: "a malformed query \(.)", should_trigger: true, split: "train"}]' \
+  >"$seam_descriptions/common/yagni.json"
+check_out="$(INVENTORY_PATH="$INV" DOCS_ROOT=docs DESCRIPTIONS_ROOT="$seam_descriptions" bash bin/check 2>&1)" \
+  && check_rc=0 || check_rc=$?
+expect_fail "the query-set shape check reads the descriptions root seam" "needs >= 10 negatives"
 
 exit "$fails"
