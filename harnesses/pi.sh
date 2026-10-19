@@ -21,6 +21,18 @@
 #     lib/tests/fixtures/harnesses/pi/. No pi stream has been observed on
 #     this machine, so every capability below is documentation, and
 #     `runnable` stays `no` until a real run replaces the label.
+#
+# ISOLATION. Every invocation of the CLI runs under an environment this file
+# builds explicitly (pi_env): the throwaway home, the XDG directories inside
+# it, a runtime directory and a dead session-bus socket inside it. The
+# operator's environment is NOT inherited: it carries the operator's own
+# session bus, their SSH agent, their IDE tokens and their credential
+# helpers, and an invocation that inherited them could read the operator's
+# stored credentials. The one exception is the operator's credential seed
+# ($LAB_CREDENTIAL_SEED/pi/env), which the runner exports for a harness
+# whose auth is environmental: it is sourced INSIDE the child process, so
+# its values reach the CLI and never reach a command line, a log or this
+# shell.
 
 adapter_name='pi'
 
@@ -32,6 +44,34 @@ permission_flags="--tools"
 capabilities="subagent-loads-skills=no(documentation) nesting-depth=unknown(documentation) tier-settable=no(documentation) session-start-event=no(documentation) post-compaction-event=no(documentation)"
 
 source_pi_home="${PI_HOME:-${HOME:-}/.pi}"
+
+# THE LAUNCH ENVIRONMENT, built explicitly (see the header).
+pi_env() {
+  PI_ENV=(
+    "PATH=$PATH"
+    "HOME=$harness_home"
+    "XDG_CONFIG_HOME=$harness_home/.config"
+    "XDG_DATA_HOME=$harness_home/.local/share"
+    "XDG_CACHE_HOME=$harness_home/.cache"
+    "XDG_RUNTIME_DIR=$harness_home/.runtime"
+    "DBUS_SESSION_BUS_ADDRESS=unix:path=$harness_home/.runtime/bus"
+    "TMPDIR=$harness_home/tmp"
+  )
+  mkdir -p "$harness_home/.config" "$harness_home/.local/share" "$harness_home/.cache" \
+           "$harness_home/.runtime" "$harness_home/tmp"
+}
+
+# Run the CLI under that environment, with the operator's credential seed
+# sourced inside the child when there is one.
+pi_exec() { # $@ the CLI and its arguments
+  local seed="${LAB_CREDENTIAL_SEED:-}/$adapter_name/env"
+  if [ -f "$seed" ]; then
+    timeout "$timeout_s" env -i "${PI_ENV[@]}" \
+      sh -c 'set -a; . "$1"; set +a; shift; exec "$@"' _ "$seed" "$@"
+  else
+    timeout "$timeout_s" env -i "${PI_ENV[@]}" "$@"
+  fi
+}
 
 _libdir="$(cd "$(dirname "${BASH_SOURCE[0]}")/../lib" && pwd)"
 # shellcheck source=../lib/common.sh
@@ -50,12 +90,13 @@ adapter_install() { # $1 plugin source ("" = NONE arm, load nothing)
   harness_home="$(mktemp -d)"
   [ -n "${1:-}" ] || return 0
   plugin_dir="$1"
-  env -i PATH="$PATH" HOME="$harness_home" pi install "$1" </dev/null \
+  pi_env
+  env -i "${PI_ENV[@]}" pi install "$1" </dev/null \
     >>"$errlog" 2>&1 || { echo "pi install failed (see $errlog)" >&2; return 1; }
   # The register line is the proof the install landed: a filesystem count of
   # the checkout cannot show that pi accepted the package.
   local listed
-  listed="$(env -i PATH="$PATH" HOME="$harness_home" pi list </dev/null 2>>"$errlog")" || {
+  listed="$(env -i "${PI_ENV[@]}" pi list </dev/null 2>>"$errlog")" || {
     echo "pi list failed (see $errlog)" >&2; return 1; }
   printf '%s\n' "$listed" | grep -F "$1" >/dev/null 2>&1 || {
     echo "pi list does not name the installed package (see $errlog)" >&2; return 1; }
@@ -121,9 +162,8 @@ adapter_usage() { # $1 stream file
 # and HOME is the throwaway run home.
 adapter_run_activation() { # $1 workdir  $2 prompt  $3 stream  $4... extra flags
   local wd="$1" prompt="$2" stream="$3"; shift 3
-  ( cd "$wd" && exec timeout "$timeout_s" env -i PATH="$PATH" HOME="$harness_home" \
-      TMPDIR="${TMPDIR:-/tmp}" \
-      pi --mode json --session-dir "$harness_home/sessions" \
+  pi_env
+  ( cd "$wd" && pi_exec pi --mode json --session-dir "$harness_home/sessions" \
          --tools read,grep,find,ls "$@" "$prompt" ) \
     < /dev/null > "$stream" 2>>"$errlog"
 }
@@ -132,9 +172,8 @@ adapter_run_activation() { # $1 workdir  $2 prompt  $3 stream  $4... extra flags
 # the run happens in a disposable fixture copy under TMPDIR, never in a real
 # checkout, under the throwaway run home.
 adapter_run_behavioral() { # $1 workdir  $2 opening file  $3 stream
-  ( cd "$1" && exec timeout "$timeout_s" env -i PATH="$PATH" HOME="$harness_home" \
-      TMPDIR="${TMPDIR:-/tmp}" \
-      pi --mode json --session-dir "$harness_home/sessions" \
+  pi_env
+  ( cd "$1" && pi_exec pi --mode json --session-dir "$harness_home/sessions" \
          --tools read,grep,find,ls,edit,write,bash "$(cat "$2")" ) \
     < /dev/null > "$3" 2>>"$errlog"
 }
@@ -147,9 +186,8 @@ adapter_continue_behavioral() { # $1 workdir  $2 prompt  $3 new stream  $4 prior
   session_id="$(jq -r 'select(.type == "session") | .id // empty' "$prior" 2>/dev/null \
     | head -1)"
   [ -n "$session_id" ] || { echo "pi stream contains no resumable session id" >&2; return 2; }
-  ( cd "$wd" && exec timeout "$timeout_s" env -i PATH="$PATH" HOME="$harness_home" \
-      TMPDIR="${TMPDIR:-/tmp}" \
-      pi --mode json --session-dir "$harness_home/sessions" \
+  pi_env
+  ( cd "$wd" && pi_exec pi --mode json --session-dir "$harness_home/sessions" \
          --session "$session_id" \
          --tools read,grep,find,ls,edit,write,bash "$prompt" ) \
     < /dev/null > "$out" 2>>"$errlog"

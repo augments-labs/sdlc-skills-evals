@@ -24,6 +24,22 @@ bad() { printf '  FAIL  %s\n' "$1"; fails=1; }
 OPERATOR_HOME="${HOME:-}"
 OPERATOR_DBUS="${DBUS_SESSION_BUS_ADDRESS:-}"
 
+# The operator's own variables, by NAME. The test exports each of them as a
+# SENTINEL — a path inside this test's own work directory — before it
+# sources an adapter, so the assertion does not depend on the developer's
+# shell and so an adapter that inherits the operator's environment is caught
+# rather than assumed absent.
+#
+# The bus is in the list because of how a session bus is found: with no
+# DBUS_SESSION_BUS_ADDRESS and no XDG_RUNTIME_DIR, a D-Bus client falls back
+# to the passwd entry's runtime directory — the operator's own. So a launch
+# that clears the environment without giving the CLI a runtime directory of
+# its own still reaches the operator's bus.
+OPERATOR_VARS="XDG_CONFIG_HOME XDG_DATA_HOME XDG_CACHE_HOME XDG_RUNTIME_DIR \
+DBUS_SESSION_BUS_ADDRESS CODEX_HOME CLAUDE_CONFIG_DIR KIMI_CODE_HOME \
+GROK_HOME HERMES_HOME PI_HOME CURSOR_HOME AGY_CLI_DISABLE_AUTO_UPDATE \
+MUSE_NO_AUTO_UPDATE DISABLE_AUTOUPDATER"
+
 # Every agent CLI name the adapters drive, and the name the fake answers to.
 CLI_NAMES="agy claude codex cursor-agent devin grok hermes kimi muse opencode pi"
 
@@ -60,6 +76,7 @@ expect() { # $1 harness  $2 key
     antigravity/resume) echo "yes";;
     antigravity/tier) echo "no";;
     antigravity/cli) echo "agy";;
+    antigravity/seed) echo "no";;
     claude-code/skill) echo "using-sdlc-skills";;
     claude-code/install) echo "";;
     claude-code/launch) echo "claude";;
@@ -67,6 +84,7 @@ expect() { # $1 harness  $2 key
     claude-code/resume) echo "yes";;
     claude-code/tier) echo "yes";;
     claude-code/cli) echo "claude";;
+    claude-code/seed) echo "yes";;
     codex/skill) echo "sdlc-skills:using-sdlc-skills";;
     codex/install) echo "codex plugin marketplace add";;
     codex/launch) echo "codex exec";;
@@ -74,6 +92,7 @@ expect() { # $1 harness  $2 key
     codex/resume) echo "yes";;
     codex/tier) echo "no";;
     codex/cli) echo "codex";;
+    codex/seed) echo "yes";;
     cursor/skill) echo "using-sdlc-skills";;
     cursor/install) echo "";;
     cursor/launch) echo "cursor-agent";;
@@ -81,6 +100,7 @@ expect() { # $1 harness  $2 key
     cursor/resume) echo "yes";;
     cursor/tier) echo "no";;
     cursor/cli) echo "cursor-agent";;
+    cursor/seed) echo "yes";;
     devin/skill) echo "using-sdlc-skills";;
     devin/install) echo "devin plugins install";;
     devin/launch) echo "devin";;
@@ -88,6 +108,7 @@ expect() { # $1 harness  $2 key
     devin/resume) echo "yes";;
     devin/tier) echo "no";;
     devin/cli) echo "devin";;
+    devin/seed) echo "yes";;
     grok/skill) echo "using-sdlc-skills";;
     grok/install) echo "grok plugin install";;
     grok/launch) echo "grok";;
@@ -95,6 +116,7 @@ expect() { # $1 harness  $2 key
     grok/resume) echo "no";;
     grok/tier) echo "no";;
     grok/cli) echo "grok";;
+    grok/seed) echo "yes";;
     hermes/skill) echo "sdlc-skills:using-sdlc-skills";;
     hermes/install) echo "hermes plugins install";;
     hermes/launch) echo "hermes";;
@@ -102,6 +124,7 @@ expect() { # $1 harness  $2 key
     hermes/resume) echo "yes";;
     hermes/tier) echo "no";;
     hermes/cli) echo "hermes";;
+    hermes/seed) echo "yes";;
     kimi-code/skill) echo "sdlc-skills:using-sdlc-skills";;
     kimi-code/install) echo "";;
     kimi-code/launch) echo "kimi";;
@@ -109,6 +132,7 @@ expect() { # $1 harness  $2 key
     kimi-code/resume) echo "yes";;
     kimi-code/tier) echo "no";;
     kimi-code/cli) echo "kimi";;
+    kimi-code/seed) echo "yes";;
     muse/skill) echo "using-sdlc-skills";;
     muse/install) echo "";;
     muse/launch) echo "muse exec";;
@@ -116,6 +140,7 @@ expect() { # $1 harness  $2 key
     muse/resume) echo "yes";;
     muse/tier) echo "no";;
     muse/cli) echo "muse";;
+    muse/seed) echo "yes";;
     opencode/skill) echo "using-git-worktrees";;
     opencode/install) echo "";;
     opencode/launch) echo "opencode run";;
@@ -123,6 +148,7 @@ expect() { # $1 harness  $2 key
     opencode/resume) echo "yes";;
     opencode/tier) echo "no";;
     opencode/cli) echo "opencode";;
+    opencode/seed) echo "yes";;
     pi/skill) echo "using-sdlc-skills";;
     pi/install) echo "pi install";;
     pi/launch) echo "pi";;
@@ -130,6 +156,7 @@ expect() { # $1 harness  $2 key
     pi/resume) echo "yes";;
     pi/tier) echo "no";;
     pi/cli) echo "pi";;
+    pi/seed) echo "yes";;
     *) echo "";;
   esac
 }
@@ -190,6 +217,24 @@ EOS
   # The fake CLI is the ONLY agent CLI on PATH: the real ones are not
   # reachable, so an adapter that reaches one fails instead of launching it.
   export PATH="$bin:/usr/bin:/bin"
+
+  # --- the operator's own variables, as sentinels ----------------------------
+  # Each one is set to a path inside this test's work directory, so it is
+  # neither the operator's real value nor a value any CLI could want. An
+  # adapter that inherits the operator's environment hands these to its CLI,
+  # and the assertions below catch exactly that.
+  local op="$work/operator" sentinels="$work/sentinels"
+  mkdir -p "$op"
+  : > "$sentinels"
+  local ovar
+  for ovar in $OPERATOR_VARS; do
+    case "$ovar" in
+      *_AUTO_UPDATE|*DISABLE_AUTOUPDATER) export "$ovar=operator-sentinel";;
+      DBUS_SESSION_BUS_ADDRESS) export "DBUS_SESSION_BUS_ADDRESS=unix:path=$op/.bus";;
+      *) export "$ovar=$op/$ovar";;
+    esac
+    printf '%s\n' "${!ovar}" >> "$sentinels"
+  done
 
   # --- the real CLIs are not reachable: PROVED, not assumed -----------------
   # Every agent CLI name must resolve into the fake's own bin directory. A
@@ -252,10 +297,24 @@ EOS
     bad "$h none arm installs (see $work/none.err)"
   fi
   none_calls="$(cat "$log" 2>/dev/null; cat "$harness_home/.fake-harness.log" 2>/dev/null)"
+  # The none arm's STATE, not the absence of a CLI call: a none arm that
+  # installed a plugin would measure the plugin, silently. So the throwaway
+  # home must hold no plugin tree and no registry that names the tree under
+  # test, and the commands that ran must name neither.
+  local none_leak="" none_found
+  none_found="$(find "$harness_home" \( -name 'sdlc-skills' -o -name 'SKILL.md' \) \
+    -print -quit 2>/dev/null || true)"
+  [ -n "$none_found" ] && none_leak="$none_leak plugin-tree"
+  none_found="$(grep -rlF -- "$plug" "$harness_home" 2>/dev/null | head -1 || true)"
+  [ -n "$none_found" ] && none_leak="$none_leak registry"
+  printf '%s\n' "$none_calls" | grep -qF -- "$plug" && none_leak="$none_leak command"
   if [ -n "$install_pattern" ] && printf '%s\n' "$none_calls" | grep -qF -- "$install_pattern"; then
-    bad "$h none arm installs no plugin"
-  else
+    none_leak="$none_leak install-command"
+  fi
+  if [ -z "$none_leak" ]; then
     ok "$h none arm installs no plugin"
+  else
+    bad "$h none arm installs no plugin ($none_leak )"
   fi
 
   # --- the launch ------------------------------------------------------------
@@ -264,10 +323,36 @@ EOS
   cp "$work/fake-stdout" "$HOME/.fake-stdout"
   export FAKE_STDOUT="$work/fake-stdout"
   printf 'the opening\n' > "$work/opening"
+  # The operator's credential seed, as a stand-in: the runner exports
+  # $LAB_CREDENTIAL_SEED/<harness>/env for a harness whose auth is
+  # environmental, and the launch has to carry it — the environment is
+  # built explicitly, so a seed that is not carried is a run with no
+  # credential. The stand-in switches the fake's seed probe on, so the
+  # seed's arrival is visible in the fake's own log.
+  mkdir -p "$work/seed/$h"
+  printf 'LAB_SEED_PROBE=1\n' > "$work/seed/$h/env"
+  export LAB_CREDENTIAL_SEED="$work/seed"
   if adapter_run_activation "$wd" "the prompt" "$stream" >/dev/null 2>"$work/run.err"; then
     ok "$h activation launch succeeds against the fake CLI"
   else
     bad "$h activation launch succeeds against the fake CLI (see $work/run.err)"
+  fi
+  local seed_log="$work/seed.log" seed_cli
+  seed_cli="$(expect "$h" cli)"
+  cat "$log" 2>/dev/null > "$seed_log"
+  cat "$harness_home/.fake-harness.log" 2>/dev/null >> "$seed_log"
+  if [ "$(expect "$h" seed)" = "yes" ]; then
+    if grep -qx "seed $seed_cli" "$seed_log" 2>/dev/null; then
+      ok "$h the launch carries the operator's credential seed"
+    else
+      bad "$h the launch carries the operator's credential seed"
+    fi
+  else
+    if grep -qx "seed $seed_cli" "$seed_log" 2>/dev/null; then
+      bad "$h the launch carries no credential (this harness has none by design)"
+    else
+      ok "$h the launch carries no credential (this harness has none by design)"
+    fi
   fi
   local launch_pattern; launch_pattern="$(expect "$h" launch)"
   local launch_calls; launch_calls="$(cat "$log" 2>/dev/null; cat "$harness_home/.fake-harness.log" 2>/dev/null)"
@@ -333,29 +418,56 @@ EOS
   else
     bad "$h the CLI ran with a home that is not the operator's (HOME=${launched_home:-none})"
   fi
-  local leaks="" key val
-  for key in HOME XDG_CONFIG_HOME XDG_DATA_HOME XDG_CACHE_HOME XDG_RUNTIME_DIR \
-             CODEX_HOME CLAUDE_CONFIG_DIR KIMI_CODE_HOME GROK_HOME HERMES_HOME; do
-    val="$(sed -n "s/^env $want_cli $key=//p" "$envlines" | tail -1)"
-    case "$val" in
-      "$OPERATOR_HOME"|"$OPERATOR_HOME"/*) leaks="$leaks $key";;
+  # The WHOLE recorded environment, not a fixed list of nine names: any
+  # variable the launch was handed that carries the operator's home, their
+  # XDG directories, their session bus or their updater switch is a route
+  # back to the operator. The sentinels are this test's own values, so a
+  # leak is caught whether or not the developer exports anything.
+  local leaks="" lkey lval
+  while IFS= read -r lline; do
+    lkey="${lline%%=*}"
+    lval="${lline#*=}"
+    case "$lval" in
+      "$OPERATOR_HOME"|"$OPERATOR_HOME"/*) leaks="$leaks $lkey(operator-home)"; continue;;
     esac
-  done
+    if grep -qxF -- "$lval" "$sentinels" 2>/dev/null; then
+      leaks="$leaks $lkey(operator-value)"
+    fi
+  done < <(sed -n "s/^env $want_cli //p" "$envlines" 2>/dev/null)
   if [ -z "$leaks" ]; then
     ok "$h no home the CLI was given points into the operator's home"
   else
     bad "$h no home the CLI was given points into the operator's home (leaks:$leaks)"
   fi
+  # The session bus: an address that points at the operator's is a route to
+  # the operator's stored credentials, and so is a runtime directory that
+  # points at the operator's — with no address set, a D-Bus client looks for
+  # the bus under the runtime directory. So the launch must be given a
+  # runtime directory inside the throwaway home, and a bus address (if it
+  # carries one) inside it too.
+  if grep -qF -- "$op/.bus" "$envlines" 2>/dev/null ||
+     { [ -n "$OPERATOR_DBUS" ] && grep -qF -- "$OPERATOR_DBUS" "$envlines" 2>/dev/null; }; then
+    bad "$h the launch cannot reach the operator's session bus"
+  else
+    ok "$h the launch cannot reach the operator's session bus"
+  fi
+  local runtime_dir
+  runtime_dir="$(sed -n "s/^env $want_cli XDG_RUNTIME_DIR=//p" "$envlines" | tail -1)"
+  case "$runtime_dir" in
+    "$harness_home"|"$harness_home"/*) ok "$h the launch's runtime dir is inside the throwaway home";;
+    *) bad "$h the launch's runtime dir is inside the throwaway home (XDG_RUNTIME_DIR=${runtime_dir:-none})";;
+  esac
+  local bus_addr
+  bus_addr="$(sed -n "s/^env $want_cli DBUS_SESSION_BUS_ADDRESS=//p" "$envlines" | tail -1)"
+  if [ -z "$bus_addr" ]; then
+    ok "$h the launch carries no session bus address"
+  else
+    case "${bus_addr#unix:path=}" in
+      "$harness_home"/*) ok "$h the launch's session bus address is inside the throwaway home";;
+      *) bad "$h the launch's session bus address is inside the throwaway home ($bus_addr)";;
+    esac
+  fi
   if [ "$h" = "antigravity" ]; then
-    # The Antigravity CLI authenticates from the operating system's secure
-    # keyring — on Linux the secret service, reached over the D-Bus session
-    # bus — so a bus address that points at the operator's session is a route
-    # to the operator's account, and no HOME redirect reaches it.
-    if [ -n "$OPERATOR_DBUS" ] && grep -qF "$OPERATOR_DBUS" "$envlines" 2>/dev/null; then
-      bad "antigravity the launch cannot reach the operator's session bus"
-    else
-      ok "antigravity the launch cannot reach the operator's session bus"
-    fi
     # The CLI writes into ~/.gemini/, so the isolation has to hold for the
     # directories it uses, and the self-updater has to be off.
     local agy_dirs_ok=1
@@ -432,9 +544,12 @@ EOS
     bad "$h chain is empty on empty output (got '$got')"
   fi
 
-  # the refusal: the model never spoke
+  # the refusal: the model never spoke. Every adapter must be able to tell
+  # a refusal from a miss: without adapter_ran the runner cannot, and a
+  # provider that never answered is scored as an ordinary miss.
   printf '{"type":"error","error":{"message":"usage limit exceeded"}}\n' > "$work/refusal.jsonl"
   if command -v adapter_ran >/dev/null 2>&1; then
+    ok "$h binds adapter_ran (the runner tells a refusal from a miss)"
     if adapter_ran "$work/refusal.jsonl" >/dev/null 2>&1; then
       bad "$h reports no run for a refused stream"
     else
@@ -451,7 +566,7 @@ EOS
       ok "$h reports no run for an empty stream"
     fi
   else
-    ok "$h binds no adapter_ran (the runner treats that as 'it ran')"
+    bad "$h binds no adapter_ran (a provider refusal would be scored as a miss)"
   fi
 
   # usage: missing and present

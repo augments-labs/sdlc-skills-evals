@@ -26,6 +26,18 @@
 # `plugins` and resolves `<dir>/index.js` inside it, refusing a file path
 # outright. The install below writes the layout the CLI on this machine
 # actually reads.
+#
+# ISOLATION. Every launch runs under an environment this file builds
+# explicitly (opencode_env): the throwaway home, the XDG directories inside
+# it, a runtime directory and a dead session-bus socket inside it. The
+# operator's environment is NOT inherited: it carries the operator's own
+# session bus, their SSH agent, their IDE tokens and their credential
+# helpers, and a launch that inherited them could read the operator's
+# stored credentials. The one exception is the operator's credential seed
+# ($LAB_CREDENTIAL_SEED/opencode/env), which the runner exports for a
+# harness whose auth is environmental: it is sourced INSIDE the child
+# process, so its values reach the CLI and never reach a command line, a
+# log or this shell.
 
 runnable=yes
 runnable_reason="opencode on PATH; the recorded activation evidence is a 1.x stream, and the install covers the pinned upstream's 1.x and 2.x plugin layouts"
@@ -33,6 +45,34 @@ permission_flags="--auto"
 capabilities="subagent-loads-skills=run nesting-depth=run tier-settable=documentation session-start-event=documentation post-compaction-event=documentation edit-path-partial=run"
 
 adapter_name='opencode'
+
+# THE LAUNCH ENVIRONMENT, built explicitly (see the header).
+opencode_env() {
+  OPENCODE_ENV=(
+    "PATH=$PATH"
+    "HOME=$harness_home"
+    "XDG_CONFIG_HOME=$harness_home/xdg"
+    "XDG_DATA_HOME=$harness_home/xdg"
+    "XDG_CACHE_HOME=$harness_home/.cache"
+    "XDG_RUNTIME_DIR=$harness_home/.runtime"
+    "DBUS_SESSION_BUS_ADDRESS=unix:path=$harness_home/.runtime/bus"
+    "TMPDIR=$harness_home/tmp"
+  )
+  mkdir -p "$harness_home/xdg" "$harness_home/.cache" "$harness_home/.runtime" \
+           "$harness_home/tmp"
+}
+
+# Run the CLI under that environment, with the operator's credential seed
+# sourced inside the child when there is one.
+opencode_exec() { # $@ the CLI and its arguments
+  local seed="${LAB_CREDENTIAL_SEED:-}/$adapter_name/env"
+  if [ -f "$seed" ]; then
+    timeout "$timeout_s" env -i "${OPENCODE_ENV[@]}" \
+      sh -c 'set -a; . "$1"; set +a; shift; exec "$@"' _ "$seed" "$@"
+  else
+    timeout "$timeout_s" env -i "${OPENCODE_ENV[@]}" "$@"
+  fi
+}
 
 # `opencode --version` prints e.g. `opencode v2.0.13`; keep only the number.
 _opencode_detect() {
@@ -145,10 +185,8 @@ adapter_usage() { # $1 stream file
 # disposable fixture and HOME/XDG are the throwaway run home.
 adapter_run_activation() { # $1 workdir  $2 prompt  $3 stream  $4... extra flags
   local wd="$1" prompt="$2" stream="$3"; shift 3
-  ( exec timeout "$timeout_s" env -i PATH="$PATH" HOME="$harness_home" \
-      XDG_CONFIG_HOME="$harness_home/xdg" XDG_DATA_HOME="$harness_home/xdg" \
-      TMPDIR="${TMPDIR:-/tmp}" \
-      opencode run --format json --auto --dir "$wd" "$@" "$prompt" ) \
+  opencode_env
+  ( opencode_exec opencode run --format json --auto --dir "$wd" "$@" "$prompt" ) \
     < /dev/null > "$stream" 2>>"$errlog"
 }
 
@@ -156,10 +194,8 @@ adapter_run_activation() { # $1 workdir  $2 prompt  $3 stream  $4... extra flags
 # the run happens in a disposable fixture copy under TMPDIR, never in a
 # real checkout, under the throwaway run home.
 adapter_run_behavioral() { # $1 workdir  $2 opening file  $3 stream
-  ( exec timeout "$timeout_s" env -i PATH="$PATH" HOME="$harness_home" \
-      XDG_CONFIG_HOME="$harness_home/xdg" XDG_DATA_HOME="$harness_home/xdg" \
-      TMPDIR="${TMPDIR:-/tmp}" \
-      opencode run --format json --auto --dir "$1" "$(cat "$2")" ) \
+  opencode_env
+  ( opencode_exec opencode run --format json --auto --dir "$1" "$(cat "$2")" ) \
     < /dev/null > "$3" 2>>"$errlog"
 }
 
@@ -171,9 +207,7 @@ adapter_continue_behavioral() { # $1 workdir  $2 prompt  $3 new stream  $4 prior
   session_id="$(jq -r '.. | objects | .sessionID? // .session_id? // empty' "$prior" 2>/dev/null \
     | grep -v '^null$' | head -1)"
   [ -n "$session_id" ] || { echo "opencode stream contains no resumable session id" >&2; return 2; }
-  ( exec timeout "$timeout_s" env -i PATH="$PATH" HOME="$harness_home" \
-      XDG_CONFIG_HOME="$harness_home/xdg" XDG_DATA_HOME="$harness_home/xdg" \
-      TMPDIR="${TMPDIR:-/tmp}" \
-      opencode run --format json --auto --dir "$wd" -s "$session_id" "$prompt" ) \
+  opencode_env
+  ( opencode_exec opencode run --format json --auto --dir "$wd" -s "$session_id" "$prompt" ) \
     < /dev/null > "$out" 2>>"$errlog"
 }

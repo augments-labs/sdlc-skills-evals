@@ -79,9 +79,17 @@ capabilities="subagent-loads-skills=unknown(documentation) nesting-depth=unknown
 
 # The isolation assignments, read by agy_env below. Kept as a function
 # because harness_home is only known after adapter_install has run.
+#
+# The operator's environment is NOT inherited: it carries the operator's own
+# session bus, their SSH agent, their IDE tokens and their credential
+# helpers, and a launch that inherited them could read the operator's
+# stored credentials. This harness carries NO credential at all — the
+# keyring it would authenticate from is deliberately unreachable — so there
+# is no seed to carry.
 AGY_ENV=()
 agy_env() { # fills AGY_ENV with the isolation assignments (see the header)
   AGY_ENV=(
+    "PATH=$PATH"
     "HOME=$harness_home"
     "XDG_CONFIG_HOME=$harness_home/.config"
     "XDG_DATA_HOME=$harness_home/.local/share"
@@ -89,9 +97,10 @@ agy_env() { # fills AGY_ENV with the isolation assignments (see the header)
     "XDG_RUNTIME_DIR=$harness_home/.runtime"
     "DBUS_SESSION_BUS_ADDRESS=unix:path=$harness_home/.runtime/bus"
     "AGY_CLI_DISABLE_AUTO_UPDATE=true"
+    "TMPDIR=$harness_home/tmp"
   )
   mkdir -p "$harness_home/.runtime" "$harness_home/.config" \
-           "$harness_home/.local/share" "$harness_home/.cache"
+           "$harness_home/.local/share" "$harness_home/.cache" "$harness_home/tmp"
 }
 
 _libdir="$(cd "$(dirname "${BASH_SOURCE[0]}")/../lib" && pwd)"
@@ -124,8 +133,8 @@ adapter_install() { # $1 plugin source ("" = NONE arm, load nothing)
   harness_home="$(mktemp -d)"
   [ -n "${1:-}" ] || return 0
   agy_env
-  ( cd "$harness_home" && exec env -i PATH="$PATH" "${AGY_ENV[@]}" \
-      TMPDIR="${TMPDIR:-/tmp}" agy plugin install "$1/plugins/sdlc-skills" \
+  ( cd "$harness_home" && exec env -i "${AGY_ENV[@]}" \
+      agy plugin install "$1/plugins/sdlc-skills" \
       </dev/null ) >>"$errlog" 2>&1 || {
     echo "agy plugin install failed (see $errlog)" >&2; return 1; }
   local installed="$harness_home/.gemini/config/plugins/sdlc-skills"
@@ -201,8 +210,7 @@ adapter_usage() { # $1 stream file
 adapter_run_activation() { # $1 workdir  $2 prompt  $3 stream  $4... extra flags
   local wd="$1" prompt="$2" stream="$3"; shift 3
   agy_env
-  ( cd "$wd" && exec timeout "$timeout_s" env -i PATH="$PATH" "${AGY_ENV[@]}" \
-      TMPDIR="${TMPDIR:-/tmp}" \
+  ( cd "$wd" && exec timeout "$timeout_s" env -i "${AGY_ENV[@]}" \
       agy --output-format stream-json --mode plan "$@" --print="$prompt" ) \
     < /dev/null > "$stream" 2>>"$errlog"
 }
@@ -212,8 +220,7 @@ adapter_run_activation() { # $1 workdir  $2 prompt  $3 stream  $4... extra flags
 # checkout, under the throwaway run home and the isolation environment.
 adapter_run_behavioral() { # $1 workdir  $2 opening file  $3 stream
   agy_env
-  ( cd "$1" && exec timeout "$timeout_s" env -i PATH="$PATH" "${AGY_ENV[@]}" \
-      TMPDIR="${TMPDIR:-/tmp}" \
+  ( cd "$1" && exec timeout "$timeout_s" env -i "${AGY_ENV[@]}" \
       agy --output-format stream-json --mode accept-edits --print="$(cat "$2")" ) \
     < /dev/null > "$3" 2>>"$errlog"
 }
@@ -228,8 +235,7 @@ adapter_continue_behavioral() { # $1 workdir  $2 prompt  $3 new stream  $4 prior
     "$prior" 2>/dev/null | head -1)"
   [ -n "$conversation_id" ] || { echo "Antigravity stream contains no resumable conversation id" >&2; return 2; }
   agy_env
-  ( cd "$wd" && exec timeout "$timeout_s" env -i PATH="$PATH" "${AGY_ENV[@]}" \
-      TMPDIR="${TMPDIR:-/tmp}" \
+  ( cd "$wd" && exec timeout "$timeout_s" env -i "${AGY_ENV[@]}" \
       agy --output-format stream-json --mode accept-edits \
         --conversation "$conversation_id" --print="$prompt" ) \
     < /dev/null > "$out" 2>>"$errlog"

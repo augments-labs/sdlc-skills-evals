@@ -33,6 +33,18 @@
 #     lib/tests/fixtures/harnesses/muse/. No skill-loading run has been
 #     recorded on this machine, so `runnable` stays `no` until a real run
 #     replaces the label.
+#
+# ISOLATION. Every invocation of the CLI runs under an environment this file
+# builds explicitly (muse_env): the throwaway home, the XDG directories
+# inside it, a runtime directory and a dead session-bus socket inside it,
+# and the launcher's auto-update switch off. The operator's environment is
+# NOT inherited: it carries the operator's own session bus, their SSH
+# agent, their IDE tokens and their credential helpers, and an invocation
+# that inherited them could read the operator's stored credentials. The one
+# exception is the operator's credential seed ($LAB_CREDENTIAL_SEED/muse/env),
+# which the runner exports for a harness whose auth is environmental: it is
+# sourced INSIDE the child process, so its values reach the CLI and never
+# reach a command line, a log or this shell.
 
 adapter_name='muse'
 
@@ -40,6 +52,35 @@ runnable=no
 runnable_reason="muse 1.4.11 is on PATH and its exec --json envelope was observed here, but no skill-loading run has been recorded on this machine"
 permission_flags="--approval-mode never"
 capabilities="subagent-loads-skills=no(documentation) nesting-depth=unknown(documentation) tier-settable=no(documentation) session-start-event=no(documentation) post-compaction-event=no(documentation)"
+
+# THE LAUNCH ENVIRONMENT, built explicitly (see the header).
+muse_env() {
+  MUSE_ENV=(
+    "PATH=$PATH"
+    "HOME=$harness_home"
+    "XDG_CONFIG_HOME=$harness_home/.config"
+    "XDG_DATA_HOME=$harness_home/.local/share"
+    "XDG_CACHE_HOME=$harness_home/.cache"
+    "XDG_RUNTIME_DIR=$harness_home/.runtime"
+    "DBUS_SESSION_BUS_ADDRESS=unix:path=$harness_home/.runtime/bus"
+    "MUSE_NO_AUTO_UPDATE=1"
+    "TMPDIR=$harness_home/tmp"
+  )
+  mkdir -p "$harness_home/.config" "$harness_home/.local/share" "$harness_home/.cache" \
+           "$harness_home/.runtime" "$harness_home/tmp"
+}
+
+# Run the CLI under that environment, with the operator's credential seed
+# sourced inside the child when there is one.
+muse_exec() { # $@ the CLI and its arguments
+  local seed="${LAB_CREDENTIAL_SEED:-}/$adapter_name/env"
+  if [ -f "$seed" ]; then
+    timeout "$timeout_s" env -i "${MUSE_ENV[@]}" \
+      sh -c 'set -a; . "$1"; set +a; shift; exec "$@"' _ "$seed" "$@"
+  else
+    timeout "$timeout_s" env -i "${MUSE_ENV[@]}" "$@"
+  fi
+}
 
 _libdir="$(cd "$(dirname "${BASH_SOURCE[0]}")/../lib" && pwd)"
 # shellcheck source=../lib/common.sh
@@ -68,8 +109,8 @@ adapter_check() {
 adapter_install() { # $1 plugin source ("" = NONE arm, load nothing)
   harness_home="$(mktemp -d)"
   [ -n "${1:-}" ] || return 0
-  ( cd "$1" && env -i PATH="$PATH" HOME="$harness_home" \
-      XDG_CONFIG_HOME="$harness_home/.config" MUSE_NO_AUTO_UPDATE=1 \
+  muse_env
+  ( cd "$1" && env -i "${MUSE_ENV[@]}" \
       bash scripts/sh/install-muse-skills.sh ) >>"$errlog" 2>&1 || {
     echo "install-muse-skills.sh failed (see $errlog)" >&2; return 1; }
   return 0
@@ -136,10 +177,8 @@ adapter_usage() { # $1 stream file
 # approval mode stays on-request so nothing is auto-approved.
 adapter_run_activation() { # $1 workdir  $2 prompt  $3 stream  $4... extra flags
   local wd="$1" prompt="$2" stream="$3"; shift 3
-  ( cd "$wd" && exec timeout "$timeout_s" env -i PATH="$PATH" HOME="$harness_home" \
-      XDG_CONFIG_HOME="$harness_home/.config" MUSE_NO_AUTO_UPDATE=1 \
-      TMPDIR="${TMPDIR:-/tmp}" \
-      muse exec --json --trust-workspace --approval-mode on-request "$@" "$prompt" ) \
+  muse_env
+  ( cd "$wd" && muse_exec muse exec --json --trust-workspace --approval-mode on-request "$@" "$prompt" ) \
     < /dev/null > "$stream" 2>>"$errlog"
 }
 
@@ -147,10 +186,8 @@ adapter_run_activation() { # $1 workdir  $2 prompt  $3 stream  $4... extra flags
 # the run happens in a disposable fixture copy under TMPDIR, never in a real
 # checkout, under the throwaway run home.
 adapter_run_behavioral() { # $1 workdir  $2 opening file  $3 stream
-  ( cd "$1" && exec timeout "$timeout_s" env -i PATH="$PATH" HOME="$harness_home" \
-      XDG_CONFIG_HOME="$harness_home/.config" MUSE_NO_AUTO_UPDATE=1 \
-      TMPDIR="${TMPDIR:-/tmp}" \
-      muse exec --json --trust-workspace --approval-mode never "$(cat "$2")" ) \
+  muse_env
+  ( cd "$1" && muse_exec muse exec --json --trust-workspace --approval-mode never "$(cat "$2")" ) \
     < /dev/null > "$3" 2>>"$errlog"
 }
 
@@ -163,10 +200,8 @@ adapter_continue_behavioral() { # $1 workdir  $2 prompt  $3 new stream  $4 prior
   session_id="$(jq -r 'select(.stream.kind? == "session") | .stream.id // empty' \
     "$prior" 2>/dev/null | head -1)"
   [ -n "$session_id" ] || { echo "Muse stream contains no resumable session id" >&2; return 2; }
-  ( cd "$wd" && exec timeout "$timeout_s" env -i PATH="$PATH" HOME="$harness_home" \
-      XDG_CONFIG_HOME="$harness_home/.config" MUSE_NO_AUTO_UPDATE=1 \
-      TMPDIR="${TMPDIR:-/tmp}" \
-      muse exec --json --trust-workspace --approval-mode never \
+  muse_env
+  ( cd "$wd" && muse_exec muse exec --json --trust-workspace --approval-mode never \
         --session-id "$session_id" "$prompt" ) \
     < /dev/null > "$out" 2>>"$errlog"
 }

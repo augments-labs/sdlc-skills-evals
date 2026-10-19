@@ -28,6 +28,18 @@
 #     lib/tests/fixtures/harnesses/cursor/. No cursor stream has been
 #     observed on this machine, so every capability below is documentation
 #     and `runnable` stays `no` until a real run replaces the label.
+#
+# ISOLATION. Every launch runs under an environment this file builds
+# explicitly (cursor_env): the throwaway home, the XDG directories inside
+# it, a runtime directory and a dead session-bus socket inside it. The
+# operator's environment is NOT inherited: it carries the operator's own
+# session bus, their SSH agent, their IDE tokens and their credential
+# helpers, and a launch that inherited them could read the operator's
+# stored credentials. The one exception is the operator's credential seed
+# ($LAB_CREDENTIAL_SEED/cursor/env), which the runner exports for a
+# harness whose auth is environmental: it is sourced INSIDE the child
+# process, so its values reach the CLI and never reach a command line, a
+# log or this shell.
 
 adapter_name='cursor'
 
@@ -37,6 +49,34 @@ permission_flags="--force"
 capabilities="subagent-loads-skills=no(documentation) nesting-depth=unknown(documentation) tier-settable=no(documentation) session-start-event=yes(documentation) post-compaction-event=unknown(documentation)"
 
 source_cursor_home="${CURSOR_HOME:-${HOME:-}/.cursor}"
+
+# THE LAUNCH ENVIRONMENT, built explicitly (see the header).
+cursor_env() {
+  CURSOR_ENV=(
+    "PATH=$PATH"
+    "HOME=$harness_home"
+    "XDG_CONFIG_HOME=$harness_home/.config"
+    "XDG_DATA_HOME=$harness_home/.local/share"
+    "XDG_CACHE_HOME=$harness_home/.cache"
+    "XDG_RUNTIME_DIR=$harness_home/.runtime"
+    "DBUS_SESSION_BUS_ADDRESS=unix:path=$harness_home/.runtime/bus"
+    "TMPDIR=$harness_home/tmp"
+  )
+  mkdir -p "$harness_home/.config" "$harness_home/.local/share" "$harness_home/.cache" \
+           "$harness_home/.runtime" "$harness_home/tmp"
+}
+
+# Run the CLI under that environment, with the operator's credential seed
+# sourced inside the child when there is one.
+cursor_exec() { # $@ the CLI and its arguments
+  local seed="${LAB_CREDENTIAL_SEED:-}/$adapter_name/env"
+  if [ -f "$seed" ]; then
+    timeout "$timeout_s" env -i "${CURSOR_ENV[@]}" \
+      sh -c 'set -a; . "$1"; set +a; shift; exec "$@"' _ "$seed" "$@"
+  else
+    timeout "$timeout_s" env -i "${CURSOR_ENV[@]}" "$@"
+  fi
+}
 
 _libdir="$(cd "$(dirname "${BASH_SOURCE[0]}")/../lib" && pwd)"
 # shellcheck source=../lib/common.sh
@@ -119,9 +159,8 @@ adapter_ran() { # $1 stream file
 # the throwaway run home.
 adapter_run_activation() { # $1 workdir  $2 prompt  $3 stream  $4... extra flags
   local wd="$1" prompt="$2" stream="$3"; shift 3
-  ( cd "$wd" && exec timeout "$timeout_s" env -i PATH="$PATH" HOME="$harness_home" \
-      TMPDIR="${TMPDIR:-/tmp}" \
-      cursor-agent --print --output-format stream-json --mode plan \
+  cursor_env
+  ( cd "$wd" && cursor_exec cursor-agent --print --output-format stream-json --mode plan \
         --workspace "$wd" "$@" "$prompt" ) \
     < /dev/null > "$stream" 2>>"$errlog"
 }
@@ -131,9 +170,8 @@ adapter_run_activation() { # $1 workdir  $2 prompt  $3 stream  $4... extra flags
 # checkout, under the throwaway run home. `--force` is cursor's permission
 # flag: it pre-approves commands that are not explicitly denied.
 adapter_run_behavioral() { # $1 workdir  $2 opening file  $3 stream
-  ( cd "$1" && exec timeout "$timeout_s" env -i PATH="$PATH" HOME="$harness_home" \
-      TMPDIR="${TMPDIR:-/tmp}" \
-      cursor-agent --print --output-format stream-json --force \
+  cursor_env
+  ( cd "$1" && cursor_exec cursor-agent --print --output-format stream-json --force \
         --workspace "$1" "$(cat "$2")" ) \
     < /dev/null > "$3" 2>>"$errlog"
 }
@@ -145,9 +183,8 @@ adapter_continue_behavioral() { # $1 workdir  $2 prompt  $3 new stream  $4 prior
   local wd="$1" prompt="$2" out="$3" prior="$4" session_id
   session_id="$(jq -r 'select(.session_id? != null) | .session_id' "$prior" 2>/dev/null | head -1)"
   [ -n "$session_id" ] || { echo "Cursor stream contains no resumable session id" >&2; return 2; }
-  ( cd "$wd" && exec timeout "$timeout_s" env -i PATH="$PATH" HOME="$harness_home" \
-      TMPDIR="${TMPDIR:-/tmp}" \
-      cursor-agent --print --output-format stream-json --force \
+  cursor_env
+  ( cd "$wd" && cursor_exec cursor-agent --print --output-format stream-json --force \
         --resume "$session_id" --workspace "$wd" "$prompt" ) \
     < /dev/null > "$out" 2>>"$errlog"
 }

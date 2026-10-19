@@ -17,8 +17,8 @@
 #   call <name> <args>   — the invocation itself
 #   at   <name> <path>   — the resolved path of this binary, so the log shows
 #                          the fake answered and not a real CLI
-#   env  <name> KEY=VAL  — the environment variables that carry a home or a
-#                          session bus, one per line
+#   env  <name> KEY=VAL  — the environment variables that carry a home, a
+#                          session bus or an updater switch, one per line
 #
 # Only those variables are recorded. A whole environment would put the
 # operator's tokens in a log that the test prints when an assertion fails,
@@ -33,10 +33,18 @@ if [ -n "$_log" ]; then
   printf 'at %s %s\n' "$self" "$0" >> "$_log" 2>/dev/null || true
   for k in HOME XDG_CONFIG_HOME XDG_DATA_HOME XDG_CACHE_HOME XDG_RUNTIME_DIR \
            DBUS_SESSION_BUS_ADDRESS CODEX_HOME CLAUDE_CONFIG_DIR \
-           KIMI_CODE_HOME GROK_HOME HERMES_HOME AGY_CLI_DISABLE_AUTO_UPDATE; do
+           KIMI_CODE_HOME GROK_HOME HERMES_HOME PI_HOME CURSOR_HOME \
+           AGY_CLI_DISABLE_AUTO_UPDATE MUSE_NO_AUTO_UPDATE \
+           DISABLE_AUTOUPDATER; do
     v="$(printenv "$k" 2>/dev/null)"
     [ -n "$v" ] && printf 'env %s %s=%s\n' "$self" "$k" "$v" >> "$_log" 2>/dev/null
   done
+  # The seed probe: the operator's credential seed is sourced INSIDE the
+  # child, so the fact that it arrived is what this records — the VALUE is
+  # never written, only the fact that the seed reached the CLI.
+  if [ -n "${LAB_SEED_PROBE:-}" ]; then
+    printf 'seed %s\n' "$self" >> "$_log" 2>/dev/null || true
+  fi
 fi
 
 _state="${HOME:-}/.fake-state"

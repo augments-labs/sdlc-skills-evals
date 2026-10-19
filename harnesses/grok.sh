@@ -29,6 +29,19 @@
 #     lib/tests/fixtures/harnesses/grok/. No grok stream has been observed
 #     on this machine, so every capability below is documentation and
 #     `runnable` stays `no` until a real run replaces the label.
+#
+# ISOLATION. Every invocation of the CLI runs under an environment this file
+# builds explicitly (grok_env): the throwaway home, the CLI's own GROK_HOME
+# — which is where the copied plugin lands — the XDG directories inside the
+# throwaway home, a runtime directory and a dead session-bus socket inside
+# it. The operator's environment is NOT inherited: it carries the
+# operator's own session bus, their SSH agent, their IDE tokens and their
+# credential helpers, and an invocation that inherited them could read the
+# operator's stored credentials. The one exception is the operator's
+# credential seed ($LAB_CREDENTIAL_SEED/grok/env), which the runner exports
+# for a harness whose auth is environmental: it is sourced INSIDE the child
+# process, so its values reach the CLI and never reach a command line, a
+# log or this shell.
 
 adapter_name='grok'
 
@@ -36,6 +49,35 @@ runnable=no
 runnable_reason="grok 1.0.62 is on PATH and its streaming-messages-json format is documented by the CLI itself, but no grok run has been recorded on this machine"
 permission_flags="--permission-mode acceptEdits"
 capabilities="subagent-loads-skills=no(documentation) nesting-depth=unknown(documentation) tier-settable=no(documentation) session-start-event=no(documentation) post-compaction-event=no(documentation)"
+
+# THE LAUNCH ENVIRONMENT, built explicitly (see the header).
+grok_env() {
+  GROK_ENV=(
+    "PATH=$PATH"
+    "HOME=$harness_home"
+    "GROK_HOME=$harness_home"
+    "XDG_CONFIG_HOME=$harness_home/.config"
+    "XDG_DATA_HOME=$harness_home/.local/share"
+    "XDG_CACHE_HOME=$harness_home/.cache"
+    "XDG_RUNTIME_DIR=$harness_home/.runtime"
+    "DBUS_SESSION_BUS_ADDRESS=unix:path=$harness_home/.runtime/bus"
+    "TMPDIR=$harness_home/tmp"
+  )
+  mkdir -p "$harness_home/.config" "$harness_home/.local/share" "$harness_home/.cache" \
+           "$harness_home/.runtime" "$harness_home/tmp"
+}
+
+# Run the CLI under that environment, with the operator's credential seed
+# sourced inside the child when there is one.
+grok_exec() { # $@ the CLI and its arguments
+  local seed="${LAB_CREDENTIAL_SEED:-}/$adapter_name/env"
+  if [ -f "$seed" ]; then
+    timeout "$timeout_s" env -i "${GROK_ENV[@]}" \
+      sh -c 'set -a; . "$1"; set +a; shift; exec "$@"' _ "$seed" "$@"
+  else
+    timeout "$timeout_s" env -i "${GROK_ENV[@]}" "$@"
+  fi
+}
 
 _libdir="$(cd "$(dirname "${BASH_SOURCE[0]}")/../lib" && pwd)"
 # shellcheck source=../lib/common.sh
@@ -64,7 +106,8 @@ adapter_install() { # $1 plugin source ("" = NONE arm, load nothing)
   harness_home="$(mktemp -d)"
   [ -n "${1:-}" ] || return 0
   plugin_dir="$1"
-  env -i PATH="$PATH" HOME="$harness_home" GROK_HOME="$harness_home" \
+  grok_env
+  env -i "${GROK_ENV[@]}" \
     grok plugin install "$1" --trust </dev/null >>"$errlog" 2>&1 || {
     echo "grok plugin install failed (see $errlog)" >&2; return 1; }
 
@@ -77,7 +120,7 @@ adapter_install() { # $1 plugin source ("" = NONE arm, load nothing)
   mkdir -p "$harness_home/rules"
   printf 'Invoke the `using-sdlc-skills` skill before acting.\n' \
     >"$harness_home/rules/using-sdlc-skills.md"
-  out="$(cd "$plugin_dir" && env -i PATH="$PATH" HOME="$harness_home" GROK_HOME="$harness_home" \
+  out="$(cd "$plugin_dir" && env -i "${GROK_ENV[@]}" \
     grok inspect --json </dev/null 2>>"$errlog")" || {
     echo "grok inspect failed (see $errlog)" >&2; return 1; }
   instructions="$(jq -c '.projectInstructions' <<<"$out" 2>>"$errlog")" || {
@@ -161,9 +204,8 @@ adapter_usage() { # $1 stream file
 # HOME is the throwaway run home.
 adapter_run_activation() { # $1 workdir  $2 prompt  $3 stream  $4... extra flags
   local wd="$1" prompt="$2" stream="$3"; shift 3
-  ( cd "$wd" && exec timeout "$timeout_s" env -i PATH="$PATH" HOME="$harness_home" \
-      GROK_HOME="$harness_home" TMPDIR="${TMPDIR:-/tmp}" \
-      grok -p "$prompt" --output-format streaming-messages-json \
+  grok_env
+  ( cd "$wd" && grok_exec grok -p "$prompt" --output-format streaming-messages-json \
         --permission-mode plan --cwd "$wd" "$@" ) \
     < /dev/null > "$stream" 2>>"$errlog"
 }
@@ -172,9 +214,8 @@ adapter_run_activation() { # $1 workdir  $2 prompt  $3 stream  $4... extra flags
 # the run happens in a disposable fixture copy under TMPDIR, never in a real
 # checkout, under the throwaway run home.
 adapter_run_behavioral() { # $1 workdir  $2 opening file  $3 stream
-  ( cd "$1" && exec timeout "$timeout_s" env -i PATH="$PATH" HOME="$harness_home" \
-      GROK_HOME="$harness_home" TMPDIR="${TMPDIR:-/tmp}" \
-      grok -p "$(cat "$2")" --output-format streaming-messages-json \
+  grok_env
+  ( cd "$1" && grok_exec grok -p "$(cat "$2")" --output-format streaming-messages-json \
         --permission-mode acceptEdits --cwd "$1" ) \
     < /dev/null > "$3" 2>>"$errlog"
 }

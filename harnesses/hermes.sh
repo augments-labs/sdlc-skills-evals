@@ -32,6 +32,20 @@
 # environment once per throwaway home, and that fetch is a network call. The
 # adapter therefore never runs `hermes` on its own account; a run must be
 # launched by the operator, who accepts that one download.
+#
+# ISOLATION. Every invocation of the CLI runs under an environment this file
+# builds explicitly (hermes_env): the throwaway home, the CLI's own
+# HERMES_HOME — which is where the plugin lands and where hermes syncs its
+# Python environment — the XDG directories inside the throwaway home, a
+# runtime directory and a dead session-bus socket inside it. The operator's
+# environment is NOT inherited: it carries the operator's own session bus,
+# their SSH agent, their IDE tokens and their credential helpers, and an
+# invocation that inherited them could read the operator's stored
+# credentials. The one exception is the operator's credential seed
+# ($LAB_CREDENTIAL_SEED/hermes/env), which the runner exports for a harness
+# whose auth is environmental: it is sourced INSIDE the child process, so
+# its values reach the CLI and never reach a command line, a log or this
+# shell.
 
 adapter_name='hermes'
 
@@ -44,6 +58,35 @@ permission_flags="--tools"
 capabilities="subagent-loads-skills=no(documentation) nesting-depth=unknown(documentation) tier-settable=no(documentation) session-start-event=yes(documentation) post-compaction-event=yes(documentation)"
 
 source_hermes_home="${HERMES_HOME:-${HOME:-}/.hermes}"
+
+# THE LAUNCH ENVIRONMENT, built explicitly (see the header).
+hermes_env() {
+  HERMES_ENV=(
+    "PATH=$PATH"
+    "HOME=$harness_home"
+    "HERMES_HOME=$harness_home"
+    "XDG_CONFIG_HOME=$harness_home/.config"
+    "XDG_DATA_HOME=$harness_home/.local/share"
+    "XDG_CACHE_HOME=$harness_home/.cache"
+    "XDG_RUNTIME_DIR=$harness_home/.runtime"
+    "DBUS_SESSION_BUS_ADDRESS=unix:path=$harness_home/.runtime/bus"
+    "TMPDIR=$harness_home/tmp"
+  )
+  mkdir -p "$harness_home/.config" "$harness_home/.local/share" "$harness_home/.cache" \
+           "$harness_home/.runtime" "$harness_home/tmp"
+}
+
+# Run the CLI under that environment, with the operator's credential seed
+# sourced inside the child when there is one.
+hermes_exec() { # $@ the CLI and its arguments
+  local seed="${LAB_CREDENTIAL_SEED:-}/$adapter_name/env"
+  if [ -f "$seed" ]; then
+    timeout "$timeout_s" env -i "${HERMES_ENV[@]}" \
+      sh -c 'set -a; . "$1"; set +a; shift; exec "$@"' _ "$seed" "$@"
+  else
+    timeout "$timeout_s" env -i "${HERMES_ENV[@]}" "$@"
+  fi
+}
 
 _libdir="$(cd "$(dirname "${BASH_SOURCE[0]}")/../lib" && pwd)"
 # shellcheck source=../lib/common.sh
@@ -79,7 +122,8 @@ adapter_install() { # $1 plugin source ("" = NONE arm, load nothing)
     git -C "$snap" -c user.name=sdlc-skills-evals -c user.email=evals@example.invalid \
       commit -qm snapshot >>"$errlog" 2>&1 || {
     echo "could not commit the snapshot (see $errlog)" >&2; return 1; }
-  env -i PATH="$PATH" HOME="$harness_home" HERMES_HOME="$harness_home" \
+  hermes_env
+  env -i "${HERMES_ENV[@]}" \
     hermes plugins install "file://$snap" --enable --yes-deps \
     </dev/null >>"$errlog" 2>&1 || {
     echo "hermes plugins install failed (see $errlog)" >&2; return 1; }
@@ -136,9 +180,8 @@ adapter_usage() { # $1 stream file
 # allow-list keeps the arm read-only.
 adapter_run_activation() { # $1 workdir  $2 prompt  $3 stream  $4... extra flags
   local wd="$1" prompt="$2" stream="$3"; shift 3
-  ( cd "$wd" && exec timeout "$timeout_s" env -i PATH="$PATH" HOME="$harness_home" \
-      HERMES_HOME="$harness_home" TMPDIR="${TMPDIR:-/tmp}" \
-      hermes chat -q "$prompt" --format stream-json \
+  hermes_env
+  ( cd "$wd" && hermes_exec hermes chat -q "$prompt" --format stream-json \
         --tools read_file,search_files,grep,skill_view,skills_list "$@" ) \
     < /dev/null > "$stream" 2>>"$errlog"
 }
@@ -147,9 +190,8 @@ adapter_run_activation() { # $1 workdir  $2 prompt  $3 stream  $4... extra flags
 # the run happens in a disposable fixture copy under TMPDIR, never in a real
 # checkout, under the throwaway run home.
 adapter_run_behavioral() { # $1 workdir  $2 opening file  $3 stream
-  ( cd "$1" && exec timeout "$timeout_s" env -i PATH="$PATH" HOME="$harness_home" \
-      HERMES_HOME="$harness_home" TMPDIR="${TMPDIR:-/tmp}" \
-      hermes chat -q "$(cat "$2")" --format stream-json \
+  hermes_env
+  ( cd "$1" && hermes_exec hermes chat -q "$(cat "$2")" --format stream-json \
         --tools read_file,search_files,grep,write_file,edit_file,str_replace,skill_view,skills_list ) \
     < /dev/null > "$3" 2>>"$errlog"
 }
@@ -162,9 +204,8 @@ adapter_continue_behavioral() { # $1 workdir  $2 prompt  $3 new stream  $4 prior
   session_id="$(jq -r 'select(.type == "system" and .subtype == "init")
                        | .session_id // empty' "$prior" 2>/dev/null | head -1)"
   [ -n "$session_id" ] || { echo "hermes stream contains no resumable session id" >&2; return 2; }
-  ( cd "$wd" && exec timeout "$timeout_s" env -i PATH="$PATH" HOME="$harness_home" \
-      HERMES_HOME="$harness_home" TMPDIR="${TMPDIR:-/tmp}" \
-      hermes chat -q "$prompt" --format stream-json --resume "$session_id" \
+  hermes_env
+  ( cd "$wd" && hermes_exec hermes chat -q "$prompt" --format stream-json --resume "$session_id" \
         --tools read_file,search_files,grep,write_file,edit_file,str_replace,skill_view,skills_list ) \
     < /dev/null > "$out" 2>>"$errlog"
 }

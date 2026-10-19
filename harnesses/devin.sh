@@ -27,6 +27,26 @@
 #     lib/tests/fixtures/harnesses/devin/. No devin ACP session has been
 #     observed on this machine, so every capability below is documentation
 #     and `runnable` stays `no` until a real run replaces the label.
+#
+# ISOLATION. Every invocation of the CLI runs under an environment this file
+# builds explicitly (devin_env): the throwaway home, the XDG directories
+# inside it, a runtime directory and a dead session-bus socket inside it.
+# The operator's environment is NOT inherited: it carries the operator's own
+# session bus, their SSH agent, their IDE tokens and their credential
+# helpers, and an invocation that inherited them could read the operator's
+# stored credentials. The one exception is the operator's credential seed
+# ($LAB_CREDENTIAL_SEED/devin/env), which the runner exports for a harness
+# whose auth is environmental: it is sourced INSIDE the child process, so
+# its values reach the CLI and never reach a command line, a log or this
+# shell.
+#
+# The pinned upstream measured on 3000.11.3 that the install's
+# organisation-policy request times out under a fully cleared environment
+# (`env -i`). This adapter gives the CLI a runtime directory inside the
+# throwaway home instead of clearing everything — the one variable a
+# cleared environment was missing. If a real install still times out, the
+# exact variable it needs is evidence only a real run can produce, and it
+# belongs in this file then.
 
 adapter_name='devin'
 
@@ -38,6 +58,34 @@ permission_flags="--permission-mode"
 capabilities="subagent-loads-skills=no(documentation) nesting-depth=unknown(documentation) tier-settable=no(documentation) session-start-event=yes(documentation) post-compaction-event=unknown(documentation)"
 
 source_devin_data="${XDG_DATA_HOME:-${HOME:-}/.local/share}/devin"
+
+# THE LAUNCH ENVIRONMENT, built explicitly (see the header).
+devin_env() {
+  DEVIN_ENV=(
+    "PATH=$PATH"
+    "HOME=$harness_home"
+    "XDG_CONFIG_HOME=$harness_home/.config"
+    "XDG_DATA_HOME=$harness_home/.local/share"
+    "XDG_CACHE_HOME=$harness_home/.cache"
+    "XDG_RUNTIME_DIR=$harness_home/.runtime"
+    "DBUS_SESSION_BUS_ADDRESS=unix:path=$harness_home/.runtime/bus"
+    "TMPDIR=$harness_home/tmp"
+  )
+  mkdir -p "$harness_home/.config" "$harness_home/.local/share" "$harness_home/.cache" \
+           "$harness_home/.runtime" "$harness_home/tmp"
+}
+
+# Run the CLI under that environment, with the operator's credential seed
+# sourced inside the child when there is one.
+devin_exec() { # $@ the CLI and its arguments
+  local seed="${LAB_CREDENTIAL_SEED:-}/$adapter_name/env"
+  if [ -f "$seed" ]; then
+    timeout "$timeout_s" env -i "${DEVIN_ENV[@]}" \
+      sh -c 'set -a; . "$1"; set +a; shift; exec "$@"' _ "$seed" "$@"
+  else
+    timeout "$timeout_s" env -i "${DEVIN_ENV[@]}" "$@"
+  fi
+}
 
 _libdir="$(cd "$(dirname "${BASH_SOURCE[0]}")/../lib" && pwd)"
 # shellcheck source=../lib/common.sh
@@ -54,21 +102,25 @@ adapter_check() {
 # rather than devin's own directories alone because devin also reads
 # `~/.claude/` hooks and skills, which would answer for the tree under test.
 #
-# The environment is kept, not cleared with `env -i`: measured on 3000.11.3,
-# the install checks the organisation's plugin policy over the network and a
-# cleared environment times that request out.
+# The environment is built explicitly (see the header) rather than inherited:
+# the pinned upstream measured that a fully cleared environment times the
+# install's organisation-policy request out, and this adapter gives the CLI
+# a runtime directory inside the throwaway home instead of clearing
+# everything.
 #
 # The NONE arm is an isolated home with credentials and no plugin.
 adapter_install() { # $1 plugin source ("" = NONE arm, load nothing)
   harness_home="$(mktemp -d)"
-  plugin_dir="$1/plugins/sdlc-skills"
+  devin_env
   mkdir -p "$harness_home/.local/share/devin"
   [ -f "$source_devin_data/credentials.toml" ] &&
     cp "$source_devin_data/credentials.toml" "$harness_home/.local/share/devin/"
+  # The NONE arm is an isolated home with credentials and no plugin.
   [ -n "${1:-}" ] || return 0
-  ( cd "$harness_home" && env -u XDG_DATA_HOME -u XDG_CONFIG_HOME -u XDG_CACHE_HOME \
-      HOME="$harness_home" \
-      devin plugins install --local "$plugin_dir" -y </dev/null ) >>"$errlog" 2>&1 || {
+  plugin_dir="$1/plugins/sdlc-skills"
+  ( cd "$harness_home" && timeout "$timeout_s" env -i "${DEVIN_ENV[@]}" \
+      devin plugins install --local "$plugin_dir" -y </dev/null ) \
+    >>"$errlog" 2>&1 || {
     echo "devin plugins install failed (see $errlog)" >&2; return 1; }
   return 0
 }
@@ -199,15 +251,17 @@ _devin_acp_wait() { # $1 stream  $2 id  $3 fd  $4 read-only?|all  $5 pid
 _devin_acp_run() { # $1 workdir  $2 prompt  $3 stream  $4 read-only?|all  $5 cli permission mode
   local wd="$1" prompt="$2" stream="$3" mode="$4"
   local fifo pid waited=0 limit sid
-  fifo="$(mktemp -u "${TMPDIR:-/tmp}/devin-acp.XXXXXX")" || return 1
+  fifo="$(mktemp -u "$harness_home/tmp/devin-acp.XXXXXX")" || return 1
   mkfifo "$fifo" || return 1
   # The parent holds the fifo open READ-WRITE, so neither the open below nor
   # the child's read-only open can deadlock on the other side. The child
   # sees EOF when this handle is closed, which is the end of the session.
   exec 3<>"$fifo" || { rm -f "$fifo"; return 1; }
   # The child must not keep the parent's write handle: it would never see
-  # the EOF that ends the session.
-  ( cd "$wd" && exec 3<&- && exec devin --permission-mode "$5" acp ) \
+  # the EOF that ends the session. The SERVER is the CLI under test, so it
+  # is the server that runs under the isolation environment; this client
+  # stays in this shell, where the JSON-RPC conversation happens.
+  ( cd "$wd" && exec 3<&- && devin_exec devin --permission-mode "$5" acp ) \
     < "$fifo" > "$stream" 2>>"$errlog" &
   pid=$!
 
@@ -242,10 +296,8 @@ _devin_acp_run() { # $1 workdir  $2 prompt  $3 stream  $4 read-only?|all  $5 cli
 # throwaway run home.
 adapter_run_activation() { # $1 workdir  $2 prompt  $3 stream  $4... extra flags
   local wd="$1" prompt="$2" stream="$3"; shift 3
-  export -f _devin_acp_run _devin_acp_wait _devin_acp_answer
-  ( cd "$wd" && exec timeout "$timeout_s" env HOME="$harness_home" \
-      XDG_DATA_HOME="$harness_home/.local/share" TMPDIR="${TMPDIR:-/tmp}" \
-      bash -c '_devin_acp_run "$1" "$2" "$3" read auto' _ "$wd" "$prompt" "$stream" ) \
+  devin_env
+  ( cd "$wd" && _devin_acp_run "$wd" "$prompt" "$stream" read auto ) \
     < /dev/null > /dev/null 2>>"$errlog"
 }
 
@@ -253,10 +305,8 @@ adapter_run_activation() { # $1 workdir  $2 prompt  $3 stream  $4... extra flags
 # the run happens in a disposable fixture copy under TMPDIR, never in a real
 # checkout, under the throwaway run home.
 adapter_run_behavioral() { # $1 workdir  $2 opening file  $3 stream
-  export -f _devin_acp_run _devin_acp_wait _devin_acp_answer
-  ( cd "$1" && exec timeout "$timeout_s" env HOME="$harness_home" \
-      XDG_DATA_HOME="$harness_home/.local/share" TMPDIR="${TMPDIR:-/tmp}" \
-      bash -c '_devin_acp_run "$1" "$2" "$3" all accept-edits' _ "$1" "$(cat "$2")" "$3" ) \
+  devin_env
+  ( cd "$1" && _devin_acp_run "$1" "$(cat "$2")" "$3" all accept-edits ) \
     < /dev/null > /dev/null 2>>"$errlog"
 }
 
@@ -268,10 +318,8 @@ adapter_continue_behavioral() { # $1 workdir  $2 prompt  $3 new stream  $4 prior
   session_id="$(jq -r 'select(.id? == 2) | .result.sessionId // empty' \
     "$prior" 2>/dev/null | head -1)"
   [ -n "$session_id" ] || { echo "Devin stream contains no resumable session id" >&2; return 2; }
-  export -f _devin_acp_run _devin_acp_wait _devin_acp_answer
-  ( cd "$wd" && exec timeout "$timeout_s" env HOME="$harness_home" \
-      XDG_DATA_HOME="$harness_home/.local/share" TMPDIR="${TMPDIR:-/tmp}" \
-      bash -c '_devin_acp_run "$1" "$2" "$3" all accept-edits' _ "$wd" "$prompt" "$out" ) \
+  devin_env
+  ( cd "$wd" && _devin_acp_run "$wd" "$prompt" "$out" all accept-edits ) \
     < /dev/null > /dev/null 2>>"$errlog"
 }
 
