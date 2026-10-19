@@ -87,6 +87,22 @@ else
   bad "the dry run names the whole planned invocation (got '$(plan_cmd "$out")')"
 fi
 
+# the --all branch names every option the live path honours: the
+# expectation is the whole option set, not the subset this call passes
+all_desc="$work/desc-all"
+mkdir -p "$all_desc/common"
+printf '%s\n' '[{"query":"probe","should_trigger":true,"split":"train","expect":"probe"}]' \
+  >"$all_desc/common/probe.json"
+out="$(DESCRIPTIONS_ROOT="$all_desc" "$here/bin/triggering" --harness fake --harness-dir "$fake_h" \
+  --all --runs 2 --jobs 1 --split train --timeout 30 --max-turns 4 \
+  --json "$work/out-all.json" --no-fixture --dry-run 2>&1)"
+want="bin/triggering --harness fake --all --plugin $inv_commit --runs 2 --jobs 1 --split train --timeout 30 --max-turns 4 --json $work/out-all.json --no-fixture --harness-dir $fake_h"
+if [ "$(plan_cmd "$out")" = "$want" ]; then
+  ok "the --all plan names the whole planned invocation"
+else
+  bad "the --all plan names the whole planned invocation (got '$(plan_cmd "$out")')"
+fi
+
 # an explicit plugin is named as it was given
 out="$("$here/bin/triggering" --harness fake --skill yagni --plugin "$standin" --dry-run 2>&1)"
 printf '%s' "$out" | grep -qF "command  : bin/triggering --harness fake --skill yagni --plugin $standin" \

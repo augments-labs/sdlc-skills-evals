@@ -358,6 +358,30 @@ case "$plan" in
   *) ok "the dry run's red arm command carries no --plugin";;
 esac
 
+# the red and the none arm name the WHOLE command, option by option, so
+# that dropping any option the live path honours turns the case red, and
+# so that the options an arm does not carry are asserted to be absent
+rec5b="$(mktemp -d)"
+out="$("$here/bin/behavior" --harness fake --scenario probe-ok --arm red --base "$plug_commit" \
+  --tier small --keep --record "$rec5b" --scenario-dir "$fake_s" --harness-dir "$fake_h" \
+  --timeout 60 --dry-run 2>&1)"
+want="bin/behavior --harness fake --scenario probe-ok --arm red --base $plug_commit --timeout 60 --tier small --keep --record $rec5b --scenario-dir $fake_s --harness-dir $fake_h"
+if [ "$(plan_cmd "$out")" = "$want" ]; then
+  ok "the red arm names the whole planned invocation"
+else
+  bad "the red arm names the whole planned invocation (got '$(plan_cmd "$out")')"
+fi
+out="$("$here/bin/behavior" --harness fake --scenario probe-ok --arm none \
+  --tier small --keep --record "$rec5b" --scenario-dir "$fake_s" --harness-dir "$fake_h" \
+  --timeout 60 --dry-run 2>&1)"
+want="bin/behavior --harness fake --scenario probe-ok --arm none --timeout 60 --tier small --keep --record $rec5b --scenario-dir $fake_s --harness-dir $fake_h"
+if [ "$(plan_cmd "$out")" = "$want" ]; then
+  ok "the none arm names the whole planned invocation"
+else
+  bad "the none arm names the whole planned invocation (got '$(plan_cmd "$out")')"
+fi
+rm -rf "$rec5b"
+
 out="$("$here/bin/behavior" --harness codex --scenario probe-ok --arm green \
   --scenario-dir "$fake_s" --dry-run 2>&1)"
 rc="$?"

@@ -91,6 +91,38 @@ want="bin/behavior --harness fake --scenario probe-ok --arm green --plugin $inv_
   || bad "the campaign names the whole planned invocation (got '$plan_cmd')"
 rm -rf "$here"/results/*-"$l3"
 
+# --- the plan names EVERY option the run honours -----------------------------
+#
+# The expectation is built from the whole option set the live path passes
+# to bin/behavior — not from the subset this campaign happens to use — so
+# that dropping any one of them turns this case red. A plan that names
+# no --tier, no --harness-dir or no --base measures a different campaign
+# from the one that was prepared, and a user who copies the printed
+# invocation gets that difference.
+
+plan_base="$work/planbase"
+mkdir -p "$plan_base"
+git -C "$plan_base" init -q
+git -C "$plan_base" -c user.name=t -c user.email=t@example.invalid commit -q --allow-empty -m base
+plan_base_commit="$(git -C "$plan_base" rev-parse HEAD)"
+l_plan="selftest-plan-$$"
+out="$("$here/bin/campaign" new "$l_plan" --plugin "$standin" --harness fake \
+  --arms green,red --base "$plan_base_commit" --scenarios probe-ok --runs 1 \
+  --tier small --harness-dir "$here/lib/tests/fake-cli" \
+  --scenario-dir "$here/lib/tests/fake-cli/scenarios" 2>&1)"
+d_plan="$(ls -d "$here"/results/*-"$l_plan" 2>/dev/null | head -1)"
+plan_green="$(printf '%s\n' "$out" | sed -n 's/^command    : //p' | grep -- "--arm green" | head -1)"
+plan_red="$(printf '%s\n' "$out" | sed -n 's/^command    : //p' | grep -- "--arm red" | head -1)"
+want_green="bin/behavior --harness fake --scenario probe-ok --arm green --plugin $standin --tier small --record $d_plan --harness-dir $here/lib/tests/fake-cli --scenario-dir $here/lib/tests/fake-cli/scenarios"
+want_red="bin/behavior --harness fake --scenario probe-ok --arm red --base $plan_base_commit --tier small --record $d_plan --harness-dir $here/lib/tests/fake-cli --scenario-dir $here/lib/tests/fake-cli/scenarios"
+[ "$plan_green" = "$want_green" ] \
+  && ok "the green arm's plan names every option the run honours" \
+  || bad "the green arm's plan names every option the run honours (got '$plan_green')"
+[ "$plan_red" = "$want_red" ] \
+  && ok "the red arm's plan names every option the run honours" \
+  || bad "the red arm's plan names every option the run honours (got '$plan_red')"
+rm -rf "$here"/results/*-"$l_plan"
+
 # --- a campaign runs the commit it froze, not a tag that moved ---------------
 #
 # A tag may be named when the campaign is prepared; the commit it names is
