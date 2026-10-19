@@ -36,14 +36,43 @@ trap 'rm -rf "$here"/results/*-"$l" "$here"/results/*-"$l"-* "$here"/workspaces/
   --scenarios probe-ok --runs 1 --scenario-dir "$here/lib/tests/fake-cli/scenarios" >/dev/null 2>&1 \
   || { bad "campaign new"; exit "$fails"; }
 d="$(ls -d "$here"/results/*-"$l")"
-jq -e --arg c "$plug_commit" '.plugin_commit == $c and .harness == "fake" and (.arms | type == "array")' \
+# the key set IS the guarantee: a campaign that loses tier, harness_dir
+# or scenario_dir stops honouring them, and the plan still prints them
+want_keys='["arms","created","harness","harness_dir","lab_commit","label","plugin_commit","plugin_ref","runs","scenario_dir","scenarios","suite","tier"]'
+jq -e --arg c "$plug_commit" --argjson k "$want_keys" \
+  '.plugin_commit == $c and .harness == "fake" and (.arms | type == "array")
+   and (keys == $k)' \
   "$d/campaign.json" >/dev/null && ok "inputs frozen with the key set" || bad "inputs frozen with the key set"
+
+# --- the run honours the directory overrides the campaign froze ---------------
+#
+# The plan prints them, and the run passes them, so the two cannot
+# disagree. The adapter answers to another name, because the harness
+# directory override is invisible under the name the runner routes by
+# itself.
+
+alt_hdir="$work/alt-harness-dir"
+mkdir -p "$alt_hdir"
+cp "$here/lib/tests/fake-cli/fake.sh" "$alt_hdir/altfake.sh"
+l_run="selftest-runopts-$$"
+"$here/bin/campaign" new "$l_run" --plugin "$standin" --harness altfake --arms green \
+  --scenarios probe-ok --runs 1 --harness-dir "$alt_hdir" \
+  --scenario-dir "$here/lib/tests/fake-cli/scenarios" >/dev/null 2>&1
+out="$("$here/bin/campaign" run "$l_run" 2>&1)"
+printf '%s' "$out" | grep -q "completed 1/1 runs" \
+  && ok "the run honours the directories the campaign froze" \
+  || bad "the run honours the directories the campaign froze (got '$out')"
+rm -rf "$here"/results/*-"$l_run"
 
 "$here/bin/campaign" report "$l" >/dev/null 2>&1 \
   && bad "report refused before runs end" || ok "report refused before runs end"
 
 "$here/bin/campaign" run "$l" >/dev/null 2>&1 \
   || { bad "campaign run"; exit "$fails"; }
+# the run adds the attempt's count, and adds nothing else
+run_keys='["arms","created","harness","harness_dir","lab_commit","label","last_run","plugin_commit","plugin_ref","runs","scenario_dir","scenarios","suite","tier"]'
+jq -e --argjson k "$run_keys" 'keys == $k' "$d/campaign.json" >/dev/null \
+  && ok "the record keeps the key set after the run" || bad "the record keeps the key set after the run"
 "$here/bin/campaign" report "$l" >/dev/null 2>&1 \
   || { bad "campaign report"; exit "$fails"; }
 grep -q "^## Commit" "$d/summary.md" && ok "summary has Commit" || bad "summary has Commit"
