@@ -162,13 +162,13 @@ part of what the verification procedure below settles.
 **The lab's runner cannot make the first observation.** `bin/behavior`
 refuses an adapter whose header says `runnable=no`: it prints
 `indeterminate(stage=harness)` and exits 2 before it launches anything
-(`bin/behavior:161-173`). Seven of the eleven adapters carry that flag,
-and it is the flag that says "this harness has not been run here yet" —
-so the run that would produce the evidence is exactly the run the runner
-refuses to make. The first observation is therefore made **by hand**,
-and the flag is promoted afterwards. Nothing in this repository can
-promote it: the offline tests run against a fake CLI, and fake evidence
-never promotes a status.
+(`bin/behavior:161-173`). Nine of the eleven adapters carry that flag
+(`opencode` and `claude-code` are the two that do not), and it is the flag
+that says "this harness has not been run here yet" — so the run that would
+produce the evidence is exactly the run the runner refuses to make. The
+first observation is therefore made **by hand**, and the flag is promoted
+afterwards. Nothing in this repository can promote it: the offline tests
+run against a fake CLI, and fake evidence never promotes a status.
 
 The procedure, per harness:
 
@@ -206,9 +206,9 @@ The procedure, per harness:
    | pi | `pi --mode json --session-dir <dir> --tools read,grep,find,ls "<prompt>"` | a `tool_execution_start` whose `toolName` is `read` and whose `args.path` is a `SKILL.md` |
 
    Run it in a disposable directory. A real run costs a model call, and
-   the agent may write: the behavioural commands in the table's row for
-   the harness are the ones that write, and the workdir is the only
-   thing standing between the run and a real checkout.
+   the agent may write, so the working directory is the only thing
+   standing between the run and a real checkout: never point this at a
+   directory whose contents matter.
 3. **Read the stream through the adapter's own parser.** That is the
    point of the procedure: the parser is what the lab judges, so the
    hand-made observation has to satisfy it.

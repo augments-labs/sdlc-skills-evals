@@ -103,6 +103,12 @@ agy_env() { # fills AGY_ENV with the isolation assignments (see the header)
            "$harness_home/.local/share" "$harness_home/.cache" "$harness_home/tmp"
 }
 
+# Run the CLI under that environment. There is no seed to carry here: this
+# harness deliberately reaches no credential at all.
+agy_exec() { # $@ the CLI and its arguments
+  timeout "$timeout_s" env -i "${AGY_ENV[@]}" "$@"
+}
+
 _libdir="$(cd "$(dirname "${BASH_SOURCE[0]}")/../lib" && pwd)"
 # shellcheck source=../lib/common.sh
 source "$_libdir/common.sh"
@@ -213,8 +219,7 @@ adapter_usage() { # $1 stream file
 adapter_run_activation() { # $1 workdir  $2 prompt  $3 stream  $4... extra flags
   local wd="$1" prompt="$2" stream="$3"; shift 3
   agy_env
-  ( cd "$wd" && exec timeout "$timeout_s" env -i "${AGY_ENV[@]}" \
-      agy --output-format stream-json --mode plan "$@" --print="$prompt" ) \
+  ( cd "$wd" && agy_exec agy --output-format stream-json --mode plan "$@" --print="$prompt" ) \
     < /dev/null > "$stream" 2>>"$errlog"
 }
 
@@ -223,8 +228,7 @@ adapter_run_activation() { # $1 workdir  $2 prompt  $3 stream  $4... extra flags
 # checkout, under the throwaway run home and the isolation environment.
 adapter_run_behavioral() { # $1 workdir  $2 opening file  $3 stream
   agy_env
-  ( cd "$1" && exec timeout "$timeout_s" env -i "${AGY_ENV[@]}" \
-      agy --output-format stream-json --mode accept-edits --print="$(cat "$2")" ) \
+  ( cd "$1" && agy_exec agy --output-format stream-json --mode accept-edits --print="$(cat "$2")" ) \
     < /dev/null > "$3" 2>>"$errlog"
 }
 
@@ -238,8 +242,7 @@ adapter_continue_behavioral() { # $1 workdir  $2 prompt  $3 new stream  $4 prior
     "$prior" 2>/dev/null | head -1)"
   [ -n "$conversation_id" ] || { echo "Antigravity stream contains no resumable conversation id" >&2; return 2; }
   agy_env
-  ( cd "$wd" && exec timeout "$timeout_s" env -i "${AGY_ENV[@]}" \
-      agy --output-format stream-json --mode accept-edits \
+  ( cd "$wd" && agy_exec agy --output-format stream-json --mode accept-edits \
         --conversation "$conversation_id" --print="$prompt" ) \
     < /dev/null > "$out" 2>>"$errlog"
 }
