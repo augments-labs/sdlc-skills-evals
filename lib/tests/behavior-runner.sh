@@ -178,6 +178,14 @@ out="$("$here/bin/behavior" --harness fake --scenario probe-ok --arm green \
   --dry-run "${base[@]}" 2>&1)"
 printf '%s' "$out" | grep -qF "pin        : $inv_commit" \
   && ok "the default pin is the committed one" || bad "the default pin is the committed one"
+
+# a directory plugin is named as the tree it is: a working tree is not a
+# commit, and calling it one would describe content the run never measured
+out="$("$here/bin/behavior" --harness fake --scenario probe-ok --arm green \
+  --plugin "$standin" --dry-run "${base[@]}" 2>&1)"
+printf '%s' "$out" | grep -qF "pin        : $standin" \
+  && ok "the dry run names the tree a directory plugin installs" \
+  || bad "the dry run names the tree a directory plugin installs"
 SDLC_SKILLS_ROOT="$standin" "$here/bin/behavior" --harness fake --scenario probe-ok \
   --arm green "${base[@]}" >/dev/null 2>&1
 [ "$?" -eq 2 ] && ok "a run that cannot resolve the default pin refuses" \

@@ -218,7 +218,7 @@ fi
 # and launches nothing: no CLI, no credential, no model, no run home.
 
 if [ -n "$dry" ]; then
-  plan_pin=""; plan_note=""; plan_ref=""
+  plan_pin=""; plan_note=""; plan_ref=""; plan_flag=""
   case "$arm" in
     none)
       plan_pin="(none)"
@@ -226,24 +226,23 @@ if [ -n "$dry" ]; then
       ;;
     red)
       plan_ref="$base"
-      plan_note="--base $base"
+      plan_flag="--base"
       ;;
     green)
       plan_ref="$plugin"
-      if [ -n "$plugin_defaulted" ]; then
-        plan_note="config/upstream-inventory.json"
-      else
-        plan_note="--plugin $plugin"
-      fi
+      plan_flag="--plugin"
       ;;
   esac
   if [ -n "$plan_ref" ]; then
-    resolved="$(lab_pin_commit_of "$plan_ref" 2>/dev/null)" || resolved=""
-    if [ -n "$resolved" ]; then
-      plan_pin="$resolved"
+    if [ -n "$plugin_defaulted" ]; then
+      plan_pin="$plugin"
+      plan_note="config/upstream-inventory.json"
     else
-      plan_pin="$plan_ref"
-      plan_note="$plan_note; a run resolves it against the plugin checkout"
+      # The tree the run installs: a directory is the operator's own
+      # working tree and is used as it is, so the tree is the path; a ref
+      # is pinned into a worktree, so the tree is the commit it names.
+      plan_pin="$(lab_pin_tree "$plan_ref" 2>/dev/null)" || plan_pin="$plan_ref"
+      plan_note="$(lab_pin_note "$plan_flag" "$plan_ref")"
     fi
   fi
   plan_cmd="bin/behavior --harness $(printf '%q' "$harness") --scenario $(printf '%q' "$scenario") --arm $arm"
