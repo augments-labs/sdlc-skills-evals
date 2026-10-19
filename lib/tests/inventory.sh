@@ -212,6 +212,18 @@ if [ -f "$DOC" ]; then
   grep -v '^| E-7 ' "$DOC" >"$work/docs/upstream-coverage.md"
   run_check "$INV" "$work/docs"
   expect_fail "a coverage record that drops a task mapping is rejected" "does not map E-7"
+
+  # the record must not overstate the re-pin: while the lab's own
+  # documented pin rows still name the old tag, the record names them
+  if grep -q 'v10\.2\.1' README.md 2>/dev/null; then
+    if grep -E 'README\.md.*v10\.2\.1' "$DOC" >/dev/null 2>&1; then
+      ok "the coverage record names the documented pin rows that still name the old tag"
+    else
+      bad "the coverage record names the documented pin rows that still name the old tag"
+    fi
+  else
+    ok "the lab's documented pin rows name the pinned commit (nothing to record)"
+  fi
 fi
 
 # --- the reported gaps match the assets on disk -----------------------------
