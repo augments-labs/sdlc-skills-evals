@@ -211,7 +211,7 @@ if mutate '.harnesses += [.harnesses[0]]' "$work/m.json"; then
 fi
 if mutate '.skills |= map(if . == "analysis/working-from-a-ticket" then "analysis/working-from-ticket" else . end)' "$work/m.json"; then
   run_check "$work/m.json" docs --plugin "$tree"
-  expect_fail "a mismatched canonical skill name is rejected" "absent from upstream"
+  expect_fail "a mismatched canonical skill name is rejected" "absent from the supplied tree"
 fi
 if mutate '.skills |= map(if . == "analysis/working-from-a-ticket" then "working-from-a-ticket" else . end)' "$work/m.json"; then
   run_check "$work/m.json" docs
@@ -248,7 +248,7 @@ drift_tree="$work/drift-tree"
 cp -r "$tree" "$drift_tree"
 rm -rf "$drift_tree/skills/$(jq -r '.skills[0]' "$INV")"
 run_check "$INV" docs --plugin "$drift_tree"
-expect_fail "a tree that lost a skill is rejected" "absent from upstream"
+expect_fail "a tree that lost a skill is rejected" "absent from the supplied tree"
 
 drift_tree2="$work/drift-tree2"
 cp -r "$tree" "$drift_tree2"
@@ -261,7 +261,7 @@ drift_tree3="$work/drift-tree3"
 cp -r "$tree" "$drift_tree3"
 rm -f "$drift_tree3/tests/harnesses/$(jq -r '.harnesses[0]' "$INV").sh"
 run_check "$INV" docs --plugin "$drift_tree3"
-expect_fail "a tree that lost a harness is rejected" "absent from upstream"
+expect_fail "a tree that lost a harness is rejected" "absent from the supplied tree"
 
 drift_tree4="$work/drift-tree4"
 cp -r "$tree" "$drift_tree4"
@@ -286,6 +286,50 @@ mkdir -p "$drift_tree6/tests/harnesses/nested"
 : >"$drift_tree6/tests/harnesses/nested/brand-new-harness.sh"
 run_check "$INV" docs --plugin "$drift_tree6"
 expect_fail "a tree harness outside the flat shape is rejected" "absent from the inventory"
+
+# a drifting tree: the disclosure belongs on the failure path too, and the
+# message must not claim the tree is upstream
+drift_tree7="$work/drift-tree7"
+cp -r "$tree" "$drift_tree7"
+mkdir -p "$drift_tree7/skills/design/newphase/newskill"
+: >"$drift_tree7/skills/design/newphase/newskill/SKILL.md"
+run_check "$INV" docs --plugin "$drift_tree7"
+expect_fail "a drifting tree is rejected" "absent from the inventory"
+if printf '%s\n' "$check_out" | grep -q "were not verified"; then
+  ok "the failure path carries the not-verified disclosure"
+else
+  bad "the failure path carries the not-verified disclosure"
+fi
+if printf '%s\n' "$check_out" | grep -q "upstream tree"; then
+  bad "the failure path does not claim the tree is upstream"
+else
+  ok "the failure path does not claim the tree is upstream"
+fi
+
+# two tree files sharing a basename are one member, not two
+dup_tree="$work/dup-tree"
+cp -r "$tree" "$dup_tree"
+mkdir -p "$dup_tree/tests/harnesses/nested"
+: >"$dup_tree/tests/harnesses/nested/opencode.sh"
+run_check "$INV" docs --plugin "$dup_tree"
+expect_pass "a repeated harness basename is one member"
+if printf '%s\n' "$check_out" | grep -q "absent from the inventory"; then
+  bad "a repeated harness basename is not reported as drift"
+else
+  ok "a repeated harness basename is not reported as drift"
+fi
+
+# a tree file whose name strips to nothing is a member, not an absence
+empty_name_tree="$work/empty-name-tree"
+cp -r "$tree" "$empty_name_tree"
+: >"$empty_name_tree/tests/harnesses/.sh"
+run_check "$INV" docs --plugin "$empty_name_tree"
+expect_fail "a tree file with an empty name is drift" "absent from the inventory"
+if printf '%s\n' "$check_out" | grep -q "an empty name"; then
+  ok "the drift report names an empty member readably"
+else
+  bad "the drift report names an empty member readably"
+fi
 
 # --- the coverage record maps every old task --------------------------------
 
@@ -314,6 +358,14 @@ if [ -f "$DOC" ]; then
   printf '| E-5 | preserved |\n' >>"$work/docs-stray-line/upstream-coverage.md"
   run_check "$INV" "$work/docs-stray-line"
   expect_fail "a stray line naming a task does not satisfy the mapping" "does not map E-5"
+
+  # a stray line of the task table's own shape, outside the table, does not
+  # satisfy it either
+  mkdir -p "$work/docs-stray-same-shape"
+  grep -v '^| E-5 ' "$DOC" >"$work/docs-stray-same-shape/upstream-coverage.md"
+  printf '| E-5 | some scope | preserved | some evidence |\n' >>"$work/docs-stray-same-shape/upstream-coverage.md"
+  run_check "$INV" "$work/docs-stray-same-shape"
+  expect_fail "a same-shape stray line does not satisfy the mapping" "does not map E-5"
 
   # the record must not overstate the re-pin: while the lab's own
   # documented pin rows still name the old tag, the record names them
@@ -489,6 +541,20 @@ if mutate '.harnesses[0] = "tests/harnesses/x.sh"' "$work/m.json"; then
 fi
 mkdir -p "$work/not-a-tree"
 run_check "$INV" docs --plugin "$work/not-a-tree"
-expect_fail "a directory that is not an upstream tree is rejected" "is not an upstream tree"
+expect_fail "a directory that is not a plugin tree is rejected" "has no skills/ or tests/harnesses/ directory"
+
+# --- the coverage scan reads the same root the shape check reads ------------
+#
+# The gate has one descriptions root. A caller that moves it moves both.
+
+mkdir -p "$work/empty-descriptions"
+check_out="$(DESCRIPTIONS_ROOT="$work/empty-descriptions" bash bin/check --inventory 2>&1)" \
+  && check_rc=0 || check_rc=$?
+seam_gaps="$(printf '%s\n' "$check_out" | sed -n 's/^check: gap: no description set for //p' | grep -c .)"
+if [ "$seam_gaps" -eq "$(jq '.skills | length' "$INV")" ]; then
+  ok "the coverage scan follows the descriptions root seam"
+else
+  bad "the coverage scan follows the descriptions root seam ($seam_gaps of $(jq '.skills | length' "$INV") skills)"
+fi
 
 exit "$fails"

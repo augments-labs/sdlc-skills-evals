@@ -20,6 +20,7 @@ INV_COMMIT="638040d407eae2834414968478792be99b3ff0cf"
 INV_VERSION="11.0.0"
 inv_path="${INVENTORY_PATH:-config/upstream-inventory.json}"
 docs_root="${DOCS_ROOT:-docs}"
+desc_root="${DESCRIPTIONS_ROOT:-descriptions}"
 check_plugin=""
 inv_only=0
 while [ $# -gt 0 ]; do
@@ -30,20 +31,27 @@ while [ $# -gt 0 ]; do
   esac
 done
 
+_list_lines() { # $1 list — one line per member, and no line at all for an
+  # empty list: an empty list and a list holding an empty member are
+  # different things, and the second must not be made invisible
+  [ -n "$1" ] || return 0
+  printf '%s\n' "$1"
+}
+
 _inventory_drift() { # $1 label, $2 inventory list, $3 tree list — 0 when they agree
   local label="$1" inv_list="$2" tree_list="$3" missing stale
-  missing="$(comm -13 <(printf '%s\n' "$inv_list" | sort) <(printf '%s\n' "$tree_list" | sort) | grep -v '^$')"
-  stale="$(comm -23 <(printf '%s\n' "$inv_list" | sort) <(printf '%s\n' "$tree_list" | sort) | grep -v '^$')"
+  missing="$(comm -13 <(_list_lines "$inv_list" | sort) <(_list_lines "$tree_list" | sort))"
+  stale="$(comm -23 <(_list_lines "$inv_list" | sort) <(_list_lines "$tree_list" | sort))"
   if [ -z "$missing" ] && [ -z "$stale" ]; then
     return 0
   fi
-  echo "check: FAIL the inventory does not match the upstream tree ($label):"
+  echo "check: FAIL the inventory does not match the supplied tree ($label):"
   if [ -n "$missing" ]; then
-    echo "  upstream, absent from the inventory:"
+    echo "  in the supplied tree, absent from the inventory:"
     printf '%s\n' "$missing" | sed 's/^/    /'
   fi
   if [ -n "$stale" ]; then
-    echo "  in the inventory, absent from upstream:"
+    echo "  in the inventory, absent from the supplied tree:"
     printf '%s\n' "$stale" | sed 's/^/    /'
   fi
   return 1
@@ -99,22 +107,25 @@ _check_inventory() { # the committed inventory, and its drift against a tree
   fi
   if [ -n "$check_plugin" ]; then
     if [ ! -d "$check_plugin/skills" ] || [ ! -d "$check_plugin/tests/harnesses" ]; then
-      echo "check: FAIL $check_plugin is not an upstream tree"
+      echo "check: FAIL $check_plugin has no skills/ or tests/harnesses/ directory (not a plugin tree)"
       return 1
     fi
+    # the comparison is by name: the tree's own commit and its contents are
+    # not established by it. Say so before the comparison, where it is read
+    # on the failure path as well as on the success path.
+    echo "check: inventory membership compared by name against the supplied tree $check_plugin; the tree's commit and its contents were not verified"
     # Every skill under skills/ and every file under tests/harnesses/ is
     # compared, whatever its depth: a member of a supplied tree is never
     # invisible to the gate. The packaged mirror lives under plugins/,
-    # outside these roots, so it is never collected.
-    tree_skills="$(cd "$check_plugin" && find skills -name SKILL.md | sed 's|^skills/||; s|/SKILL.md$||' | sort)" \
+    # outside these roots, so it is never collected. The harness set is a
+    # set of names, so a repeated basename is one member. A name that
+    # strips to nothing is a member, and is shown as one.
+    tree_skills="$(cd "$check_plugin" && find skills -name SKILL.md | sed 's|^skills/||; s|/SKILL.md$||' | sed 's|^$|(an empty name)|' | sort)" \
       || { echo "check: FAIL cannot read the tree at $check_plugin"; return 1; }
-    tree_harnesses="$(cd "$check_plugin" && find tests/harnesses -type f ! -name 'README.md' | sed 's|.*/||; s|\.sh$||' | sort)" \
+    tree_harnesses="$(cd "$check_plugin" && find tests/harnesses -type f ! -name 'README.md' | sed 's|.*/||; s|\.sh$||' | sed 's|^$|(an empty name)|' | sort -u)" \
       || { echo "check: FAIL cannot read the tree at $check_plugin"; return 1; }
     _inventory_drift "skills" "$(jq -r '.skills[]' "$inv")" "$tree_skills" || return 1
     _inventory_drift "harnesses" "$(jq -r '.harnesses[]' "$inv")" "$tree_harnesses" || return 1
-    # the comparison is by name: the tree's own commit and its contents are
-    # not established by it, so say so
-    echo "check: inventory membership compared by name against the supplied tree $check_plugin; the tree's commit and its contents were not verified"
   else
     # membership is knowable only against a tree: say so, so a reader of the
     # log cannot mistake this for "the inventory matches upstream"
@@ -123,13 +134,14 @@ _check_inventory() { # the committed inventory, and its drift against a tree
   # Coverage gaps are reported, never failed: the successor plan closes the
   # skill gaps in V3-CORPORA and the adapter gaps in V3-HARNESSES. The
   # line is printed either way, so an empty result is an explicit zero and
-  # not the absence of a scan.
+  # not the absence of a scan. The scan reads the same roots the shape
+  # checks read, so a caller that moves a root moves both.
   local eval_n=0 desc_n=0 adapter_n=0
   while IFS= read -r sk; do
     if [ ! -f "behavior/evals/$sk/evals.json" ]; then
       eval_gaps="$eval_gaps $sk"; eval_n=$((eval_n + 1))
     fi
-    if [ ! -f "descriptions/$sk.json" ]; then
+    if [ ! -f "$desc_root/$sk.json" ]; then
       desc_gaps="$desc_gaps $sk"; desc_n=$((desc_n + 1))
     fi
   done < <(jq -r '.skills[]' "$inv")
@@ -153,17 +165,44 @@ _check_coverage_record() { # every old task is mapped to a scope verdict
     return 1
   fi
   for id in E-0 E-1 E-2 E-3 E-4 E-5 E-6 E-7 E-8 E-9 E-10 E-11 E-12 E-13 E-14; do
-    # the mapping is read from the task table: a row of its four-column
-    # shape, naming the id in column 1, carrying the verdict in column 3
-    # (field 4 once the pipes are the separators). No other cell and no
-    # line outside the table can supply a verdict.
-    awk -F'|' -v id="$id" '
-      NF == 6 && $2 ~ ("^[[:space:]]*" id "([[:space:]]|$)") {
-        v = $4
-        gsub(/^[[:space:]]+|[[:space:]]+$/, "", v)
-        if (v == "preserved" || v == "extended" || v == "removed") found = 1
-      }
-      END { exit(found ? 0 : 1) }' "$doc" \
+    # The mapping is read from the task table: the first table whose header
+    # names a Verdict column, and the rows of that table only. The verdict
+    # cell is the one the header names, and a row must have the header's
+    # column count. A line outside the table, or a cell other than the
+    # verdict cell, cannot supply a verdict.
+    awk -v id="$id" '
+      { line[NR] = $0 }
+      END {
+        hdr = 0
+        for (i = 1; i <= NR && !hdr; i++) {
+          if (line[i] !~ /^\|/) continue
+          n = split(line[i], cell, "|")
+          first = 1; last = n
+          if (cell[1] == "") first = 2
+          if (cell[n] == "") last = n - 1
+          for (j = first; j <= last; j++) {
+            v = cell[j]
+            gsub(/^[[:space:]]+|[[:space:]]+$/, "", v)
+            if (v == "Verdict") { hdr = i; vcol = j; cols = last - first + 1 }
+          }
+        }
+        if (hdr == 0) exit 1
+        for (i = hdr + 1; i <= NR; i++) {
+          if (line[i] !~ /^\|/) break
+          n = split(line[i], cell, "|")
+          first = 1; last = n
+          if (cell[1] == "") first = 2
+          if (cell[n] == "") last = n - 1
+          if (last - first + 1 != cols) continue
+          v = cell[first]
+          gsub(/^[[:space:]]+|[[:space:]]+$/, "", v)
+          if (v !~ ("^" id "([[:space:]]|$)")) continue
+          v = cell[vcol]
+          gsub(/^[[:space:]]+|[[:space:]]+$/, "", v)
+          if (v == "preserved" || v == "extended" || v == "removed") found = 1
+        }
+        exit(found ? 0 : 1)
+      }' "$doc" \
       || { echo "check: FAIL the coverage record does not map $id to preserved, extended or removed"; return 1; }
   done
   echo "check: coverage record ok"
@@ -226,8 +265,9 @@ if [ -f behavior/suites/routing.txt ]; then
 fi
 
 # E-5: query-set shape — what the old README asked readers to check.
-# Root override for tests: DESCRIPTIONS_ROOT (default descriptions/).
-desc_root="${DESCRIPTIONS_ROOT:-descriptions}"
+# Root override for tests: DESCRIPTIONS_ROOT (default descriptions/),
+# declared with the other roots above so the coverage scan reads the same
+# root this section reads.
 _check_set() { # $1 file $2 holdout(0|1)
   local f="$1" hold="$2" total pos neg t v tpos vpos
   total="$(jq 'length' "$f")" || { echo "check: FAIL $f is not a JSON array"; return 1; }
