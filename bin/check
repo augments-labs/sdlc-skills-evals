@@ -102,35 +102,46 @@ _check_inventory() { # the committed inventory, and its drift against a tree
       echo "check: FAIL $check_plugin is not an upstream tree"
       return 1
     fi
-    # Every skill under skills/ is compared, whatever its depth: a member of
-    # a supplied tree is never invisible to the gate. The packaged mirror
-    # lives under plugins/, outside this root, so it is never collected.
+    # Every skill under skills/ and every file under tests/harnesses/ is
+    # compared, whatever its depth: a member of a supplied tree is never
+    # invisible to the gate. The packaged mirror lives under plugins/,
+    # outside these roots, so it is never collected.
     tree_skills="$(cd "$check_plugin" && find skills -name SKILL.md | sed 's|^skills/||; s|/SKILL.md$||' | sort)" \
       || { echo "check: FAIL cannot read the tree at $check_plugin"; return 1; }
-    tree_harnesses="$(cd "$check_plugin" && find tests/harnesses -maxdepth 1 -name '*.sh' | sed 's|.*/||; s|\.sh$||' | sort)" \
+    tree_harnesses="$(cd "$check_plugin" && find tests/harnesses -type f ! -name 'README.md' | sed 's|.*/||; s|\.sh$||' | sort)" \
       || { echo "check: FAIL cannot read the tree at $check_plugin"; return 1; }
     _inventory_drift "skills" "$(jq -r '.skills[]' "$inv")" "$tree_skills" || return 1
     _inventory_drift "harnesses" "$(jq -r '.harnesses[]' "$inv")" "$tree_harnesses" || return 1
+    # the comparison is by name: the tree's own commit and its contents are
+    # not established by it, so say so
+    echo "check: inventory membership compared by name against the supplied tree $check_plugin; the tree's commit and its contents were not verified"
   else
     # membership is knowable only against a tree: say so, so a reader of the
     # log cannot mistake this for "the inventory matches upstream"
     echo "check: inventory membership not checked (no --plugin tree); the pin, canonical form, uniqueness and order were"
   fi
   # Coverage gaps are reported, never failed: the successor plan closes the
-  # skill gaps in V3-CORPORA and the adapter gaps in V3-HARNESSES.
+  # skill gaps in V3-CORPORA and the adapter gaps in V3-HARNESSES. The
+  # line is printed either way, so an empty result is an explicit zero and
+  # not the absence of a scan.
+  local eval_n=0 desc_n=0 adapter_n=0
   while IFS= read -r sk; do
-    if [ ! -f "behavior/evals/$sk/evals.json" ]; then eval_gaps="$eval_gaps $sk"; fi
-    if [ ! -f "descriptions/$sk.json" ]; then desc_gaps="$desc_gaps $sk"; fi
+    if [ ! -f "behavior/evals/$sk/evals.json" ]; then
+      eval_gaps="$eval_gaps $sk"; eval_n=$((eval_n + 1))
+    fi
+    if [ ! -f "descriptions/$sk.json" ]; then
+      desc_gaps="$desc_gaps $sk"; desc_n=$((desc_n + 1))
+    fi
   done < <(jq -r '.skills[]' "$inv")
   while IFS= read -r h; do
-    if [ ! -f "harnesses/$h.sh" ]; then adapter_gaps="$adapter_gaps $h"; fi
+    if [ ! -f "harnesses/$h.sh" ]; then
+      adapter_gaps="$adapter_gaps $h"; adapter_n=$((adapter_n + 1))
+    fi
   done < <(jq -r '.harnesses[]' "$inv")
-  if [ -n "$eval_gaps$desc_gaps$adapter_gaps" ]; then
-    echo "check: coverage gaps (V3-CORPORA closes the skills, V3-HARNESSES the adapters):"
-    for sk in $eval_gaps; do echo "check: gap: no evals.json for $sk"; done
-    for sk in $desc_gaps; do echo "check: gap: no description set for $sk"; done
-    for h in $adapter_gaps; do echo "check: gap: no lab adapter for $h"; done
-  fi
+  echo "check: coverage checked: $eval_n skills without an eval definition, $desc_n without a description set, $adapter_n without a lab adapter (V3-CORPORA closes the skills, V3-HARNESSES the adapters)"
+  for sk in $eval_gaps; do echo "check: gap: no evals.json for $sk"; done
+  for sk in $desc_gaps; do echo "check: gap: no description set for $sk"; done
+  for h in $adapter_gaps; do echo "check: gap: no lab adapter for $h"; done
   echo "check: inventory ok"
   return 0
 }
@@ -142,13 +153,15 @@ _check_coverage_record() { # every old task is mapped to a scope verdict
     return 1
   fi
   for id in E-0 E-1 E-2 E-3 E-4 E-5 E-6 E-7 E-8 E-9 E-10 E-11 E-12 E-13 E-14; do
+    # the mapping is read from the task table: a row of its four-column
+    # shape, naming the id in column 1, carrying the verdict in column 3
+    # (field 4 once the pipes are the separators). No other cell and no
+    # line outside the table can supply a verdict.
     awk -F'|' -v id="$id" '
-      $2 ~ ("^[[:space:]]*" id "([[:space:]]|$)") {
-        for (i = 3; i <= NF; i++) {
-          v = $i
-          gsub(/^[[:space:]]+|[[:space:]]+$/, "", v)
-          if (v == "preserved" || v == "extended" || v == "removed") found = 1
-        }
+      NF == 6 && $2 ~ ("^[[:space:]]*" id "([[:space:]]|$)") {
+        v = $4
+        gsub(/^[[:space:]]+|[[:space:]]+$/, "", v)
+        if (v == "preserved" || v == "extended" || v == "removed") found = 1
       }
       END { exit(found ? 0 : 1) }' "$doc" \
       || { echo "check: FAIL the coverage record does not map $id to preserved, extended or removed"; return 1; }
@@ -157,12 +170,13 @@ _check_coverage_record() { # every old task is mapped to a scope verdict
   return 0
 }
 
-# --inventory runs only the pinned-scope section: the inventory, its drift
-# against a supplied tree, and the coverage record.
+# --inventory runs the pinned-scope section: the inventory, its drift
+# against a supplied tree, and the coverage record. Its terminal line says
+# so, so a partial run is never read as a full-gate pass.
 if [ "$inv_only" -eq 1 ]; then
   _check_inventory || exit 1
   _check_coverage_record || exit 1
-  echo "check: OK"
+  echo "check: OK (pinned scope only: inventory and coverage record)"
   exit 0
 fi
 

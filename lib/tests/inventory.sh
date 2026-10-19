@@ -88,6 +88,14 @@ else
   bad "the default path says membership was not checked"
 fi
 
+# the partial run says which sections it ran, so its result cannot be read
+# as a full-gate pass
+if printf '%s\n' "$check_out" | grep -q "pinned scope only"; then
+  ok "the partial run says it ran the pinned scope only"
+else
+  bad "the partial run says it ran the pinned scope only"
+fi
+
 # --- drift against a tree built from the inventory --------------------------
 
 tree="$work/tree"
@@ -102,6 +110,15 @@ done < <(jq -r '.harnesses[]' "$INV")
 
 run_check "$INV" docs --plugin "$tree"
 expect_pass "the inventory matches a tree built from it"
+
+# the with-tree path says what it did not verify: the comparison is by
+# name, so the tree's commit and its contents are not established
+if printf '%s\n' "$check_out" | grep -q "compared by name" \
+    && printf '%s\n' "$check_out" | grep -q "were not verified"; then
+  ok "the with-tree path says what it did not verify"
+else
+  bad "the with-tree path says what it did not verify"
+fi
 
 # a packaged mirror carries the same skills flat — it is a distribution
 # artifact, never a second canonical copy
@@ -205,6 +222,15 @@ mkdir -p "$drift_tree5/skills/design/newphase/newskill"
 run_check "$INV" docs --plugin "$drift_tree5"
 expect_fail "a tree skill outside the canonical shape is rejected" "absent from the inventory"
 
+# the same rule for harnesses: a harness outside the flat
+# tests/harnesses/*.sh shape is drift too
+drift_tree6="$work/drift-tree6"
+cp -r "$tree" "$drift_tree6"
+mkdir -p "$drift_tree6/tests/harnesses/nested"
+: >"$drift_tree6/tests/harnesses/nested/brand-new-harness.sh"
+run_check "$INV" docs --plugin "$drift_tree6"
+expect_fail "a tree harness outside the flat shape is rejected" "absent from the inventory"
+
 # --- the coverage record maps every old task --------------------------------
 
 if [ -f "$DOC" ]; then
@@ -212,6 +238,21 @@ if [ -f "$DOC" ]; then
   grep -v '^| E-7 ' "$DOC" >"$work/docs/upstream-coverage.md"
   run_check "$INV" "$work/docs"
   expect_fail "a coverage record that drops a task mapping is rejected" "does not map E-7"
+
+  # the mapping is read from the Verdict cell: a verdict word in another
+  # cell of the row does not satisfy it
+  mkdir -p "$work/docs-empty-verdict"
+  awk -F'|' 'BEGIN { OFS = "|" } $2 ~ /^ E-0 / { $3 = " removed "; $4 = " " } { print }' \
+    "$DOC" >"$work/docs-empty-verdict/upstream-coverage.md"
+  run_check "$INV" "$work/docs-empty-verdict"
+  expect_fail "a record whose verdict cell is empty is rejected" "does not map E-0"
+
+  # a stray line naming the task is not the task table's row
+  mkdir -p "$work/docs-stray-line"
+  grep -v '^| E-5 ' "$DOC" >"$work/docs-stray-line/upstream-coverage.md"
+  printf '| E-5 | preserved |\n' >>"$work/docs-stray-line/upstream-coverage.md"
+  run_check "$INV" "$work/docs-stray-line"
+  expect_fail "a stray line naming a task does not satisfy the mapping" "does not map E-5"
 
   # the record must not overstate the re-pin: while the lab's own
   # documented pin rows still name the old tag, the record names them
@@ -257,6 +298,18 @@ if [ "$expected_desc_gaps" = "$reported_desc_gaps" ]; then
   ok "the gate reports exactly the skills without a description set"
 else
   bad "the gate reports exactly the skills without a description set"
+fi
+
+# the coverage line is printed even when there is nothing to report: an
+# empty result is an explicit zero, not the absence of a scan
+zero_inv="$work/zero-gap-inventory.json"
+jq '.skills = ["common/yagni"] | .harnesses = ["opencode"]' "$INV" >"$zero_inv"
+run_check "$zero_inv" docs
+if printf '%s\n' "$check_out" \
+    | grep -q "coverage checked: 0 skills without an eval definition, 0 without a description set, 0 without a lab adapter"; then
+  ok "the gate says so when there are no coverage gaps"
+else
+  bad "the gate says so when there are no coverage gaps"
 fi
 
 exit "$fails"
