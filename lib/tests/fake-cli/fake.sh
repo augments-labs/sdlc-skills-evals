@@ -14,6 +14,13 @@
 
 adapter_name='fake'
 
+# The runner SOURCES this file. FAKE_SOURCE_LOG records that it happened,
+# so a test can tell a path that only planned from a path that loaded an
+# adapter at all.
+if [ -n "${FAKE_SOURCE_LOG:-}" ]; then
+  printf 'sourced %s\n' "$adapter_name" >> "$FAKE_SOURCE_LOG"
+fi
+
 runnable=yes
 runnable_reason="offline test double — always runnable, never a live CLI"
 # Test double: driven by FAKE_MODE env, passes no CLI flags. Exempt from
