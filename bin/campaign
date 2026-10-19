@@ -140,7 +140,10 @@ if [ "${1:-}" = "--evals" ]; then
   if [ -n "$dry" ]; then
     printf '%s eval(s) x 2 arms = %s runs, billed to your own harness account. Calls nothing.\n' \
       "$total_cases" "$((total_cases * 2))"
-    evals_cmd="bin/campaign --evals --plugin $(printf '%q' "$plugin") --harness $(printf '%q' "$harness")"
+    # The command carries the TREE the plan names — a commit for a ref, a
+    # path for a directory — so a ref that moves after the plan cannot
+    # change what the plan installs.
+    evals_cmd="bin/campaign --evals --plugin $(printf '%q' "$plugin_tree") --harness $(printf '%q' "$harness")"
     if [ -n "$all_evals" ]; then evals_cmd="$evals_cmd --all"; else
       for sk in "${skills[@]}"; do evals_cmd="$evals_cmd --skill $(printf '%q' "$sk")"; done
     fi

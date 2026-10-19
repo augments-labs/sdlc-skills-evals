@@ -27,7 +27,11 @@ plug_commit="$(git -C "$standin" rev-parse HEAD)"
 inv_commit="$(jq -r '.upstream.commit' "$here/config/upstream-inventory.json")"
 
 l="selftest-$$"
-trap 'rm -rf "$here"/results/*-"$l" "$here"/results/*-"$l"-*' EXIT
+# The eval path writes a workspace under the lab root. Every eval case
+# here names its own workspace, so the test cleans up after itself and
+# never leaves an iteration behind.
+eval_ws_live="selftest-evalref-$$"
+trap 'rm -rf "$here"/results/*-"$l" "$here"/results/*-"$l"-* "$here"/workspaces/selftest-eval*-"$$"' EXIT
 "$here/bin/campaign" new "$l" --plugin "$standin" --harness fake --arms green \
   --scenarios probe-ok --runs 1 --scenario-dir "$here/lib/tests/fake-cli/scenarios" >/dev/null 2>&1 \
   || { bad "campaign new"; exit "$fails"; }
@@ -319,21 +323,67 @@ want="bin/campaign --evals --plugin $inv_commit --harness fake --all --without n
   && ok "the eval dry run names the whole planned invocation" \
   || bad "the eval dry run names the whole planned invocation (got '$eval_cmd')"
 
+# --- the eval dry run names the tree it installs -----------------------------
+#
+# A ref moves. The eval preparation plan resolves it once and its command
+# carries the commit it named, so a tag that moves afterwards cannot change
+# what the plan installs. The plan is compared against a REF, not against
+# the default pin: where the ref and the tree are the same string, the two
+# behaviours cannot be told apart.
+
+eval_tag_repo="$work/evaltags"
+mkdir -p "$eval_tag_repo"
+git -C "$eval_tag_repo" init -q
+git -C "$eval_tag_repo" -c user.name=t -c user.email=t@example.invalid commit -q --allow-empty -m one
+eval_one="$(git -C "$eval_tag_repo" rev-parse HEAD)"
+git -C "$eval_tag_repo" tag selftest-eval-tag
+git -C "$eval_tag_repo" -c user.name=t -c user.email=t@example.invalid commit -q --allow-empty -m two
+eval_two="$(git -C "$eval_tag_repo" rev-parse HEAD)"
+eval_ws="selftest-evalws-$$"
+out="$(SDLC_SKILLS_ROOT="$eval_tag_repo" "$here/bin/campaign" --evals --dry-run \
+  --harness fake --harness-dir "$here/lib/tests/fake-cli" --skill yagni \
+  --plugin selftest-eval-tag --campaign "$eval_ws" 2>&1)"
+printf '%s' "$out" | grep -qF "pin        : $eval_one" \
+  && ok "the eval dry run names the commit a ref resolves to" \
+  || bad "the eval dry run names the commit a ref resolves to"
+eval_cmd="$(printf '%s\n' "$out" | sed -n 's/^command    : //p')"
+case "$eval_cmd" in
+  *"--plugin $eval_one"*) ok "the eval planned command carries the commit, not the ref";;
+  *) bad "the eval planned command carries the commit, not the ref (got '$eval_cmd')";;
+esac
+# the tag moves: the run still installs the commit the plan named
+git -C "$eval_tag_repo" tag -f selftest-eval-tag "$eval_two" >/dev/null 2>&1
+eval_launch="$work/evallaunch.log"
+rm -f "$eval_launch"
+( cd "$here" && SDLC_SKILLS_ROOT="$eval_tag_repo" FAKE_LAUNCH_LOG="$eval_launch" \
+    eval "$eval_cmd" ) >/dev/null 2>&1
+eval_install="$(sed -n 's/^install //p' "$eval_launch" 2>/dev/null | head -1)"
+eval_head="$(sed -n 's/^install-head //p' "$eval_launch" 2>/dev/null | head -1)"
+if [ -n "$eval_install" ] && [ "$eval_head" = "$eval_one" ]; then
+  ok "the eval run installs the commit the plan named, not the moved tag"
+else
+  bad "the eval run installs the commit the plan named, not the moved tag (installed '$eval_install' at '$eval_head')"
+fi
+rm -rf "$here/workspaces/$eval_ws"
+
 # --- the live eval path stops before any launch ------------------------------
 #
 # The eval path spends tokens, so its offline cases stop at the refusals
 # that come first: the default pin it cannot resolve, and the old arm it
 # was not given.
 
-out="$(SDLC_SKILLS_ROOT="$empty_root" "$here/bin/campaign" --evals --harness fake --skill yagni 2>&1)"
+out="$(SDLC_SKILLS_ROOT="$empty_root" "$here/bin/campaign" --evals --harness fake --skill yagni \
+  --campaign "$eval_ws_live" 2>&1)"
 rc="$?"
 [ "$rc" -eq 2 ] && ok "the live eval path refuses a default pin it cannot resolve" \
   || bad "the live eval path refuses a default pin it cannot resolve (exit $rc)"
 printf '%s' "$out" | grep -qF "$inv_commit" \
   && ok "the refusal names the committed pin" || bad "the refusal names the committed pin"
-"$here/bin/campaign" --evals --harness fake --skill yagni --without old >/dev/null 2>&1
+"$here/bin/campaign" --evals --harness fake --skill yagni --without old \
+  --campaign "$eval_ws_live" >/dev/null 2>&1
 [ "$?" -eq 2 ] && ok "the live eval path refuses --without old with no --old-plugin" \
   || bad "the live eval path refuses --without old with no --old-plugin"
+rm -rf "$here/workspaces/$eval_ws_live"
 
 # --- no invented monetary cost ----------------------------------------------
 #

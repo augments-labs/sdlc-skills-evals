@@ -40,6 +40,12 @@ adapter_install() { # $1 plugin source
   # a pinned tree from a moving checkout.
   if [ -n "${FAKE_LAUNCH_LOG:-}" ]; then
     printf 'install %s\n' "$1" >> "$FAKE_LAUNCH_LOG"
+    # ...and the commit that tree is at. A pinned tree is a throwaway
+    # worktree the runner removes at exit, so the path alone cannot say
+    # WHICH tree was measured once the run is over.
+    _fake_head=""
+    [ -n "$1" ] && _fake_head="$(git -C "$1" rev-parse HEAD 2>/dev/null || printf 'none')"
+    printf 'install-head %s\n' "$_fake_head" >> "$FAKE_LAUNCH_LOG"
   fi
   return 0
 }
