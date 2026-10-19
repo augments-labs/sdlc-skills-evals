@@ -367,6 +367,39 @@ if [ -f "$DOC" ]; then
   run_check "$INV" "$work/docs-stray-same-shape"
   expect_fail "a same-shape stray line does not satisfy the mapping" "does not map E-5"
 
+  # the mapping is bound to the record's task table by identity: a record
+  # whose task table has no rows at all, carrying an earlier Verdict-headed
+  # table with the fifteen mappings, is rejected — the mappings are not
+  # read out of a table that is not the task table
+  mkdir -p "$work/docs-empty-task-table"
+  task_table="$(awk '/^\| Old task \|/{f=1} f{print} /^\| E-14 /{f=0}' "$DOC")"
+  {
+    printf '%s\n\n' "$task_table"
+    grep -v '^| E-' "$DOC"
+  } >"$work/docs-empty-task-table/upstream-coverage.md"
+  run_check "$INV" "$work/docs-empty-task-table"
+  expect_fail "a record whose task table has no rows is rejected" "ambiguous"
+
+  # two tables that both hold E-n ids are ambiguous, and the gate says so
+  # instead of resolving silently to the first
+  mkdir -p "$work/docs-two-task-tables"
+  {
+    printf '| Old task | Scope today | Verdict | Evidence |\n'
+    printf '| --- | --- | --- | --- |\n'
+    printf '| E-0 substituted row | substituted scope | preserved | substituted evidence |\n\n'
+    cat "$DOC"
+  } >"$work/docs-two-task-tables/upstream-coverage.md"
+  run_check "$INV" "$work/docs-two-task-tables"
+  expect_fail "two tables holding task ids are rejected as ambiguous" "ambiguous"
+
+  # a renamed verdict column is a different problem from a missing row, and
+  # the message must say which one it is
+  mkdir -p "$work/docs-renamed-header"
+  sed 's/^| Old task | Scope today | Verdict | Evidence |$/| Old task | Scope today | Disposition | Evidence |/' \
+    "$DOC" >"$work/docs-renamed-header/upstream-coverage.md"
+  run_check "$INV" "$work/docs-renamed-header"
+  expect_fail "a renamed verdict column is rejected" "names no Verdict column"
+
   # the record must not overstate the re-pin: while the lab's own
   # documented pin rows still name the old tag, the record names them
   if grep -q 'v10\.2\.1' README.md 2>/dev/null; then
@@ -413,8 +446,12 @@ else
   bad "the gate reports exactly the skills without a description set"
 fi
 
-# the printed counters are the signal V3-CORPORA reads when it re-arms the
-# list: each must equal the length of the list it summarises
+# The printed counters are the signal V3-CORPORA reads when it re-arms the
+# list: each must equal the length of the list it summarises. That re-arm is
+# the successor task's obligation, on the plan's own clause that lets the
+# gaps be recorded first ("Initial coverage may record missing assets;
+# V3-CORPORA closes them", 01-inventory.md) and its transfer of bin/check to
+# V3-CORPORA (04-corpora.md).
 counters_of() { # $1 gate output — the three numbers of the coverage line
   printf '%s\n' "$1" \
     | sed -n 's/^check: coverage checked: \([0-9][0-9]*\) skills without an eval definition, \([0-9][0-9]*\) without a description set, \([0-9][0-9]*\) without a lab adapter.*/\1 \2 \3/p'
@@ -444,6 +481,32 @@ if [ "$(counters_of "$check_out")" = "0 0 0" ]; then
   ok "the zero-gap run's counters are zero"
 else
   bad "the zero-gap run's counters are zero (counters '$(counters_of "$check_out")')"
+fi
+
+# a scan that cannot read the inventory must fail the gate: a counter that
+# reads zero because nothing was scanned is a measurement that never
+# happened, and it must not be printed as one
+mkdir -p "$work/fake-bin"
+cat >"$work/fake-bin/jq" <<'FAKEJQ'
+#!/usr/bin/env bash
+# a jq that cannot read the inventory's member lists
+for a in "$@"; do
+  if [ "$a" = ".skills[]" ] || [ "$a" = ".harnesses[]" ]; then
+    echo "jq: cannot read the member lists" >&2
+    exit 4
+  fi
+done
+exec "$REAL_JQ" "$@"
+FAKEJQ
+chmod +x "$work/fake-bin/jq"
+real_jq="$(command -v jq)"
+check_out="$(PATH="$work/fake-bin:$PATH" REAL_JQ="$real_jq" bash bin/check --inventory 2>&1)" \
+  && check_rc=0 || check_rc=$?
+expect_fail "a coverage scan that cannot read the inventory fails" "cannot read the skill list from"
+if printf '%s\n' "$check_out" | grep -q "coverage checked:"; then
+  bad "a failed scan printed a coverage count"
+else
+  ok "a failed scan printed no coverage count"
 fi
 
 # --- the inventory and the coverage record agree ----------------------------
