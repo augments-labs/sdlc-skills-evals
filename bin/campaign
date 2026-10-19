@@ -164,6 +164,14 @@ if [ "${1:-}" = "--evals" ]; then
   if [ "$(grep '^runnable=' "$hdir/$harness.sh" | sed 's/^runnable=//')" != "yes" ]; then
     echo "harness $harness is unrunnable here — measuring nothing" >&2; exit 2
   fi
+  # The adapters redirect the launch's stderr to "$errlog" — the contract
+  # every harness/*.sh header states. The file must exist before the
+  # adapter is sourced: under `set -u` an unset errlog aborts the
+  # LAUNCH with an unbound-variable error, so the CLI is never called
+  # and the campaign measures nothing while still reporting the eval as
+  # graded. Each arm's stderr starts empty; the file goes at exit.
+  errlog="$(mktemp)"
+  trap 'rm -f "${errlog:-}"' EXIT
   # shellcheck source=/dev/null
   source "$hdir/$harness.sh"
   require_tool jq timeout || exit 2
@@ -184,7 +192,7 @@ if [ "${1:-}" = "--evals" ]; then
   # through same-shell redirects (never $()) so their worktrees outlive
   # the call; everything is removed at campaign exit.
   _pin_run="$(lab_run_dir evals-pin)" || exit 2
-  trap 'lab_pin_cleanup "$_pin_run" 2>/dev/null; lab_home_cleanup "$_pin_run" 2>/dev/null' EXIT
+  trap 'lab_pin_cleanup "$_pin_run" 2>/dev/null; lab_home_cleanup "$_pin_run" 2>/dev/null; rm -f "${errlog:-}"' EXIT
   if [ -d "$plugin" ]; then with_src="$plugin";
   else
     lab_pin_plugin "$plugin" "$_pin_run/with" >"$_pin_run/with-commit.txt" 2>/dev/null || {
@@ -231,6 +239,7 @@ if [ "${1:-}" = "--evals" ]; then
         prompt_file="$(mktemp)"; printf '%s' "$prompt" > "$prompt_file"
         stream="$dest/stream.jsonl"
         start_ms="$(date +%s)000"
+        : > "$errlog"   # this arm's stderr starts empty
         adapter_run_behavioral "$workdir" "$prompt_file" "$stream"; status=$?
         end_ms="$(date +%s)000"
         rm -f "$prompt_file"

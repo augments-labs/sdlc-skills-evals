@@ -11,6 +11,14 @@
 # error (exit 1), blocked (provider-refusal pattern), dead (empty
 # stream). FAKE_UNAVAILABLE=1 makes adapter_check fail.
 # FAKE_TOKENS=1 makes adapter_usage report a number, else silence.
+# FAKE_NO_TIER=1 binds NO tier: the double has no adapter_model, so it
+# stands for an adapter that cannot set one and the runner must refuse a
+# run that asks for a tier.
+#
+# The launch redirects its stderr to "$errlog", exactly as every real
+# adapter does (harnesses/*.sh). The double keeps that contract on
+# purpose: a runner that launches without setting errlog then aborts
+# here, under `set -u`, instead of passing silently.
 
 adapter_name='fake'
 
@@ -52,8 +60,13 @@ adapter_install() { # $1 plugin source
 
 adapter_activation_flags() { :; }
 adapter_prompt_suffix() { :; }
-adapter_model() { printf 'fake-%s\n' "$1"; }
-adapter_model_flags() { return 0; }
+# A tier the adapter cannot set is modelled by NOT binding one: the
+# runner refuses a run that asks for a tier rather than running the
+# default model and calling it that tier.
+if [ -z "${FAKE_NO_TIER:-}" ]; then
+  adapter_model() { printf 'fake-%s\n' "$1"; }
+  adapter_model_flags() { return 0; }
+fi
 
 adapter_chain() { # $1 stream
   grep -h '^SKILL ' "$1" 2>/dev/null | sed 's/^SKILL //'
@@ -93,19 +106,23 @@ _fake_body() { # $1 workdir $2 prompt $3 stream — the canned behavior
 
 adapter_run_activation() { # $1 workdir $2 prompt $3 stream
   # Mirrors the real adapters: the wall clock bounds the run, and the
-  # runner sees 124 on timeout.
+  # runner sees 124 on timeout. The launch's stderr goes to "$errlog",
+  # the redirect every real adapter makes.
   # FAKE_LAUNCH_LOG records that the launcher was reached, so a test can
   # tell a run that launched from a path that only planned.
   if [ -n "${FAKE_LAUNCH_LOG:-}" ]; then
     printf 'activation %s\n' "$1" >> "$FAKE_LAUNCH_LOG"
   fi
   export -f _fake_body _fake_emit_ok
-  timeout "${timeout_s:-5}" bash -c '_fake_body "$@"' _ "$@"
+  timeout "${timeout_s:-5}" bash -c '_fake_body "$@"' _ "$@" 2>>"$errlog"
 }
 
 adapter_run_behavioral() { # $1 workdir $2 opening file $3 stream
   if [ -n "${FAKE_LAUNCH_LOG:-}" ]; then
     printf 'behavioral %s\n' "$1" >> "$FAKE_LAUNCH_LOG"
+    # The tier the run asked for, as the runner handed it over: a
+    # campaign's frozen tier is observable at the launch this way.
+    printf 'tier %s\n' "${scenario_model_tier:-}" >> "$FAKE_LAUNCH_LOG"
   fi
   adapter_run_activation "$1" "behavioral" "$3"
 }

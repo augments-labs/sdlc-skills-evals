@@ -458,6 +458,54 @@ else
 fi
 rm -rf "$here/workspaces/$eval_ws"
 
+# --- the eval live path launches a redirecting adapter ------------------------
+#
+# Every real adapter (harnesses/*.sh) redirects the launch's stderr to
+# "$errlog", and the fake double does the same. A campaign that launches
+# without setting errlog aborts the LAUNCH under `set -u`: the CLI is
+# never called, the arm's stream stays empty, and the campaign still
+# reports the eval as graded — a run that measured nothing, reported as
+# a measurement.
+#
+# So the eval path is run LIVE against the redirecting double, and the
+# launch must REACH the CLI: the arm's stream carries what the double
+# emitted. The tree is a stand-in checkout the plugin is pinned from, so
+# no upstream checkout and no network call are needed.
+
+eval_live_repo="$work/evallive"
+mkdir -p "$eval_live_repo"
+git -C "$eval_live_repo" init -q
+git -C "$eval_live_repo" -c user.name=t -c user.email=t@example.invalid commit -q --allow-empty -m one
+eval_live_commit="$(git -C "$eval_live_repo" rev-parse HEAD)"
+eval_live_ws="selftest-evallive-$$"
+eval_live_log="$work/evallive.log"
+rm -f "$eval_live_log"
+eval_live_out="$(SDLC_SKILLS_ROOT="$eval_live_repo" FAKE_LAUNCH_LOG="$eval_live_log" \
+  "$here/bin/campaign" --evals --harness fake --harness-dir "$here/lib/tests/fake-cli" \
+  --plugin "$eval_live_commit" --skill yagni --campaign "$eval_live_ws" 2>&1)"
+eval_live_rc="$?"
+if [ "$eval_live_rc" -eq 0 ]; then
+  ok "the eval live path completes against a redirecting adapter"
+else
+  bad "the eval live path completes against a redirecting adapter (exit $eval_live_rc, got '$eval_live_out')"
+fi
+# the launch REACHED the CLI: the arm's stream carries what the double
+# emitted. An empty stream means the launch never ran.
+eval_live_stream=""
+for s in "$here/workspaces/$eval_live_ws"/*/*/*/stream.jsonl; do
+  [ -s "$s" ] && { eval_live_stream="$s"; break; }
+done
+if [ -n "$eval_live_stream" ]; then
+  ok "the eval live path launches through the redirecting adapter"
+else
+  bad "the eval live path launches through the redirecting adapter (the launch never ran: no stream content)"
+fi
+case "$eval_live_out" in
+  *"errlog"*) bad "the eval live path launches with errlog set";;
+  *) ok "the eval live path launches with errlog set";;
+esac
+rm -rf "$here/workspaces/$eval_live_ws"
+
 # --- the live eval path stops before any launch ------------------------------
 #
 # The eval path spends tokens, so its offline cases stop at the refusals
