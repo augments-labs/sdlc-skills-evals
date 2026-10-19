@@ -82,6 +82,46 @@ lab_pin_commit_of() {
   printf '%s\n' "$commit"
 }
 
+# lab_pin_tree <path|ref> — the TREE a run installs for a plugin
+# reference. A directory is the operator's own working tree and is used as
+# it is, so the tree is the path; anything else is pinned into a
+# throwaway worktree, so the tree is the commit it names. A runner that
+# names one of these names what it will install.
+lab_pin_tree() {
+  [ "$#" -eq 1 ] || return 127
+  local src="$1" commit
+  if [ -d "$src" ]; then
+    printf '%s\n' "$src"
+    return 0
+  fi
+  commit="$(lab_pin_commit_of "$src" 2>/dev/null)" || return 2
+  printf '%s\n' "$commit"
+}
+
+# lab_pin_note <flag> <path|ref> — the note a runner prints beside the
+# tree a reference names: where the tree came from, and for a directory,
+# where that tree is (a working tree is not a commit, and calling it one
+# would describe content the run never measured).
+lab_pin_note() {
+  [ "$#" -eq 2 ] || return 127
+  local flag="$1" src="$2" commit
+  if [ -d "$src" ]; then
+    commit="$(lab_pin_commit_of "$src" 2>/dev/null)" || commit=""
+    if [ -n "$commit" ]; then
+      printf -- '%s %s; working tree at %s' "$flag" "$src" "$commit"
+    else
+      printf -- '%s %s' "$flag" "$src"
+    fi
+    return 0
+  fi
+  commit="$(lab_pin_commit_of "$src" 2>/dev/null)" || commit=""
+  if [ -n "$commit" ]; then
+    printf -- '%s %s' "$flag" "$src"
+  else
+    printf -- '%s %s; a run resolves it against the plugin checkout' "$flag" "$src"
+  fi
+}
+
 _lab_pin_worktrees=""
 
 _lab_pin_remove() { # $1 worktree path — removes via the owning repo, from any CWD

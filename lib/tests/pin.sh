@@ -124,4 +124,31 @@ else
   ok "an unknown ref is refused"
 fi
 
+# --- what a run installs -----------------------------------------------------
+#
+# A reference names a TREE. A ref is pinned into a throwaway worktree, so
+# the tree is the commit it names; a directory is the operator's own
+# working tree, used as it is, so the tree is the path.
+
+tree_dir="$(lab_pin_tree "$standin" 2>/dev/null)"
+[ "$tree_dir" = "$standin" ] && ok "a directory names the tree a run installs" \
+  || bad "a directory names the tree a run installs (got '$tree_dir')"
+tree_commit="$(lab_pin_tree "$commit" 2>/dev/null)"
+[ "$tree_commit" = "$commit" ] && ok "a commit names the tree a run installs" \
+  || bad "a commit names the tree a run installs (got '$tree_commit')"
+tree_tag="$(lab_pin_tree selftest-tag 2>/dev/null)"
+[ "$tree_tag" = "$commit" ] && ok "a tag names the commit it pins to" \
+  || bad "a tag names the commit it pins to (got '$tree_tag')"
+
+note_dir="$(lab_pin_note --plugin "$standin" 2>/dev/null)"
+[ "$note_dir" = "--plugin $standin; working tree at $commit" ] \
+  && ok "a directory's note names the tree and where it is" \
+  || bad "a directory's note names the tree and where it is (got '$note_dir')"
+note_ref="$(lab_pin_note --plugin selftest-tag 2>/dev/null)"
+[ "$note_ref" = "--plugin selftest-tag" ] && ok "a ref's note names the reference" \
+  || bad "a ref's note names the reference (got '$note_ref')"
+note_base="$(lab_pin_note --base selftest-tag 2>/dev/null)"
+[ "$note_base" = "--base selftest-tag" ] && ok "a note names the flag it came from" \
+  || bad "a note names the flag it came from (got '$note_base')"
+
 exit "$fails"
