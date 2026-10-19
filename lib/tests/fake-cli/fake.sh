@@ -29,6 +29,11 @@ adapter_check() {
 adapter_install() { # $1 plugin source
   harness_home="$(mktemp -d)"
   plugin_dir="$1"
+  # FAKE_LAUNCH_LOG records the tree the run installed, so a test can tell
+  # a pinned tree from a moving checkout.
+  if [ -n "${FAKE_LAUNCH_LOG:-}" ]; then
+    printf 'install %s\n' "$1" >> "$FAKE_LAUNCH_LOG"
+  fi
   return 0
 }
 

@@ -56,6 +56,8 @@ else
 fi
 descroot="${DESCRIPTIONS_ROOT:-$lab_root/descriptions}"
 harnessdir="$lab_root/harnesses"
+# shellcheck source=../lib/pin.sh
+source "$lab_root/lib/pin.sh"
 
 usage() {
   cat <<'EOF'
@@ -64,8 +66,8 @@ bin/triggering — score a skill DESCRIPTION against its query set.
   --harness NAME    opencode | claude-code | codex | kimi-code   (required)
   --skill NAME      the skill to score                            (or --all)
   --plugin P        path or git ref of the plugin tree under test
-                    (default: SDLC_SKILLS_ROOT, else the lab's sibling
-                    ../sdlc-skills; required except with --dry-run)
+                    (default: the pinned upstream commit, a commit and
+                    never a tag)
   --all             every query set under DESCRIPTIONS_ROOT
   --split WHICH     all | train | validation | holdout           (default: all)
   --runs N          repetitions per query                         (default: 3)
@@ -73,7 +75,8 @@ bin/triggering — score a skill DESCRIPTION against its query set.
   --timeout N       seconds per run                               (default: 120)
   --max-turns N     turns before a run is cut off                 (default: 6)
   --json PATH       write the per-query records as a JSON array
-  --dry-run         print the API-call budget and exit without calling
+  --dry-run         print the plan — the pin and the exact command —
+                    and call nothing
   --no-fixture      run queries in a bare directory instead of a seeded project
   --harness-dir D   harness directory (default: harnesses;
                     a test seam for offline runs)
@@ -94,6 +97,19 @@ Examples:
   bin/triggering --harness opencode --skill yagni --split train
   bin/triggering --harness opencode --skill yagni --json out.json
 EOF
+  _pin_line
+}
+
+# The pin a run uses when the caller names none: the committed upstream
+# commit, read from config/upstream-inventory.json. It is a commit, never
+# a mutable tag, so a run never selects new work from a moving ref.
+_pin_line() {
+  local pin
+  if pin="$(lab_inventory_commit 2>/dev/null)"; then
+    printf 'default pin: %s  (config/upstream-inventory.json)\n' "$pin"
+  else
+    printf 'default pin: (unreadable — config/upstream-inventory.json names no commit)\n'
+  fi
 }
 
 harness=""; skill=""; runs=3; split="all"; dry=""; jsonout=""; all=""; fixture="1"; jobs=3
@@ -128,6 +144,20 @@ case "$split" in all|train|validation|holdout) ;; *) echo "--split all|train|val
 for n in runs jobs timeout_s maxturns; do
   case "${!n}" in ''|*[!0-9]*|0) echo "--${n%_s} needs a positive integer" >&2; exit 2;; esac
 done
+# The plugin a run uses: the caller's, or the committed upstream commit.
+# The default is a commit, never a mutable tag, so a run never selects new
+# work from a moving ref.
+plugin_defaulted=""
+if [ -z "$plugin" ]; then
+  plugin="$(lab_inventory_commit 2>/dev/null)" || {
+    echo "no usable upstream pin: config/upstream-inventory.json names no commit" >&2; exit 2; }
+  plugin_defaulted="1"
+fi
+if [ -n "$plugin_defaulted" ]; then
+  plugin_note="config/upstream-inventory.json"
+else
+  plugin_note="--plugin $plugin"
+fi
 [ -n "$harnessdir_override" ] && harnessdir="$harnessdir_override"
 
 sets=()
@@ -144,6 +174,20 @@ fi
 sel='.[] | select($split == "all" or .split == $split)'
 
 if [ -n "$dry" ]; then
+  # The plan, priced: no pin, no checkout, no CLI, no credential, no
+  # model. It names the pin a live run would use and the exact command
+  # it would be.
+  plan_pin="$(lab_pin_commit_of "$plugin" 2>/dev/null)" || plan_pin=""
+  [ -n "$plan_pin" ] || plan_pin="$plugin"
+  plan_cmd="bin/triggering --harness $(printf '%q' "$harness")"
+  if [ -n "$all" ]; then plan_cmd="$plan_cmd --all"; else plan_cmd="$plan_cmd --skill $(printf '%q' "$skill")"; fi
+  plan_cmd="$plan_cmd --plugin $(printf '%q' "$plugin") --runs $runs --jobs $jobs --split $split"
+  plan_cmd="$plan_cmd --timeout $timeout_s --max-turns $maxturns"
+  [ -n "$jsonout" ] && plan_cmd="$plan_cmd --json $(printf '%q' "$jsonout")"
+  [ -z "$fixture" ] && plan_cmd="$plan_cmd --no-fixture"
+  echo "plugin   : $plan_pin  ($plugin_note)"
+  echo "harness  : $harness"
+  echo "command  : $plan_cmd"
   total=0
   for f in "${sets[@]}"; do
     n="$(jq --arg split "$split" "[$sel] | length" "$f")"
@@ -168,9 +212,6 @@ fi
 . "$lab_root/lib/common.sh"
 # shellcheck source=/dev/null
 . "$lab_root/fixtures/fixtures.sh"
-if [ -z "$plugin" ]; then
-  plugin="$(plugin_root 2>/dev/null)" || { echo "needs --plugin <path|ref> (no plugin checkout found)" >&2; exit 2; }
-fi
 adapter_check || exit 3
 # Default for the optional structural refusal check (see `observe_once`).
 # Conservative on purpose: an adapter that does not implement it is assumed to
@@ -206,7 +247,7 @@ observe_once() { # $1 query text  $2 subject skill
     git -c user.name='SDLC skills Harness' -c user.email='harness@example.invalid' \
         commit -q -m 'fixture baseline' ) || { rm -rf "$workdir" "$stream" "$errlog"; return 2; }
 
-  adapter_install "$plugin" || { rm -rf "$workdir" "$stream" "$errlog"; return 3; }
+  adapter_install "$plugin_src" || { rm -rf "$workdir" "$stream" "$errlog"; return 3; }
   local prompt; prompt="$text$(adapter_prompt_suffix 2>/dev/null || true)"
   local -a xflags; mapfile -t xflags < <(adapter_activation_flags 2>/dev/null || true)
 
@@ -273,8 +314,25 @@ observe_once() { # $1 query text  $2 subject skill
 }
 
 # --- scoring loop -------------------------------------------------------------
-results="$(mktemp)"; trap 'rm -f "$results"' EXIT
+results="$(mktemp)"; pin_dir=""
+trap 'rm -f "$results"; lab_pin_cleanup; [ -z "$pin_dir" ] || rm -rf "$pin_dir"' EXIT
 sets_failed=0
+
+# The plugin is a TREE, not a ref: a ref is pinned into a throwaway
+# worktree first, so the run uses the commit it names and never a moving
+# branch. The worktree is removed at exit, with the registration it made
+# in the plugin checkout.
+plugin_src="$plugin"
+if [ ! -d "$plugin" ]; then
+  pin_dir="$(mktemp -d)" || exit 2
+  lab_pin_plugin "$plugin" "$pin_dir" >"$pin_dir/commit.txt" 2>/dev/null || {
+    echo "cannot pin --plugin '$plugin' (the plugin checkout has no such commit)" >&2; exit 2; }
+  plugin_src="$pin_dir/plugin"
+fi
+# The pin this run uses, named in the output: a commit, never a ref that
+# could move between the plan and the run.
+plugin_commit="$(lab_pin_commit_of "$plugin" 2>/dev/null)" || plugin_commit=""
+printf 'plugin   : %s  (%s)\n' "${plugin_commit:-$plugin}" "$plugin_note"
 
 for f in "${sets[@]}"; do
   subject="$(basename "$f" .json)"
