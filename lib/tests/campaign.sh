@@ -162,6 +162,67 @@ want_red="bin/behavior --harness fake --scenario probe-ok --arm red --base $plan
   || bad "the red arm's plan names every option the run honours (got '$plan_red')"
 rm -rf "$here"/results/*-"$l_plan"
 
+# --- the run asks for the tier the campaign froze ----------------------------
+#
+# The tier is frozen in campaign.json and printed in the plan, but a
+# campaign that froze --tier small and a run that asked for something
+# else measure different campaigns, and nothing would say so. The
+# adapter records the tier it was handed, so the frozen value and the
+# value the run asked for are compared — not two hardcoded strings.
+
+l_tier="selftest-tier-$$"
+"$here/bin/campaign" new "$l_tier" --plugin "$standin" --harness fake --arms green \
+  --scenarios probe-ok --runs 1 --tier small \
+  --scenario-dir "$here/lib/tests/fake-cli/scenarios" >/dev/null 2>&1
+d_tier="$(ls -d "$here"/results/*-"$l_tier" 2>/dev/null | head -1)"
+frozen_tier="$(jq -r '.tier // empty' "$d_tier/campaign.json" 2>/dev/null)"
+tier_log="$work/tier.log"
+rm -f "$tier_log"
+FAKE_LAUNCH_LOG="$tier_log" "$here/bin/campaign" run "$l_tier" >/dev/null 2>&1
+tier_asked="$(sed -n 's/^tier //p' "$tier_log" 2>/dev/null | head -1)"
+if [ "$frozen_tier" = small ] && [ "$tier_asked" = "$frozen_tier" ]; then
+  ok "the run asks for the tier the campaign froze"
+else
+  bad "the run asks for the tier the campaign froze (froze '$frozen_tier', asked '$tier_asked')"
+fi
+rm -rf "$here"/results/*-"$l_tier"
+
+# --- a tier the adapter cannot set is refused, not run at the default -------
+#
+# The runner must refuse a run that asks for a tier the adapter cannot
+# set, rather than running the default model and calling it that tier.
+# FAKE_NO_TIER=1 makes the double bind no tier at all, the way an
+# adapter that cannot set one does.
+
+out="$(FAKE_NO_TIER=1 "$here/bin/behavior" --harness fake --scenario probe-ok --arm green \
+  --plugin "$standin" --tier small --harness-dir "$here/lib/tests/fake-cli" \
+  --scenario-dir "$here/lib/tests/fake-cli/scenarios" 2>&1)"
+rc="$?"
+if [ "$rc" -eq 2 ] && printf '%s' "$out" | grep -qF "binds no tiers"; then
+  ok "the runner refuses a tier the adapter cannot set"
+else
+  bad "the runner refuses a tier the adapter cannot set (exit $rc, got '$out')"
+fi
+
+# and the campaign that froze that tier measures nothing, saying so
+l_notier="selftest-notier-$$"
+"$here/bin/campaign" new "$l_notier" --plugin "$standin" --harness fake --arms green \
+  --scenarios probe-ok --runs 1 --tier small \
+  --scenario-dir "$here/lib/tests/fake-cli/scenarios" >/dev/null 2>&1
+d_notier="$(ls -d "$here"/results/*-"$l_notier" 2>/dev/null | head -1)"
+out="$(FAKE_NO_TIER=1 "$here/bin/campaign" run "$l_notier" 2>&1)"
+if printf '%s' "$out" | grep -q "completed 0/1 runs"; then
+  ok "a campaign whose adapter cannot set the tier measures nothing"
+else
+  bad "a campaign whose adapter cannot set the tier measures nothing (got '$out')"
+fi
+if [ -n "$d_notier" ] && [ -z "$(find "$d_notier/runs" -name '*.json' 2>/dev/null | head -1)" ]; then
+  ok "the refused run wrote no record"
+else
+  bad "the refused run wrote no record"
+fi
+rm -rf "$here"/results/*-"$l_notier"
+
 # --- a campaign runs the commit it froze, not a tag that moved ---------------
 #
 # A tag may be named when the campaign is prepared; the commit it names is
