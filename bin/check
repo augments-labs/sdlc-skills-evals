@@ -9,6 +9,159 @@ cd "$root" || exit 1
 echo "check: skeleton — static entry point"
 echo "check: .gitignore honors plans, raw runs, workspaces, secrets"
 
+# V3-INVENTORY: the pinned upstream scope.
+#
+# The pin (repository, commit, package version) lives here so a rewritten
+# commit or a mutable version tag fails the gate. The membership — which
+# skills, which harnesses — is checked against an explicitly supplied plugin
+# tree and is never fetched, so the default gate stays offline.
+INV_URL="https://github.com/augments-labs/sdlc-skills"
+INV_COMMIT="638040d407eae2834414968478792be99b3ff0cf"
+INV_VERSION="11.0.0"
+inv_path="${INVENTORY_PATH:-config/upstream-inventory.json}"
+docs_root="${DOCS_ROOT:-docs}"
+check_plugin=""
+inv_only=0
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --plugin) check_plugin="${2:-}"; shift 2 2>/dev/null || shift ;;
+    --inventory) inv_only=1; shift ;;
+    *) break ;;
+  esac
+done
+
+_inventory_drift() { # $1 label, $2 inventory list, $3 tree list — 0 when they agree
+  local label="$1" inv_list="$2" tree_list="$3" missing stale
+  missing="$(comm -13 <(printf '%s\n' "$inv_list" | sort) <(printf '%s\n' "$tree_list" | sort) | grep -v '^$')"
+  stale="$(comm -23 <(printf '%s\n' "$inv_list" | sort) <(printf '%s\n' "$tree_list" | sort) | grep -v '^$')"
+  if [ -z "$missing" ] && [ -z "$stale" ]; then
+    return 0
+  fi
+  echo "check: FAIL the inventory does not match the upstream tree ($label):"
+  if [ -n "$missing" ]; then
+    echo "  upstream, absent from the inventory:"
+    printf '%s\n' "$missing" | sed 's/^/    /'
+  fi
+  if [ -n "$stale" ]; then
+    echo "  in the inventory, absent from upstream:"
+    printf '%s\n' "$stale" | sed 's/^/    /'
+  fi
+  return 1
+}
+
+_check_inventory() { # the committed inventory, and its drift against a tree
+  local inv="$inv_path" sk h tree_skills tree_harnesses
+  local eval_gaps="" desc_gaps="" adapter_gaps=""
+  if [ ! -f "$inv" ]; then
+    echo "check: FAIL no upstream inventory at $inv"
+    return 1
+  fi
+  if ! jq -e . "$inv" >/dev/null 2>&1; then
+    echo "check: FAIL $inv is not valid JSON"
+    return 1
+  fi
+  if ! jq -e --arg u "$INV_URL" --arg c "$INV_COMMIT" --arg v "$INV_VERSION" \
+      '(.upstream.url == $u) and (.upstream.commit == $c) and (.upstream.version == $v)' "$inv" >/dev/null; then
+    echo "check: FAIL $inv does not pin $INV_COMMIT ($INV_VERSION)"
+    return 1
+  fi
+  if ! jq -e '(.skills | type == "array") and (.skills | length > 0)' "$inv" >/dev/null; then
+    echo "check: FAIL $inv needs a non-empty skills array"
+    return 1
+  fi
+  if ! jq -e 'all(.skills[]; type == "string" and test("^[a-z0-9][a-z0-9-]*/[a-z0-9][a-z0-9-]*$"))' "$inv" >/dev/null; then
+    echo "check: FAIL skill rows must be canonical paths (<phase>/<skill>)"
+    return 1
+  fi
+  if ! jq -e '(.skills | length) == (.skills | unique | length)' "$inv" >/dev/null; then
+    echo "check: FAIL skill rows must be unique"
+    return 1
+  fi
+  if ! jq -e '.skills == (.skills | sort)' "$inv" >/dev/null; then
+    echo "check: FAIL skill rows must be in canonical (sorted) order"
+    return 1
+  fi
+  if ! jq -e '(.harnesses | type == "array") and (.harnesses | length > 0)' "$inv" >/dev/null; then
+    echo "check: FAIL $inv needs a non-empty harnesses array"
+    return 1
+  fi
+  if ! jq -e 'all(.harnesses[]; type == "string" and test("^[a-z][a-z0-9-]*$"))' "$inv" >/dev/null; then
+    echo "check: FAIL harness rows must be plain names"
+    return 1
+  fi
+  if ! jq -e '(.harnesses | length) == (.harnesses | unique | length)' "$inv" >/dev/null; then
+    echo "check: FAIL harness rows must be unique"
+    return 1
+  fi
+  if ! jq -e '.harnesses == (.harnesses | sort)' "$inv" >/dev/null; then
+    echo "check: FAIL harness rows must be in canonical (sorted) order"
+    return 1
+  fi
+  if [ -n "$check_plugin" ]; then
+    if [ ! -d "$check_plugin/skills" ] || [ ! -d "$check_plugin/tests/harnesses" ]; then
+      echo "check: FAIL $check_plugin is not an upstream tree"
+      return 1
+    fi
+    # Canonical skills only: skills/<phase>/<name>/SKILL.md. A packaged
+    # mirror is flat, or lives under plugins/ — a distribution artifact,
+    # never a second canonical copy.
+    tree_skills="$(cd "$check_plugin" && find skills -name SKILL.md | sed 's|^skills/||; s|/SKILL.md$||' | awk -F/ 'NF == 2' | sort)" \
+      || { echo "check: FAIL cannot read the tree at $check_plugin"; return 1; }
+    tree_harnesses="$(cd "$check_plugin" && find tests/harnesses -maxdepth 1 -name '*.sh' | sed 's|.*/||; s|\.sh$||' | sort)" \
+      || { echo "check: FAIL cannot read the tree at $check_plugin"; return 1; }
+    _inventory_drift "skills" "$(jq -r '.skills[]' "$inv")" "$tree_skills" || return 1
+    _inventory_drift "harnesses" "$(jq -r '.harnesses[]' "$inv")" "$tree_harnesses" || return 1
+  fi
+  # Coverage gaps are reported, never failed: the successor plan closes the
+  # skill gaps in V3-CORPORA and the adapter gaps in V3-HARNESSES.
+  while IFS= read -r sk; do
+    if [ ! -f "behavior/evals/$sk/evals.json" ]; then eval_gaps="$eval_gaps $sk"; fi
+    if [ ! -f "descriptions/$sk.json" ]; then desc_gaps="$desc_gaps $sk"; fi
+  done < <(jq -r '.skills[]' "$inv")
+  while IFS= read -r h; do
+    if [ ! -f "harnesses/$h.sh" ]; then adapter_gaps="$adapter_gaps $h"; fi
+  done < <(jq -r '.harnesses[]' "$inv")
+  if [ -n "$eval_gaps$desc_gaps$adapter_gaps" ]; then
+    echo "check: coverage gaps (V3-CORPORA closes the skills, V3-HARNESSES the adapters):"
+    for sk in $eval_gaps; do echo "check: gap: no evals.json for $sk"; done
+    for sk in $desc_gaps; do echo "check: gap: no description set for $sk"; done
+    for h in $adapter_gaps; do echo "check: gap: no lab adapter for $h"; done
+  fi
+  echo "check: inventory ok"
+  return 0
+}
+
+_check_coverage_record() { # every old task is mapped to a scope verdict
+  local doc="$docs_root/upstream-coverage.md" id
+  if [ ! -f "$doc" ]; then
+    echo "check: FAIL no coverage record at $doc"
+    return 1
+  fi
+  for id in E-0 E-1 E-2 E-3 E-4 E-5 E-6 E-7 E-8 E-9 E-10 E-11 E-12 E-13 E-14; do
+    awk -F'|' -v id="$id" '
+      $2 ~ ("^[[:space:]]*" id "([[:space:]]|$)") {
+        for (i = 3; i <= NF; i++) {
+          v = $i
+          gsub(/^[[:space:]]+|[[:space:]]+$/, "", v)
+          if (v == "preserved" || v == "extended" || v == "removed") found = 1
+        }
+      }
+      END { exit(found ? 0 : 1) }' "$doc" \
+      || { echo "check: FAIL the coverage record does not map $id to preserved, extended or removed"; return 1; }
+  done
+  echo "check: coverage record ok"
+  return 0
+}
+
+# --inventory runs only the pinned-scope section: the inventory, its drift
+# against a supplied tree, and the coverage record.
+if [ "$inv_only" -eq 1 ]; then
+  _check_inventory || exit 1
+  _check_coverage_record || exit 1
+  echo "check: OK"
+  exit 0
+fi
+
 # E-3: harness launcher contract (headers, required functions, opencode parsing)
 bash lib/tests/harnesses.sh || { echo "check: FAIL harnesses"; exit 1; }
 bash lib/tests/opencode-adapter.sh >/dev/null || { echo "check: FAIL opencode adapter"; exit 1; }
@@ -110,7 +263,6 @@ echo "check: descriptions ok"
 # Enforced as no-exec-bit + no-shebang: a non-executable, shebang-less
 # script file would pass, so treat this as the realistic-vectors proxy it
 # is and keep code out of both trees by review, not just by gate.
-docs_root="${DOCS_ROOT:-docs}"
 if find "$docs_root" results -type f -perm -111 2>/dev/null | grep -q .; then
   echo "check: FAIL executable under docs/ or results/ (records and guidance only)"
   find "$docs_root" results -type f -perm -111 2>/dev/null
@@ -122,22 +274,9 @@ if grep -rl '^#!' "$docs_root" 2>/dev/null | grep -q .; then
 fi
 echo "check: docs ok"
 
-# E-7: evals inventory — every skill on the pinned plugin has an evals.json.
-# Scoped by --plugin <tree> (the tree to compare against); without it the
-# section is skipped with a note, so CI without a plugin checkout stays green.
-check_plugin=""
-[ "${1:-}" = "--plugin" ] && { check_plugin="${2:-}"; }
-if [ -n "$check_plugin" ]; then
-  while IFS= read -r sk; do
-    # implementation/subagent-driven-development is owned by E-12's
-    # evaluator (it authors the file); every other skill is E-7's.
-    [ "$sk" = "implementation/subagent-driven-development" ] && continue
-    [ -f "behavior/evals/$sk/evals.json" ] \
-      || { echo "check: FAIL missing evals for $sk"; exit 1; }
-  done < <(find "$check_plugin/skills" -name SKILL.md | sed 's|.*/skills/||; s|/SKILL.md||' | sort)
-  echo "check: evals inventory ok"
-else
-  echo "check: evals inventory skipped (no --plugin tree)"
-fi
+# V3-INVENTORY: the pinned scope is checked last, so the report of a broken
+# inventory follows the rest of the gate's findings.
+_check_inventory || exit 1
+_check_coverage_record || exit 1
 
 echo "check: OK"
