@@ -2,12 +2,22 @@
 # Offline test: bin/campaign — what it freezes, what it plans, what it
 # counts, and the offline paths that must launch nothing.
 #
-# Every run here uses the fake harness (--harness fake, or --harness-dir
-# lib/tests/fake-cli), so no agent CLI is reached and no token is spent.
-# The non-launching cases put a SENTINEL real CLI on PATH — one that
-# fails and records the call — and the campaign-run control that follows
-# proves the sentinel is reachable at all. The live eval path is reached
-# only as far as its refusals, which come before any launch.
+# Almost every run here uses the FAKE adapter (--harness fake, which
+# routes to lib/tests/fake-cli, or --harness-dir lib/tests/fake-cli; one
+# case uses a copy of it under another name, so a harness directory
+# override is observable). The exceptions, and what each of them reaches:
+#
+#   the preparation cases name --harness opencode and prepare without
+#     sourcing an adapter at all; the FAKE_SOURCE_LOG case holds the
+#     eval preparation to that.
+#   the campaign-run control reaches the SENTINEL CLI on PATH — one that
+#     fails and records the call — so the cases above are not vacuous.
+#     The sentinel spends nothing.
+#
+# The live eval path is reached as far as its refusals, and once against
+# the fake adapter, which is not an agent CLI. No case in this file
+# reaches a real agent CLI: the sentinel stands in for one, and it always
+# fails.
 set -uo pipefail
 here="$(cd "$(dirname "$0")/../.." && pwd)"
 export SDLC_SKILLS_EVALS_ROOT="$here"

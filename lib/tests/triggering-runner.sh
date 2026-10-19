@@ -3,13 +3,18 @@
 # and the offline paths that must launch nothing.
 #
 # The fake emits a fixed SKILL line (FAKE_SUBJECT) or none (FAKE_FIRE=0),
-# so the loop's reductions are exercised with zero live calls, and every
-# run here uses the fake harness (--harness-dir lib/tests/fake-cli): no
-# agent CLI is reached and no token is spent. The non-launching cases put
-# a SENTINEL real CLI on PATH — one that fails and records the call — and
-# the live-path control that follows proves the sentinel is reachable at
-# all. One case reads the real codex adapter's header without launching
-# it: the dry run against an unrunnable harness.
+# so the loop's reductions are exercised with zero live calls. Almost
+# every run here uses the FAKE adapter (--harness fake with --harness-dir
+# lib/tests/fake-cli). The exceptions, and what each of them reaches:
+#
+#   the case that names --harness codex reads that adapter's header and
+#     is refused before any launch, because the adapter is unrunnable.
+#   the live-path control sources the real opencode adapter and reaches
+#     the SENTINEL CLI on PATH — one that fails and records the call —
+#     so the case above is not vacuous. The sentinel spends nothing.
+#
+# No case in this file reaches a real agent CLI: the sentinel stands in
+# for one, and it always fails.
 set -uo pipefail
 here="$(cd "$(dirname "$0")/../.." && pwd)"
 fake_h="$here/lib/tests/fake-cli"

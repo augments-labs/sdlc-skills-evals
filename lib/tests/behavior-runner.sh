@@ -2,13 +2,19 @@
 # Offline test: bin/behavior — its outcome classes, the plans it prints,
 # and the offline paths that must launch nothing.
 #
-# Every run here uses the fake harness (--harness-dir lib/tests/fake-cli
-# with --scenario-dir lib/tests/fake-cli/scenarios), so no agent CLI is
-# reached and no token is spent. The non-launching cases put a SENTINEL
-# real CLI on PATH — one that fails and records the call — and the
-# live-path control that follows proves the sentinel is reachable at all.
-# Two cases read a real adapter's header without launching it: the
-# unrunnable-harness dry run, and the control above.
+# Almost every run here uses the FAKE adapter (--harness fake with
+# --harness-dir lib/tests/fake-cli and --scenario-dir
+# lib/tests/fake-cli/scenarios), so no agent CLI is reached and no token
+# is spent. The exceptions, and what each of them reaches:
+#
+#   the dry runs that name --harness opencode or --harness codex SOURCE
+#     the real adapter and read its header; they launch nothing.
+#   the live-path control sources the real opencode adapter and reaches
+#     the SENTINEL CLI on PATH — one that fails and records the call —
+#     so the cases above are not vacuous. The sentinel spends nothing.
+#
+# No case in this file reaches a real agent CLI: the sentinel stands in
+# for one, and it always fails.
 set -uo pipefail
 here="$(cd "$(dirname "$0")/../.." && pwd)"
 fake_h="$here/lib/tests/fake-cli"
