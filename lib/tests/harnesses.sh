@@ -58,14 +58,25 @@ for h in "${adapters[@]}"; do
   reason="$(grep '^runnable_reason=' "$hh/$name" | sed 's/^runnable_reason=//; s/^"//; s/"$//')"
   if [ -n "$reason" ]; then ok "$name states a runnable_reason";
   else bad "$name states a runnable_reason"; fi
-  # every capability claim carries its evidence class
+  # every capability claim carries its evidence class, in the documented
+  # form: the claim first, the evidence class in the parentheses — e.g.
+  # `subagent-loads-skills=yes(documentation)`. A claim without its
+  # evidence class cannot be weighed by whoever reads the header, so the
+  # shape is checked rather than trusted, and each of the five documented
+  # capabilities is required to be there.
   caps="$(grep '^capabilities=' "$hh/$name" | sed 's/^capabilities=//; s/^"//; s/"$//')"
-  bad_caps="$(printf '%s\n' "$caps" | tr ' ' '\n' | grep -c '=[a-z]*($' 2>/dev/null || true)"
+  bad_caps="$(printf '%s\n' "$caps" | tr ' ' '\n' \
+    | grep -vcE '^[a-z-]+=[a-z]+\((run|documentation)\)$' 2>/dev/null || true)"
   total_caps="$(printf '%s\n' "$caps" | tr ' ' '\n' | grep -c '=' 2>/dev/null || true)"
-  if [ "$total_caps" -gt 0 ] && [ "$bad_caps" -eq 0 ]; then
+  missing=""
+  for want in subagent-loads-skills nesting-depth tier-settable \
+              session-start-event post-compaction-event; do
+    printf '%s\n' "$caps" | tr ' ' '\n' | grep -q "^$want=" || missing="$missing $want"
+  done
+  if [ "$total_caps" -gt 0 ] && [ "$bad_caps" -eq 0 ] && [ -z "$missing" ]; then
     ok "$name capabilities carry their evidence class"
   else
-    bad "$name capabilities carry their evidence class"
+    bad "$name capabilities carry their evidence class (malformed:$bad_caps missing:$missing )"
   fi
   # an adapter reaches its CLI by NAME, through PATH. A literal path to a
   # home or a system directory would reach the operator's real CLI whatever

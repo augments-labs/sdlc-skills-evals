@@ -42,7 +42,7 @@
 runnable=yes
 runnable_reason="opencode on PATH; the recorded activation evidence is a 1.x stream, and the install covers the pinned upstream's 1.x and 2.x plugin layouts"
 permission_flags="--auto"
-capabilities="subagent-loads-skills=run nesting-depth=run tier-settable=documentation session-start-event=documentation post-compaction-event=documentation edit-path-partial=run"
+capabilities="subagent-loads-skills=yes(run) nesting-depth=yes(run) tier-settable=unknown(documentation) session-start-event=unknown(documentation) post-compaction-event=unknown(documentation) edit-path-partial=yes(run)"
 
 adapter_name='opencode'
 
@@ -75,8 +75,15 @@ opencode_exec() { # $@ the CLI and its arguments
 }
 
 # `opencode --version` prints e.g. `opencode v2.0.13`; keep only the number.
+# The probe runs under an environment of its own — a throwaway home, no
+# operator variable — so a version check cannot reach the operator's
+# session bus or their credential helpers either.
 _opencode_detect() {
-  opencode_version="$(opencode --version 2>/dev/null | head -1 | tr -cd '0-9.')"
+  local probe_home
+  probe_home="$(mktemp -d)" || return 1
+  opencode_version="$(env -i PATH="$PATH" HOME="$probe_home" \
+    opencode --version 2>/dev/null | head -1 | tr -cd '0-9.')"
+  rm -rf "$probe_home"
   opencode_major="${opencode_version%%.*}"
 }
 

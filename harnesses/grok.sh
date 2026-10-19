@@ -104,6 +104,9 @@ adapter_check() {
 # nudge is the routing channel, and the none arm must carry none.
 adapter_install() { # $1 plugin source ("" = NONE arm, load nothing)
   harness_home="$(mktemp -d)"
+  # No plugin path survives an install: a stale one from an earlier
+  # arm would be a plugin the none arm loads.
+  plugin_dir=""
   [ -n "${1:-}" ] || return 0
   plugin_dir="$1"
   grok_env

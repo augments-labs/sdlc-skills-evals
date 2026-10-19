@@ -110,6 +110,9 @@ adapter_check() {
 # The NONE arm is an isolated home with no plugin installed.
 adapter_install() { # $1 plugin source ("" = NONE arm, load nothing)
   harness_home="$(mktemp -d)"
+  # No plugin path survives an install: a stale one from an earlier
+  # arm would be a plugin the none arm loads.
+  plugin_dir=""
   [ -n "${1:-}" ] || return 0
   local snap="$harness_home/src/sdlc-skills"
   mkdir -p "$snap"

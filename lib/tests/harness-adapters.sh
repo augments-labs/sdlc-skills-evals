@@ -279,6 +279,7 @@ EOS
   else
     bad "$h install records an isolated home"
   fi
+  local green_home="$harness_home"
   local calls; calls="$(cat "$log" 2>/dev/null; cat "$harness_home/.fake-harness.log" 2>/dev/null)"
   if [ -z "$install_pattern" ]; then
     ok "$h install needs no CLI invocation"
@@ -300,7 +301,9 @@ EOS
   # The none arm's STATE, not the absence of a CLI call: a none arm that
   # installed a plugin would measure the plugin, silently. So the throwaway
   # home must hold no plugin tree and no registry that names the tree under
-  # test, and the commands that ran must name neither.
+  # test, the commands that ran must name neither, and the adapter must
+  # leave no plugin path behind — a stale `plugin_dir` from the green arm
+  # is a plugin the none arm would load.
   local none_leak="" none_found
   none_found="$(find "$harness_home" \( -name 'sdlc-skills' -o -name 'SKILL.md' \) \
     -print -quit 2>/dev/null || true)"
@@ -311,6 +314,7 @@ EOS
   if [ -n "$install_pattern" ] && printf '%s\n' "$none_calls" | grep -qF -- "$install_pattern"; then
     none_leak="$none_leak install-command"
   fi
+  [ -n "${plugin_dir:-}" ] && none_leak="$none_leak plugin-dir"
   if [ -z "$none_leak" ]; then
     ok "$h none arm installs no plugin"
   else
@@ -366,6 +370,13 @@ EOS
   else
     bad "$h activation launch captures the CLI's output"
   fi
+  # the run that follows the none-arm install reports no skill
+  got="$(adapter_chain "$stream" 2>/dev/null)"
+  if [ -z "$got" ]; then
+    ok "$h the none arm's run reports no skill"
+  else
+    bad "$h the none arm's run reports no skill (got '$got')"
+  fi
   if adapter_run_behavioral "$wd" "$work/opening" "$stream" >/dev/null 2>"$work/beh.err"; then
     ok "$h behavioural launch succeeds against the fake CLI"
   else
@@ -405,12 +416,22 @@ EOS
   # can read the operator's token, so none of the variables a CLI keeps its
   # home in may point there.
   #
-  # The environment of the LAST invocation — the behavioural launch. The
-  # install may probe the CLI (a version check) outside the isolated
-  # environment, and that probe is not the launch under test.
+  # The environment of EVERY invocation the adapter made, read from the
+  # fake's own log: the install's invocations and the launches alike. The
+  # order of the log does not matter — an adapter that isolates one
+  # invocation and not the other has left a hole, and the assertions below
+  # read the whole set.
   local envlines="$work/env.txt"
-  awk '/^call /{ n = 0; delete e } /^env /{ e[++n] = $0 }
-       END { for (i = 1; i <= n; i++) print e[i] }' "$work/all.log" > "$envlines" 2>/dev/null || true
+  awk '/^call /{ if (n) { for (i = 1; i <= n; i++) print e[i] }
+          n = 0; delete e }
+       /^env /{ e[++n] = $0 }
+       END { if (n) { for (i = 1; i <= n; i++) print e[i] } }' \
+    "$work/all.log" > "$envlines" 2>/dev/null || true
+  # Every throwaway home the adapter built: the green arm's and the none
+  # arm's. A directory the CLI was handed must be inside one of them.
+  local homes="$work/homes"
+  : > "$homes"
+  printf '%s\n' "$green_home" "$harness_home" >> "$homes"
   local launched_home
   launched_home="$(sed -n "s/^env $want_cli HOME=//p" "$envlines" | tail -1)"
   if [ -n "$launched_home" ] && [ "$launched_home" != "$OPERATOR_HOME" ]; then
@@ -419,7 +440,7 @@ EOS
     bad "$h the CLI ran with a home that is not the operator's (HOME=${launched_home:-none})"
   fi
   # The WHOLE recorded environment, not a fixed list of nine names: any
-  # variable the launch was handed that carries the operator's home, their
+  # variable the CLI was handed that carries the operator's home, their
   # XDG directories, their session bus or their updater switch is a route
   # back to the operator. The sentinels are this test's own values, so a
   # leak is caught whether or not the developer exports anything.
@@ -442,30 +463,41 @@ EOS
   # The session bus: an address that points at the operator's is a route to
   # the operator's stored credentials, and so is a runtime directory that
   # points at the operator's — with no address set, a D-Bus client looks for
-  # the bus under the runtime directory. So the launch must be given a
-  # runtime directory inside the throwaway home, and a bus address (if it
-  # carries one) inside it too.
+  # the bus under the runtime directory. So every invocation must be given a
+  # runtime directory inside a throwaway home, and a bus address (if it
+  # carries one) inside one too.
   if grep -qF -- "$op/.bus" "$envlines" 2>/dev/null ||
      { [ -n "$OPERATOR_DBUS" ] && grep -qF -- "$OPERATOR_DBUS" "$envlines" 2>/dev/null; }; then
     bad "$h the launch cannot reach the operator's session bus"
   else
     ok "$h the launch cannot reach the operator's session bus"
   fi
-  local runtime_dir
-  runtime_dir="$(sed -n "s/^env $want_cli XDG_RUNTIME_DIR=//p" "$envlines" | tail -1)"
-  case "$runtime_dir" in
-    "$harness_home"|"$harness_home"/*) ok "$h the launch's runtime dir is inside the throwaway home";;
-    *) bad "$h the launch's runtime dir is inside the throwaway home (XDG_RUNTIME_DIR=${runtime_dir:-none})";;
-  esac
-  local bus_addr
-  bus_addr="$(sed -n "s/^env $want_cli DBUS_SESSION_BUS_ADDRESS=//p" "$envlines" | tail -1)"
-  if [ -z "$bus_addr" ]; then
-    ok "$h the launch carries no session bus address"
-  else
-    case "${bus_addr#unix:path=}" in
-      "$harness_home"/*) ok "$h the launch's session bus address is inside the throwaway home";;
-      *) bad "$h the launch's session bus address is inside the throwaway home ($bus_addr)";;
+  local runtime_dir runtime_ok=1
+  while IFS= read -r runtime_dir; do
+    [ -n "$runtime_dir" ] || continue
+    grep -qxF -- "$runtime_dir" "$homes" >/dev/null 2>&1 && continue
+    case "$runtime_dir" in
+      "$harness_home"/*) continue;;
     esac
+    runtime_ok=0
+  done < <(sed -n "s/^env $want_cli XDG_RUNTIME_DIR=//p" "$envlines" 2>/dev/null)
+  if [ "$runtime_ok" -eq 1 ] && [ -n "$(sed -n "s/^env $want_cli XDG_RUNTIME_DIR=//p" "$envlines" | head -1)" ]; then
+    ok "$h the launch's runtime dir is inside the throwaway home"
+  else
+    bad "$h the launch's runtime dir is inside the throwaway home"
+  fi
+  local bus_addr bus_ok=1
+  while IFS= read -r bus_addr; do
+    [ -n "$bus_addr" ] || continue
+    case "${bus_addr#unix:path=}" in
+      "$harness_home"/*) continue;;
+      *) bus_ok=0;;
+    esac
+  done < <(sed -n "s/^env $want_cli DBUS_SESSION_BUS_ADDRESS=//p" "$envlines" 2>/dev/null)
+  if [ "$bus_ok" -eq 1 ]; then
+    ok "$h the launch's session bus address is inside the throwaway home"
+  else
+    bad "$h the launch's session bus address is inside the throwaway home"
   fi
   if [ "$h" = "antigravity" ]; then
     # The CLI writes into ~/.gemini/, so the isolation has to hold for the

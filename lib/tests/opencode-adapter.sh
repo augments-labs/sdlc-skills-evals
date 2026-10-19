@@ -64,24 +64,32 @@ adapter_ran "$work/err.jsonl" && bad "error stream did not run" || ok "error str
 # `plugins` and resolves `<dir>/index.js` inside it.
 #
 # The version comes from the CLI's own `--version`, so the fake CLI below
-# is what answers it: the real opencode is not on this test's PATH.
+# is what answers it: the real opencode is not on this test's PATH. The
+# answer is read from a file BESIDE the fake, not from the environment:
+# the adapter reads the version under a cleared environment — a version
+# probe must not reach the operator's session bus either — so a variable
+# would not survive to the CLI.
 fakebin="$work/bin"; mkdir -p "$fakebin"
 cat > "$fakebin/opencode" <<'EOF'
 #!/usr/bin/env bash
 case "${1:-}" in
-  --version) printf 'opencode v%s\n' "${FAKE_OPENCODE_VERSION:-1.9.0}";;
+  --version|-v)
+    v="$(cat "$(dirname "$0")/version" 2>/dev/null || echo 1.9.0)"
+    printf 'opencode v%s\n' "$v";;
 esac
 exit 0
 EOF
 chmod +x "$fakebin/opencode"
 PATH="$fakebin:$PATH"; export PATH
+fake_version() { printf '%s\n' "$1" > "$fakebin/version"; }
 
 plug="$work/plugin-src"
 mkdir -p "$plug/.opencode/plugins"
 printf 'export default {}\n' > "$plug/.opencode/plugins/sdlc-skills.js"
 printf 'export default {}\n' > "$plug/index.js"
 
-FAKE_OPENCODE_VERSION=1.9.0 maxturns=6 adapter_install "$plug"
+fake_version 1.9.0
+maxturns=6 adapter_install "$plug"
 # Set by adapter_install (sourced above).
 # shellcheck disable=SC2154
 cfg="$harness_home/xdg/opencode/opencode.json"
@@ -92,7 +100,8 @@ jq -e 'has("plugins") | not' "$cfg" >/dev/null \
   && ok "1.x install writes no plugins key" || bad "1.x install writes no plugins key"
 rm -rf "$harness_home"
 
-FAKE_OPENCODE_VERSION=2.0.32 maxturns=6 adapter_install "$plug"
+fake_version 2.0.32
+maxturns=6 adapter_install "$plug"
 cfg="$harness_home/xdg/opencode/opencode.json"
 jq -e --arg p "$plug" \
   '.plugins[0] == $p and .agent.build.steps == 6' "$cfg" >/dev/null \
@@ -102,13 +111,15 @@ jq -e 'has("plugin") | not' "$cfg" >/dev/null \
 rm -rf "$harness_home"
 
 # a version the adapter does not know is refused, not guessed at
-if FAKE_OPENCODE_VERSION=9.9.9 adapter_install "$plug" >/dev/null 2>&1; then
+fake_version 9.9.9
+if adapter_install "$plug" >/dev/null 2>&1; then
   bad "an unrecognised opencode version is refused"
 else
   ok "an unrecognised opencode version is refused"
 fi
 
-FAKE_OPENCODE_VERSION=1.9.0 adapter_install "$plug" >/dev/null 2>&1
+fake_version 1.9.0
+adapter_install "$plug" >/dev/null 2>&1
 saved_turns="${maxturns:-}"
 unset maxturns
 adapter_install "$plug" 2>/dev/null
