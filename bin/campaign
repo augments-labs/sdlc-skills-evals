@@ -9,8 +9,8 @@
 #
 # Manual tool, never CI. Live runs (run spends tokens) start only on a
 # recorded go; new and --dry-run plan without spending anything: they
-# report the number of planned runs and the exact invocations, and no
-# cost of any kind.
+# report the number of planned runs and the exact invocations, and state
+# no monetary figure of their own.
 
 set -uo pipefail
 if [ -n "${SDLC_SKILLS_EVALS_ROOT:-}" ]; then
@@ -353,9 +353,10 @@ if [ "$cmd" = "new" ]; then
     printf '  "created": '; jq -n --arg c "$created" '$c'; printf '\n}\n'
   } > "$dir/campaign.json"
   jq -e '.plugin_commit and (.arms | type == "array")' "$dir/campaign.json" >/dev/null || exit 2
-  planned="$(printf '%s\n' "$scenarios" | tr ',' '\n' | grep -c .)"
-  planned=$(( planned * $(printf '%s\n' "$arms" | tr ',' '\n' | grep -c .) * runs ))
-  echo "planned $planned runs into $dir"
+  planned_scenarios="$(printf '%s\n' "$scenarios" | tr ',' '\n' | grep -c .)"
+  planned_arms="$(printf '%s\n' "$arms" | tr ',' '\n' | grep -c .)"
+  planned=$(( planned_scenarios * planned_arms * runs ))
+  echo "planned $planned runs into $dir ($planned_scenarios scenarios x $planned_arms arms x $runs runs)"
   echo "label      : $label"
   echo "harness    : $harness"
   echo "arms       : $arms"
@@ -393,6 +394,7 @@ if [ "$cmd" = "run" ]; then
   hdir_c="$(jq -r '.harness_dir // empty' "$dir/campaign.json")"
   sdir_c="$(jq -r '.scenario_dir // empty' "$dir/campaign.json")"
   planned=0
+  before="$(find "$dir/runs" -name '*.json' 2>/dev/null | wc -l | tr -d ' ')"
   while read -r sc; do
     while read -r an; do
       abase="$(jq -r --arg a "$an" '.arms[] | select(.name == $a) | .base // empty' "$dir/campaign.json")"
@@ -418,11 +420,17 @@ if [ "$cmd" = "run" ]; then
       done
     done < <(jq -r '.arms[].name' "$dir/campaign.json")
   done < <(jq -r '.scenarios[]' "$dir/campaign.json")
-  # A completion is a completion: count the runs that produced a record,
-  # not the invocations. A run that resolved no pin, or refused its
-  # arguments, measured nothing, and saying it completed would be a claim
-  # the record does not support.
-  done_n="$(find "$dir/runs" -name '*.json' 2>/dev/null | wc -l | tr -d ' ')"
+  # A completion is a completion: count the records THIS run wrote, not
+  # the invocations and not the records an earlier attempt left. A run
+  # that resolved no pin, or refused its arguments, measured nothing, and
+  # saying it completed would be a claim the record does not support.
+  after="$(find "$dir/runs" -name '*.json' 2>/dev/null | wc -l | tr -d ' ')"
+  done_n=$((after - before))
+  # What this attempt achieved, so the report's pending gate can tell a
+  # missing observation from a record an earlier attempt left behind.
+  jq --argjson n "$done_n" --arg at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+    '.last_run = {records: $n, at: $at}' "$dir/campaign.json" > "$dir/.campaign.json.new" \
+    && mv "$dir/.campaign.json.new" "$dir/campaign.json"
   echo "completed $done_n/$planned runs into $dir"
   exit 0
 fi
@@ -435,7 +443,15 @@ while [ "$#" -gt 0 ]; do
 done
 dir="$(_record_dir "$label")" || exit 2
 planned="$(jq -r '(.scenarios | length) * (.arms | length) * .runs' "$dir/campaign.json")"
-have="$(find "$dir/runs" -name '*.json' | wc -l)"
+# The pending gate counts the records the LAST attempt wrote: a record an
+# earlier attempt left behind must never stand in for an observation this
+# campaign did not make.
+last_run="$(jq -r '.last_run.records // empty' "$dir/campaign.json" 2>/dev/null)"
+if [ -n "$last_run" ]; then
+  have="$last_run"
+else
+  have="$(find "$dir/runs" -name '*.json' | wc -l)"
+fi
 if [ "$have" -lt "$planned" ]; then
   echo "report refused: $have/$planned runs complete" >&2; exit 2
 fi
@@ -447,8 +463,10 @@ created="$(jq -r '.created' "$dir/campaign.json")"
 # The commit the runs actually measured. A directory plugin is the
 # operator's own working tree, so it can have moved since the campaign
 # was prepared: the frozen commit and the measured one are then different
-# trees, and the record says which was measured.
-measured="$(find "$dir/runs" -name '*.json' -exec jq -r '.plugin_commit // empty' {} + 2>/dev/null \
+# trees, and the record says which was measured. Only the records that
+# measured a plugin count — the green arm's — so a red arm's base commit
+# is never presented as a plugin commit.
+measured="$(find "$dir/runs" -name '*-green-*.json' -exec jq -r '.plugin_commit // empty' {} + 2>/dev/null \
   | sort -u | paste -sd, -)"
 {
   echo "# Campaign: $label"

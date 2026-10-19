@@ -1,7 +1,15 @@
 #!/usr/bin/env bash
-# Offline test: bin/triggering via the fake harness only. The fake emits a
-# fixed SKILL line (FAKE_SUBJECT) or none (FAKE_FIRE=0), so the scoring
-# loop's reductions are exercised with zero live calls. No token spent.
+# Offline test: bin/triggering — its scoring loop, the plans it prints,
+# and the offline paths that must launch nothing.
+#
+# The fake emits a fixed SKILL line (FAKE_SUBJECT) or none (FAKE_FIRE=0),
+# so the loop's reductions are exercised with zero live calls, and every
+# run here uses the fake harness (--harness-dir lib/tests/fake-cli): no
+# agent CLI is reached and no token is spent. The non-launching cases put
+# a SENTINEL real CLI on PATH — one that fails and records the call — and
+# the live-path control that follows proves the sentinel is reachable at
+# all. One case reads the real codex adapter's header without launching
+# it: the dry run against an unrunnable harness.
 set -uo pipefail
 here="$(cd "$(dirname "$0")/../.." && pwd)"
 fake_h="$here/lib/tests/fake-cli"

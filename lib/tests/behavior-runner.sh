@@ -1,8 +1,14 @@
 #!/usr/bin/env bash
-# Offline test: bin/behavior outcome classes via the fake harness only.
-# Nothing here may launch a live CLI: every run uses --harness-dir
-# lib/tests/fake-cli with --scenario-dir lib/tests/fake-cli/scenarios,
-# except the two probes that exit before any launch. No token spent.
+# Offline test: bin/behavior — its outcome classes, the plans it prints,
+# and the offline paths that must launch nothing.
+#
+# Every run here uses the fake harness (--harness-dir lib/tests/fake-cli
+# with --scenario-dir lib/tests/fake-cli/scenarios), so no agent CLI is
+# reached and no token is spent. The non-launching cases put a SENTINEL
+# real CLI on PATH — one that fails and records the call — and the
+# live-path control that follows proves the sentinel is reachable at all.
+# Two cases read a real adapter's header without launching it: the
+# unrunnable-harness dry run, and the control above.
 set -uo pipefail
 here="$(cd "$(dirname "$0")/../.." && pwd)"
 fake_h="$here/lib/tests/fake-cli"
