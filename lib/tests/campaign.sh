@@ -85,9 +85,11 @@ jq -e --argjson k "$run_keys" 'keys == $k' "$d/campaign.json" >/dev/null \
   && ok "the record keeps the key set after the run" || bad "the record keeps the key set after the run"
 "$here/bin/campaign" report "$l" >/dev/null 2>&1 \
   || { bad "campaign report"; exit "$fails"; }
-grep -q "^## Commit" "$d/summary.md" && ok "summary has Commit" || bad "summary has Commit"
-grep -q "^## Behavior scenarios" "$d/summary.md" && ok "summary has Behavior scenarios" || bad "summary has Behavior scenarios"
-grep -q "^## Costs" "$d/summary.md" && ok "summary has Costs" || bad "summary has Costs"
+# the headings are matched WHOLE: a prefix match would let "## Committed"
+# satisfy a check for "## Commit"
+grep -qx "## Commit" "$d/summary.md" && ok "summary has Commit" || bad "summary has Commit"
+grep -qx "## Behavior scenarios" "$d/summary.md" && ok "summary has Behavior scenarios" || bad "summary has Behavior scenarios"
+grep -qx "## Costs" "$d/summary.md" && ok "summary has Costs" || bad "summary has Costs"
 grep -q "probe-ok" "$d/summary.md" && ok "summary names the scenario" || bad "summary names the scenario"
 
 # a manifest-less probe scenario cannot go green, even in a campaign
@@ -458,7 +460,8 @@ case "$out" in
 esac
 none_line="$(printf '%s\n' "$out" | sed -n 's/^command    : //p' | grep -- "--arm none" | head -1)"
 case "$none_line" in
-  *--plugin*) bad "the none arm's planned command carries no --plugin";;
+  "") bad "the none arm's planned command carries no --plugin (the plan names no none arm)";;
+  *--plugin*) bad "the none arm's planned command carries no --plugin (got '$none_line')";;
   *) ok "the none arm's planned command carries no --plugin";;
 esac
 out="$("$here/bin/campaign" run "$l12" 2>&1)"
@@ -615,8 +618,13 @@ rm -rf "$here/workspaces/$eval_live_ws"
 out="$(SDLC_SKILLS_ROOT="$empty_root" "$here/bin/campaign" --evals --harness fake --skill yagni \
   --campaign "$eval_ws_live" 2>&1)"
 rc="$?"
-[ "$rc" -eq 2 ] && ok "the live eval path refuses a default pin it cannot resolve" \
-  || bad "the live eval path refuses a default pin it cannot resolve (exit $rc)"
+# the refusal names the pin it could not resolve: an exit 2 alone would
+# be satisfied by any later refusal
+if [ "$rc" -eq 2 ] && printf '%s' "$out" | grep -qF "cannot pin --plugin '$inv_commit'"; then
+  ok "the live eval path refuses a default pin it cannot resolve"
+else
+  bad "the live eval path refuses a default pin it cannot resolve (exit $rc, got '$out')"
+fi
 printf '%s' "$out" | grep -qF "$inv_commit" \
   && ok "the refusal names the committed pin" || bad "the refusal names the committed pin"
 out="$("$here/bin/campaign" --evals --harness fake --skill yagni --without old \
