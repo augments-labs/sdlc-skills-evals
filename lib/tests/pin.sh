@@ -63,4 +63,65 @@ else
 fi
 rm -rf "$run_dir4"
 
+# --- the committed upstream pin ----------------------------------------------
+#
+# The pin a run resolves is a COMMIT, never a mutable tag: it comes from the
+# committed inventory, and a value that is not a full object name is
+# refused, so no run can select new work from a tag.
+
+lab_root="$(cd "$here/../.." && pwd)"
+inv="$lab_root/config/upstream-inventory.json"
+
+pin="$(lab_inventory_commit 2>/dev/null)"
+if [ -n "$pin" ] && [ "${#pin}" -eq 40 ]; then
+  ok "the committed pin is a full object name"
+else
+  bad "the committed pin is a full object name (got '$pin')"
+fi
+case "$pin" in
+  *[!0-9a-f]*) bad "the committed pin is hexadecimal" ;;
+  *) ok "the committed pin is hexadecimal" ;;
+esac
+
+# a version tag in place of the commit is refused
+tag_inv="$standin/inventory-tag.json"
+jq '.upstream.commit = "v11.0.0"' "$inv" >"$tag_inv" 2>/dev/null
+if INVENTORY_PATH="$tag_inv" lab_inventory_commit >/dev/null 2>&1; then
+  bad "a version tag instead of a commit is refused"
+else
+  ok "a version tag instead of a commit is refused"
+fi
+
+# a missing inventory is refused
+if INVENTORY_PATH="$standin/no-such-inventory.json" lab_inventory_commit >/dev/null 2>&1; then
+  bad "a missing inventory is refused"
+else
+  ok "a missing inventory is refused"
+fi
+
+# --- what a ref names --------------------------------------------------------
+#
+# A full object name IS a commit and is taken at face value, so a pinned
+# commit needs no checkout to name. A tag is resolved to the commit it
+# names. A path is its own HEAD.
+
+face="$(SDLC_SKILLS_ROOT=/nonexistent/sdlc-skills-evals-root lab_pin_commit_of "$commit" 2>/dev/null)"
+[ "$face" = "$commit" ] && ok "a commit is taken at face value" \
+  || bad "a commit is taken at face value (got '$face')"
+
+git -C "$standin" tag -f selftest-tag "$commit" >/dev/null 2>&1
+tagged="$(lab_pin_commit_of selftest-tag 2>/dev/null)"
+[ "$tagged" = "$commit" ] && ok "a tag resolves to the commit it names" \
+  || bad "a tag resolves to the commit it names (got '$tagged')"
+
+head_of="$(lab_pin_commit_of "$standin" 2>/dev/null)"
+[ "$head_of" = "$commit" ] && ok "a path resolves to its own HEAD" \
+  || bad "a path resolves to its own HEAD (got '$head_of')"
+
+if lab_pin_commit_of does-not-exist-sdlc-skills-evals >/dev/null 2>&1; then
+  bad "an unknown ref is refused"
+else
+  ok "an unknown ref is refused"
+fi
+
 exit "$fails"

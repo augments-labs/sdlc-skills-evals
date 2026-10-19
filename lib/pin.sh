@@ -14,6 +14,74 @@
 # globally installed plugin: without a usable SDLC_SKILLS_ROOT the pin is
 # refused (exit 2).
 
+# --- the committed upstream pin ----------------------------------------------
+#
+# The pin a run resolves is a COMMIT, never a mutable tag: it is the
+# upstream.commit of the committed inventory (config/upstream-inventory.json),
+# which the static gate checks offline. A value that is not a full object
+# name is refused, so no run can select new work from a tag. INVENTORY_PATH
+# is the seam bin/check reads too, so one artifact has one path.
+
+_lab_is_commit() { # $1 — 0 when it is a full object name
+  case "${1:-}" in ''|*[!0-9a-f]*) return 1 ;; esac
+  [ "${#1}" -eq 40 ]
+}
+
+_lab_inventory_path() { # prints the inventory's path
+  local root inv
+  if [ -n "${SDLC_SKILLS_EVALS_ROOT:-}" ]; then
+    root="$SDLC_SKILLS_EVALS_ROOT"
+  else
+    root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+  fi
+  inv="${INVENTORY_PATH:-$root/config/upstream-inventory.json}"
+  case "$inv" in /*) : ;; *) inv="$root/$inv" ;; esac
+  printf '%s\n' "$inv"
+}
+
+lab_inventory_commit() { # prints the committed upstream pin; 2 when there is none
+  local inv commit
+  inv="$(_lab_inventory_path)"
+  [ -f "$inv" ] || { printf 'no upstream inventory at %s\n' "$inv" >&2; return 2; }
+  command -v jq >/dev/null 2>&1 || { printf 'needs `jq`\n' >&2; return 2; }
+  commit="$(jq -r '.upstream.commit // empty' "$inv" 2>/dev/null)" \
+    || { printf 'cannot read the upstream pin from %s\n' "$inv" >&2; return 2; }
+  if ! _lab_is_commit "$commit"; then
+    printf 'the upstream pin is not a commit: %s\n' "${commit:-none}" >&2
+    return 2
+  fi
+  printf '%s\n' "$commit"
+}
+
+# lab_pin_commit_of <path|ref> — the commit a plugin reference names, with
+# no worktree and no checkout of its own: a path is its own HEAD, a full
+# object name is a commit and is taken at face value, and any other ref
+# (a tag, a branch) is resolved against the plugin checkout. A tag may be
+# NAMED here; the commit it names is what a run then uses.
+lab_pin_commit_of() {
+  [ "$#" -eq 1 ] || return 127
+  local src="$1" root commit
+  if [ -d "$src" ]; then
+    commit="$(git -C "$src" rev-parse HEAD 2>/dev/null)" \
+      || { printf 'not a plugin checkout: %s\n' "$src" >&2; return 2; }
+    printf '%s\n' "$commit"
+    return 0
+  fi
+  if _lab_is_commit "$src"; then
+    printf '%s\n' "$src"
+    return 0
+  fi
+  root="${SDLC_SKILLS_ROOT:-}"
+  if [ -z "$root" ]; then
+    root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/../sdlc-skills"
+  fi
+  git -C "$root" rev-parse --git-dir >/dev/null 2>&1 \
+    || { printf 'not a plugin checkout: %s\n' "$root" >&2; return 2; }
+  commit="$(git -C "$root" rev-parse --verify --quiet "$src^{commit}" 2>/dev/null)" \
+    || { printf 'cannot resolve %s in %s\n' "$src" "$root" >&2; return 2; }
+  printf '%s\n' "$commit"
+}
+
 _lab_pin_worktrees=""
 
 _lab_pin_remove() { # $1 worktree path — removes via the owning repo, from any CWD
