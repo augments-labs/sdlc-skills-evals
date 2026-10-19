@@ -19,33 +19,66 @@
 # built-ins only; real config: 37 sdlc skills). Provisional until a recorded
 # run confirms them: adapter_ran (no dead-CLI shape observed) and the
 # session-continue path (sessionID key observed, resume unobserved).
+#
+# TWO GENERATIONS install the same plugin differently, so the major version
+# decides (the pinned upstream's tests/harnesses/opencode.sh, v11.0.0): 1.x
+# takes a plugin FILE under `plugin`; 2.x takes a plugin DIRECTORY under
+# `plugins` and resolves `<dir>/index.js` inside it, refusing a file path
+# outright. The install below writes the layout the CLI on this machine
+# actually reads.
 
 runnable=yes
-runnable_reason="opencode 1.x on PATH; auth is infrastructure-provided on this machine, no seed needed"
+runnable_reason="opencode on PATH; the recorded activation evidence is a 1.x stream, and the install covers the pinned upstream's 1.x and 2.x plugin layouts"
 permission_flags="--auto"
 capabilities="subagent-loads-skills=run nesting-depth=run tier-settable=documentation session-start-event=documentation post-compaction-event=documentation edit-path-partial=run"
 
 adapter_name='opencode'
 
-adapter_check() {
-  command -v opencode >/dev/null 2>&1 || { echo "no \`opencode\` CLI on PATH" >&2; return 3; }
+# `opencode --version` prints e.g. `opencode v2.0.13`; keep only the number.
+_opencode_detect() {
+  opencode_version="$(opencode --version 2>/dev/null | head -1 | tr -cd '0-9.')"
+  opencode_major="${opencode_version%%.*}"
 }
 
-# OpenCode loads a plugin file directly: the isolated config home carries
-# only the plugin entry naming the pinned source. An empty source is the
-# NONE arm — isolated home, no plugin entry, so nothing can leak in.
+adapter_check() {
+  command -v opencode >/dev/null 2>&1 || { echo "no \`opencode\` CLI on PATH" >&2; return 3; }
+  _opencode_detect
+  case "$opencode_major" in
+    1|2) ;;
+    *) echo "unrecognised \`opencode\` version: ${opencode_version:-none}" >&2; return 3;;
+  esac
+}
+
+
+# OpenCode loads a plugin from the checkout, so the checkout is the whole
+# install: the plugin resolves its skills from its own location. The isolated
+# config home carries only the plugin entry — no credentials. An empty source
+# is the NONE arm — isolated home, no plugin entry, so nothing can leak in.
 # Auth is infrastructure-provided here; where it is not, the runner exports
 # $LAB_CREDENTIAL_SEED/opencode/env before invoking (see harnesses/README).
 adapter_install() { # $1 plugin source ("" = NONE arm, load nothing)
   harness_home="$(mktemp -d)"
   mkdir -p "$harness_home/xdg/opencode" || return 3
+  # The layout depends on the major version: 1.x names a plugin FILE under
+  # `plugin`, 2.x names the plugin DIRECTORY under `plugins` and resolves
+  # `<dir>/index.js` inside it. The version is read at install time, never
+  # carried over from an earlier install.
+  _opencode_detect
+  case "$opencode_major" in
+    1|2) ;;
+    *) echo "unrecognised \`opencode\` version: ${opencode_version:-none}" >&2; return 3;;
+  esac
   # A step bound for the default build agent when the runner names one
   # (maxturns): opencode has no CLI turns flag, so the isolated config
   # carries it. Past the bound the agent answers text-only and exits —
   # a miss, not a hang. Without maxturns the wall clock is the only bound.
   local plug_cfg steps_cfg
   if [ -n "${1:-}" ]; then
-    plug_cfg="$(jq -n --arg p "$1/.opencode/plugins/sdlc-skills.js" '[$p]')"
+    if [ "$opencode_major" = "1" ]; then
+      plug_cfg="$(jq -n --arg p "$1/.opencode/plugins/sdlc-skills.js" '[$p]')"
+    else
+      plug_cfg="$(jq -n --arg p "$1" '[$p]')"
+    fi
   else
     plug_cfg="null"
   fi
@@ -54,9 +87,11 @@ adapter_install() { # $1 plugin source ("" = NONE arm, load nothing)
   else
     steps_cfg="null"
   fi
-  jq -n --argjson plugin "$plug_cfg" --argjson agent "$steps_cfg" \
+  local plugin_key="plugin"
+  [ "$opencode_major" = "1" ] || plugin_key="plugins"
+  jq -n --arg key "$plugin_key" --argjson plugin "$plug_cfg" --argjson agent "$steps_cfg" \
     '{"$schema":"https://opencode.ai/config.json"}
-     + (if $plugin == null then {} else {plugin:$plugin} end)
+     + (if $plugin == null then {} else {($key):$plugin} end)
      + (if $agent == null then {} else {agent:$agent} end)' \
     > "$harness_home/xdg/opencode/opencode.json" || return 3
   plugin_dir="$1"
