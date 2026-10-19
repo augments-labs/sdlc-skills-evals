@@ -385,6 +385,47 @@ printf '%s' "$out" | grep -qF "$inv_commit" \
   || bad "the live eval path refuses --without old with no --old-plugin"
 rm -rf "$here/workspaces/$eval_ws_live"
 
+# --- a campaign with no usable pin refuses -----------------------------------
+#
+# An inventory that names no commit is refused by BOTH campaign paths, and
+# NO tree is named in its place: the campaign falls back to nothing, never
+# to some other tree.
+
+broken_inv="$work/no-commit-inventory.json"
+jq '.upstream.commit = "v11.0.0"' "$here/config/upstream-inventory.json" > "$broken_inv"
+out="$(INVENTORY_PATH="$broken_inv" "$here/bin/campaign" --evals --harness fake --skill yagni \
+  --campaign "$eval_ws_live" 2>&1)"
+rc="$?"
+if [ "$rc" -eq 2 ] && printf '%s' "$out" | grep -qF "no usable upstream pin"; then
+  ok "the eval path refuses a default pin it cannot resolve"
+else
+  bad "the eval path refuses a default pin it cannot resolve (exit $rc, got '$out')"
+fi
+case "$out" in
+  *"pin        :"*) bad "the eval refusal names no tree in place of the pin";;
+  *) ok "the eval refusal names no tree in place of the pin";;
+esac
+l_nopin="selftest-nopin-$$"
+out="$(INVENTORY_PATH="$broken_inv" "$here/bin/campaign" new "$l_nopin" --harness fake \
+  --arms green --scenarios probe-ok --runs 1 \
+  --scenario-dir "$here/lib/tests/fake-cli/scenarios" 2>&1)"
+rc="$?"
+if [ "$rc" -eq 2 ] && printf '%s' "$out" | grep -qF "no usable upstream pin"; then
+  ok "a campaign with no usable pin refuses"
+else
+  bad "a campaign with no usable pin refuses (exit $rc, got '$out')"
+fi
+case "$out" in
+  *"pin        :"*) bad "the campaign refusal names no tree in place of the pin";;
+  *) ok "the campaign refusal names no tree in place of the pin";;
+esac
+if ls -d "$here"/results/*-"$l_nopin" >/dev/null 2>&1; then
+  bad "the refusal prepared no campaign"
+else
+  ok "the refusal prepared no campaign"
+fi
+rm -rf "$here"/results/*-"$l_nopin" "$here/workspaces/$eval_ws_live"
+
 # --- no invented monetary cost ----------------------------------------------
 #
 # The offline paths report the plan, never a price. The pattern is a

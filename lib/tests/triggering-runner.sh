@@ -103,6 +103,23 @@ rc="$?"
 printf '%s' "$out" | grep -qF "$inv_commit" \
   && ok "the refusal names the pinned commit" || bad "the refusal names the pinned commit"
 
+# an inventory that names no commit is refused, and NO tree is named in
+# its place: the runner falls back to nothing, never to some other tree
+broken_inv="$work/no-commit-inventory.json"
+jq '.upstream.commit = "v11.0.0"' "$here/config/upstream-inventory.json" > "$broken_inv"
+out="$(INVENTORY_PATH="$broken_inv" "$here/bin/triggering" --harness fake --skill yagni \
+  --dry-run 2>&1)"
+rc="$?"
+if [ "$rc" -eq 2 ] && printf '%s' "$out" | grep -qF "no usable upstream pin"; then
+  ok "the descriptions runner refuses a default pin it cannot resolve"
+else
+  bad "the descriptions runner refuses a default pin it cannot resolve (exit $rc, got '$out')"
+fi
+case "$out" in
+  *"plugin   :"*) bad "the refusal names no tree in place of the pin";;
+  *) ok "the refusal names no tree in place of the pin";;
+esac
+
 # a one-query set, so a live run costs one observation and not a whole
 # sheet
 desc_work="$work/descriptions/common"

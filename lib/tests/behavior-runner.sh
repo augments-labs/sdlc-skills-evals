@@ -200,6 +200,27 @@ SDLC_SKILLS_ROOT="$standin" "$here/bin/behavior" --harness fake --scenario probe
 [ "$?" -eq 2 ] && ok "a run that cannot resolve the default pin refuses" \
   || bad "a run that cannot resolve the default pin refuses"
 
+# an inventory that names no commit is refused, and NO tree is named in
+# its place: the runner falls back to nothing, never to some other tree
+broken_inv="$work/no-commit-inventory.json"
+jq '.upstream.commit = "v11.0.0"' "$here/config/upstream-inventory.json" > "$broken_inv"
+out="$(INVENTORY_PATH="$broken_inv" "$here/bin/behavior" --harness fake --scenario probe-ok \
+  --arm green --dry-run "${base[@]}" 2>&1)"
+rc="$?"
+if [ "$rc" -eq 2 ] && printf '%s' "$out" | grep -qF "no usable upstream pin"; then
+  ok "the behaviour runner refuses a default pin it cannot resolve"
+else
+  bad "the behaviour runner refuses a default pin it cannot resolve (exit $rc, got '$out')"
+fi
+case "$out" in
+  *"pin        :"*) bad "the refusal names no tree in place of the pin";;
+  *) ok "the refusal names no tree in place of the pin";;
+esac
+INVENTORY_PATH="$broken_inv" "$here/bin/behavior" --harness fake --scenario probe-ok \
+  --arm green "${base[@]}" >/dev/null 2>&1
+[ "$?" -eq 2 ] && ok "the live path refuses a default pin it cannot resolve" \
+  || bad "the live path refuses a default pin it cannot resolve"
+
 # --- the plan is the whole command, option by option -------------------------
 #
 # The plan advertises the exact invocation. A prefix match would let a plan
