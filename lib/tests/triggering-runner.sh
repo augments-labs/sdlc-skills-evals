@@ -176,8 +176,9 @@ tag_one="$(git -C "$tagrepo" rev-parse HEAD)"
 git -C "$tagrepo" tag selftest-plan-tag
 git -C "$tagrepo" -c user.name=t -c user.email=t@example.invalid commit -q --allow-empty -m two
 tag_two="$(git -C "$tagrepo" rev-parse HEAD)"
-out="$(SDLC_SKILLS_ROOT="$tagrepo" "$here/bin/triggering" --harness fake --harness-dir "$fake_h" \
-  --skill yagni --plugin selftest-plan-tag --dry-run 2>&1)"
+out="$(SDLC_SKILLS_ROOT="$tagrepo" DESCRIPTIONS_ROOT="$work/descriptions" "$here/bin/triggering" \
+  --harness fake --harness-dir "$fake_h" --skill probe --plugin selftest-plan-tag \
+  --runs 1 --split train --dry-run 2>&1)"
 printf '%s' "$out" | grep -qF "plugin   : $tag_one" \
   && ok "the dry run names the commit a ref resolves to" \
   || bad "the dry run names the commit a ref resolves to"
@@ -186,14 +187,13 @@ case "$plan" in
   *"--plugin $tag_one"*) ok "the planned command carries the commit, not the ref";;
   *) bad "the planned command carries the commit, not the ref (got '$plan')";;
 esac
-# the tag moves: the plan's command still resolves to the commit it named
+# the tag moves: the plan's command still installs the commit it named
 git -C "$tagrepo" tag -f selftest-plan-tag "$tag_two" >/dev/null 2>&1
-resolved="$(SDLC_SKILLS_ROOT="$tagrepo" "$here/bin/triggering" --harness fake --harness-dir "$fake_h" \
-  --skill yagni --plugin "$tag_one" --dry-run 2>&1 | sed -n 's/^plugin   : //p')"
-case "$resolved" in
-  "$tag_one"*) ok "the planned command still names the commit the plan froze";;
-  *) bad "the planned command still names the commit the plan froze (got '$resolved')";;
-esac
+out2="$( cd "$here" && SDLC_SKILLS_ROOT="$tagrepo" DESCRIPTIONS_ROOT="$work/descriptions" \
+  eval "$plan" 2>&1 )"
+printf '%s' "$out2" | grep -qF "plugin   : $tag_one" \
+  && ok "the planned command still installs the commit the plan froze" \
+  || bad "the planned command still installs the commit the plan froze (got '$(printf '%s' "$out2" | sed -n 's/^plugin   : //p')')"
 
 # --- no invented monetary cost ----------------------------------------------
 #
