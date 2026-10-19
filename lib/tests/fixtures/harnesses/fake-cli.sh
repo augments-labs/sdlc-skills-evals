@@ -17,9 +17,12 @@
 #   call <name> <args>   — the invocation itself
 #   at   <name> <path>   — the resolved path of this binary, so the log shows
 #                          the fake answered and not a real CLI
-#   env  <name> KEY=VAL  — the environment the CLI was launched with, one
-#                          variable per line (so a value with spaces stays
-#                          readable)
+#   env  <name> KEY=VAL  — the environment variables that carry a home or a
+#                          session bus, one per line
+#
+# Only those variables are recorded. A whole environment would put the
+# operator's tokens in a log that the test prints when an assertion fails,
+# and a test must never print a credential.
 set -uo pipefail
 
 self="$(basename "$0")"
@@ -28,7 +31,12 @@ _log="${FAKE_HARNESS_LOG:-}"
 if [ -n "$_log" ]; then
   printf 'call %s %s\n' "$self" "$*" >> "$_log" 2>/dev/null || true
   printf 'at %s %s\n' "$self" "$0" >> "$_log" 2>/dev/null || true
-  env | sort | sed "s/^/env $self /" >> "$_log" 2>/dev/null || true
+  for k in HOME XDG_CONFIG_HOME XDG_DATA_HOME XDG_CACHE_HOME XDG_RUNTIME_DIR \
+           DBUS_SESSION_BUS_ADDRESS CODEX_HOME CLAUDE_CONFIG_DIR \
+           KIMI_CODE_HOME GROK_HOME HERMES_HOME AGY_CLI_DISABLE_AUTO_UPDATE; do
+    v="$(printenv "$k" 2>/dev/null)"
+    [ -n "$v" ] && printf 'env %s %s=%s\n' "$self" "$k" "$v" >> "$_log" 2>/dev/null
+  done
 fi
 
 _state="${HOME:-}/.fake-state"

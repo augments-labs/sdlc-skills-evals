@@ -240,7 +240,7 @@ EOS
   elif printf '%s\n' "$calls" | grep -qF -- "$install_pattern"; then
     ok "$h install invokes the CLI ($install_pattern)"
   else
-    bad "$h install invokes the CLI ($install_pattern) — log: $(printf '%s' "$calls" | tr '\n' '|')"
+    bad "$h install invokes the CLI ($install_pattern) — log: $(printf '%s\n' "$calls" | grep '^call ' | tr '\n' '|')"
   fi
 
   # --- the none arm ----------------------------------------------------------
@@ -274,7 +274,7 @@ EOS
   if printf '%s\n' "$launch_calls" | grep -qF -- "$launch_pattern"; then
     ok "$h activation launch reaches the CLI ($launch_pattern)"
   else
-    bad "$h activation launch reaches the CLI ($launch_pattern) — log: $(printf '%s' "$launch_calls" | tr '\n' '|')"
+    bad "$h activation launch reaches the CLI ($launch_pattern) — log: $(printf '%s\n' "$launch_calls" | grep '^call ' | tr '\n' '|')"
   fi
   if [ -s "$stream" ]; then
     ok "$h activation launch captures the CLI's output"
