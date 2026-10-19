@@ -248,6 +248,7 @@ if [ -n "$dry" ]; then
   plan_cmd="bin/behavior --harness $(printf '%q' "$harness") --scenario $(printf '%q' "$scenario") --arm $arm"
   [ "$arm" = green ] && plan_cmd="$plan_cmd --plugin $(printf '%q' "$plugin")"
   [ "$arm" = red ] && plan_cmd="$plan_cmd --base $(printf '%q' "$base")"
+  plan_cmd="$plan_cmd --timeout $timeout_s"
   [ -n "$tier_override" ] && plan_cmd="$plan_cmd --tier $(printf '%q' "$tier_override")"
   [ -n "$keep" ] && plan_cmd="$plan_cmd --keep"
   [ -n "$record_dir" ] && plan_cmd="$plan_cmd --record $(printf '%q' "$record_dir")"

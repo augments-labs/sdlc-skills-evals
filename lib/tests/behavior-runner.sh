@@ -114,6 +114,9 @@ printf '%s' "$out" | grep -qF "pin        : $inv_commit" \
 printf '%s' "$out" | grep -qF "command    : bin/behavior --harness opencode --scenario probe-ok --arm green --plugin $inv_commit" \
   && ok "the dry run names the exact planned invocation" \
   || bad "the dry run names the exact planned invocation"
+printf '%s' "$out" | grep -qF -- "--timeout 1800" \
+  && ok "the dry run names the timeout the run would use" \
+  || bad "the dry run names the timeout the run would use"
 
 # the dry run refuses what the live run refuses
 "$here/bin/behavior" --harness opencode --scenario probe-ok --arm none --plugin "$standin" \
