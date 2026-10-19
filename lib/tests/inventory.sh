@@ -80,6 +80,14 @@ expect_fail "a missing inventory file is rejected" "no upstream inventory"
 run_check "$INV" docs
 expect_pass "the committed inventory passes the gate"
 
+# the default path says what it did NOT check: membership is knowable only
+# against a tree
+if printf '%s\n' "$check_out" | grep -q "membership not checked"; then
+  ok "the default path says membership was not checked"
+else
+  bad "the default path says membership was not checked"
+fi
+
 # --- drift against a tree built from the inventory --------------------------
 
 tree="$work/tree"
@@ -188,6 +196,15 @@ cp -r "$tree" "$drift_tree4"
 run_check "$INV" docs --plugin "$drift_tree4"
 expect_fail "a tree that gained a harness is rejected" "absent from the inventory"
 
+# a member of a supplied tree is never invisible: a skill outside the
+# canonical two-level shape is drift, not a path to discard
+drift_tree5="$work/drift-tree5"
+cp -r "$tree" "$drift_tree5"
+mkdir -p "$drift_tree5/skills/design/newphase/newskill"
+: >"$drift_tree5/skills/design/newphase/newskill/SKILL.md"
+run_check "$INV" docs --plugin "$drift_tree5"
+expect_fail "a tree skill outside the canonical shape is rejected" "absent from the inventory"
+
 # --- the coverage record maps every old task --------------------------------
 
 if [ -f "$DOC" ]; then
@@ -218,6 +235,16 @@ if [ "$expected_adapter_gaps" = "$reported_adapter_gaps" ]; then
   ok "the gate reports exactly the harnesses without a lab adapter"
 else
   bad "the gate reports exactly the harnesses without a lab adapter"
+fi
+
+expected_desc_gaps="$(while IFS= read -r s; do
+  [ -f "descriptions/$s.json" ] || printf '%s\n' "$s"
+done < <(jq -r '.skills[]' "$INV") | sort)"
+reported_desc_gaps="$(printf '%s\n' "$check_out" | sed -n 's/^check: gap: no description set for //p' | sort)"
+if [ "$expected_desc_gaps" = "$reported_desc_gaps" ]; then
+  ok "the gate reports exactly the skills without a description set"
+else
+  bad "the gate reports exactly the skills without a description set"
 fi
 
 exit "$fails"

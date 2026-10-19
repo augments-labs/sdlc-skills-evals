@@ -102,15 +102,19 @@ _check_inventory() { # the committed inventory, and its drift against a tree
       echo "check: FAIL $check_plugin is not an upstream tree"
       return 1
     fi
-    # Canonical skills only: skills/<phase>/<name>/SKILL.md. A packaged
-    # mirror is flat, or lives under plugins/ — a distribution artifact,
-    # never a second canonical copy.
-    tree_skills="$(cd "$check_plugin" && find skills -name SKILL.md | sed 's|^skills/||; s|/SKILL.md$||' | awk -F/ 'NF == 2' | sort)" \
+    # Every skill under skills/ is compared, whatever its depth: a member of
+    # a supplied tree is never invisible to the gate. The packaged mirror
+    # lives under plugins/, outside this root, so it is never collected.
+    tree_skills="$(cd "$check_plugin" && find skills -name SKILL.md | sed 's|^skills/||; s|/SKILL.md$||' | sort)" \
       || { echo "check: FAIL cannot read the tree at $check_plugin"; return 1; }
     tree_harnesses="$(cd "$check_plugin" && find tests/harnesses -maxdepth 1 -name '*.sh' | sed 's|.*/||; s|\.sh$||' | sort)" \
       || { echo "check: FAIL cannot read the tree at $check_plugin"; return 1; }
     _inventory_drift "skills" "$(jq -r '.skills[]' "$inv")" "$tree_skills" || return 1
     _inventory_drift "harnesses" "$(jq -r '.harnesses[]' "$inv")" "$tree_harnesses" || return 1
+  else
+    # membership is knowable only against a tree: say so, so a reader of the
+    # log cannot mistake this for "the inventory matches upstream"
+    echo "check: inventory membership not checked (no --plugin tree); the pin, canonical form, uniqueness and order were"
   fi
   # Coverage gaps are reported, never failed: the successor plan closes the
   # skill gaps in V3-CORPORA and the adapter gaps in V3-HARNESSES.
