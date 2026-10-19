@@ -172,6 +172,16 @@ if [ "$(grep '^runnable=' "$harness_file" | sed 's/^runnable=//')" != "yes" ]; t
   fi
 fi
 
+# The live path's own requirements, before the scenario is read: a missing
+# tool or an unavailable adapter is refused first, as it always was. A dry
+# run needs neither and asks for neither.
+if [ -z "$dry" ]; then
+  require_tool jq timeout || exit 2
+  if ! adapter_check; then
+    echo "verdict    : indeterminate(stage=harness) — adapter unavailable" >&2; exit 2
+  fi
+fi
+
 # --- scenario ----------------------------------------------------------------
 scenario_file="$scenario_dir/$scenario.sh"
 [ -f "$scenario_file" ] || { echo "no scenario at $scenario_file" >&2; exit 2; }
@@ -279,11 +289,6 @@ cleanup() {
 }
 trap cleanup EXIT
 eval "$(lab_home_env "$run_dir")" || exit 2
-
-require_tool jq timeout || exit 2
-if ! adapter_check; then
-  echo "verdict    : indeterminate(stage=harness) — adapter unavailable" >&2; exit 2
-fi
 
 # Track which assertion verbs actually ran, for the manifest check. The
 # wrappers delegate to the prelude originals, so counting and exit bands
