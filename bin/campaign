@@ -7,8 +7,9 @@
 # readable without the lab: summary.md says what ran, on what, and what
 # came out, with indeterminate counted separately from pass and fail.
 #
-# Manual tool, never CI. Live runs (new covers pricing via bin/behavior's
-# own observation; run spends tokens) start only on a recorded go.
+# Manual tool, never CI. Live runs (run spends tokens) start only on a
+# recorded go; new and --dry-run plan and price without spending
+# anything.
 
 set -uo pipefail
 if [ -n "${SDLC_SKILLS_EVALS_ROOT:-}" ]; then
@@ -18,6 +19,8 @@ else
 fi
 # shellcheck source=../lib/common.sh
 source "$lab_root/lib/common.sh"
+# shellcheck source=../lib/pin.sh
+source "$lab_root/lib/pin.sh"
 
 usage() {
   cat <<'EOF'
@@ -38,29 +41,36 @@ while runs are pending, then writes summary.md (## Commit,
 ## Behavior scenarios, ## Chains from chains.json when present, ## Costs,
 ## Against baseline with --against).
 
-  --help                      this text
+--plugin is optional: the pinned upstream commit is used when it is left
+out. A ref that IS named is frozen to the commit it names, and the run
+uses that commit — a ref that moves after the campaign was prepared
+cannot become the pin of the run.
 
   campaign --evals [--dry-run] --plugin P --harness H
       (--skill S ... | --all) [--without none|old] [--old-plugin REF]
       [--campaign NAME] [--iteration N] [--timeout SEC] [--harness-dir D]
                                 run output-eval pairs into a workspace iteration
 
-new freezes campaign.json {plugin_ref, plugin_commit, harness,
-arms: [{name, base}], suite, scenarios, runs, tier, lab_commit, created}.
-run executes every planned run through bin/behavior --record (raw streams
-under raw/, run homes under TMPDIR, never under results/). report refuses
-while runs are pending, then writes summary.md (## Commit,
-## Behavior scenarios, ## Chains from chains.json when present, ## Costs,
-## Against baseline with --against).
-
 A `fake` harness name routes to lib/tests/fake-cli/ for self-tests.
 EOF
+  _pin_line
+}
+
+# The pin a campaign uses when the caller names none: the committed
+# upstream commit, read from config/upstream-inventory.json. It is a
+# commit, never a mutable tag, so a campaign never selects new work from
+# a moving ref.
+_pin_line() {
+  local pin
+  if pin="$(lab_inventory_commit 2>/dev/null)"; then
+    printf 'default pin: %s  (config/upstream-inventory.json)\n' "$pin"
+  else
+    printf 'default pin: (unreadable — config/upstream-inventory.json names no commit)\n'
+  fi
 }
 
 if [ "${1:-}" = "--evals" ]; then
   shift
-  # shellcheck source=../lib/pin.sh
-  source "$lab_root/lib/pin.sh"
   # shellcheck source=../lib/home-env.sh
   source "$lab_root/lib/home-env.sh"
   dry=""; plugin=""; harness=""; without="none"; old_plugin=""; campaign_n=""; iteration=""
@@ -107,12 +117,35 @@ if [ "${1:-}" = "--evals" ]; then
   for ef in "${evals_files[@]}"; do
     total_cases=$((total_cases + $(jq '.evals | length' "$ef")))
   done
+  # The plugin an eval run uses: the caller's, or the committed upstream
+  # commit. A commit, never a mutable tag.
+  plugin_defaulted=""
+  if [ -z "$plugin" ]; then
+    plugin="$(lab_inventory_commit 2>/dev/null)" || {
+      echo "no usable upstream pin: config/upstream-inventory.json names no commit" >&2; exit 2; }
+    plugin_defaulted="1"
+  fi
+  if [ -n "$plugin_defaulted" ]; then
+    plugin_note="config/upstream-inventory.json"
+  else
+    plugin_note="--plugin $plugin"
+  fi
   if [ -n "$dry" ]; then
     printf '%s eval(s) x 2 arms = %s runs, billed to your own harness account. Calls nothing.\n' \
       "$total_cases" "$((total_cases * 2))"
+    evals_cmd="bin/campaign --evals --plugin $(printf '%q' "$plugin") --harness $(printf '%q' "$harness")"
+    if [ -n "$all_evals" ]; then evals_cmd="$evals_cmd --all"; else
+      for sk in "${skills[@]}"; do evals_cmd="$evals_cmd --skill $(printf '%q' "$sk")"; done
+    fi
+    evals_cmd="$evals_cmd --without $without"
+    [ -n "$old_plugin" ] && evals_cmd="$evals_cmd --old-plugin $(printf '%q' "$old_plugin")"
+    [ -n "$campaign_n" ] && evals_cmd="$evals_cmd --campaign $(printf '%q' "$campaign_n")"
+    [ -n "$iteration" ] && evals_cmd="$evals_cmd --iteration $(printf '%q' "$iteration")"
+    echo "pin        : $plugin  ($plugin_note)"
+    echo "harness    : $harness"
+    echo "command    : $evals_cmd"
     exit 0
   fi
-  [ -n "$plugin" ] || { echo "--evals needs --plugin (dry-run excepted)" >&2; exit 2; }
   hdir="${harnessdir_override:-$lab_root/harnesses}"
   [ "$harness" = fake ] && [ -z "$harnessdir_override" ] && hdir="$lab_root/lib/tests/fake-cli"
   [ -f "$hdir/$harness.sh" ] || { echo "no harness adapter: $harness" >&2; exit 2; }
@@ -243,7 +276,6 @@ if [ "$cmd" = "new" ]; then
       *) echo "unknown argument: $1" >&2; exit 2;;
     esac
   done
-  [ -n "$plugin" ] || { echo "new needs --plugin <path|ref>" >&2; exit 2; }
   [ -n "$harness" ] || { echo "new needs --harness" >&2; exit 2; }
   [ -n "$arms" ] || { echo "new needs --arms" >&2; exit 2; }
   case "$runs" in ''|*[!0-9]*|0) echo "--runs needs a positive integer" >&2; exit 2;; esac
@@ -260,17 +292,23 @@ if [ "$cmd" = "new" ]; then
   if printf '%s' ",$arms," | grep -q ",red,"; then
     [ -n "$base" ] || { echo "--arms red needs --base REF" >&2; exit 2; }
   fi
-  # Freeze the plugin: a directory resolves to its HEAD, a ref resolves in
-  # SDLC_SKILLS_ROOT. Nothing global, nothing installed, ever satisfies this.
-  plugin_commit=""
-  if [ -d "$plugin" ]; then
-    plugin_commit="$(git -C "$plugin" rev-parse HEAD 2>/dev/null)" || {
-      echo "--plugin is not a plugin checkout: $plugin" >&2; exit 2; }
-  else
-    proot="$(plugin_root 2>/dev/null)" || { echo "cannot resolve --plugin '$plugin' (no plugin checkout)" >&2; exit 2; }
-    plugin_commit="$(git -C "$proot" rev-parse "$plugin^{commit}" 2>/dev/null)" || {
-      echo "cannot resolve --plugin '$plugin' in $proot" >&2; exit 2; }
+  # The plugin a campaign freezes: the caller's, or the committed upstream
+  # commit. A ref is frozen to the COMMIT it names, so a tag that moves
+  # after the campaign was prepared cannot become the pin of the run.
+  # Nothing global, nothing installed, ever satisfies this.
+  plugin_defaulted=""
+  if [ -z "$plugin" ]; then
+    plugin="$(lab_inventory_commit 2>/dev/null)" || {
+      echo "no usable upstream pin: config/upstream-inventory.json names no commit" >&2; exit 2; }
+    plugin_defaulted="1"
   fi
+  if [ -n "$plugin_defaulted" ]; then
+    plugin_note="config/upstream-inventory.json"
+  else
+    plugin_note="--plugin $plugin"
+  fi
+  plugin_commit="$(lab_pin_commit_of "$plugin")" || {
+    echo "new needs a --plugin the plugin checkout can resolve" >&2; exit 2; }
   lab_commit="$(git -C "$lab_root" rev-parse HEAD 2>/dev/null || printf 'uncommitted')"
   day="$(date -u +%Y-%m-%d)"; created="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
   dir="$lab_root/results/$day-$label"
@@ -300,6 +338,27 @@ if [ "$cmd" = "new" ]; then
   planned="$(printf '%s\n' "$scenarios" | tr ',' '\n' | grep -c .)"
   planned=$(( planned * $(printf '%s\n' "$arms" | tr ',' '\n' | grep -c .) * runs ))
   echo "planned $planned runs into $dir"
+  echo "label      : $label"
+  echo "harness    : $harness"
+  echo "arms       : $arms"
+  echo "pin        : $plugin_commit  ($plugin_note)"
+  # The exact invocations the run will make, one per scenario and arm.
+  while IFS= read -r sc; do
+    while IFS= read -r an; do
+      plan_cmd="bin/behavior --harness $(printf '%q' "$harness") --scenario $(printf '%q' "$sc") --arm $an"
+      if [ "$an" = red ]; then
+        abase="$(jq -r --arg a "$an" '.arms[] | select(.name == $a) | .base // empty' "$dir/campaign.json")"
+        plan_cmd="$plan_cmd --base $(printf '%q' "$abase")"
+      elif [ "$an" != none ]; then
+        plan_cmd="$plan_cmd --plugin $(printf '%q' "$plugin_commit")"
+      fi
+      [ -n "$tier" ] && plan_cmd="$plan_cmd --tier $(printf '%q' "$tier")"
+      plan_cmd="$plan_cmd --record $(printf '%q' "$dir")"
+      [ -n "$harnessdir_override" ] && plan_cmd="$plan_cmd --harness-dir $(printf '%q' "$harnessdir_override")"
+      [ -n "$scenariodir_override" ] && plan_cmd="$plan_cmd --scenario-dir $(printf '%q' "$scenariodir_override")"
+      echo "command    : $plan_cmd"
+    done < <(jq -r '.arms[].name' "$dir/campaign.json")
+  done < <(jq -r '.scenarios[]' "$dir/campaign.json")
   exit 0
 fi
 
@@ -308,6 +367,7 @@ if [ "$cmd" = "run" ]; then
   dir="$(_record_dir "$label")" || exit 2
   harness="$(jq -r '.harness' "$dir/campaign.json")"
   plugin_ref="$(jq -r '.plugin_ref' "$dir/campaign.json")"
+  plugin_commit="$(jq -r '.plugin_commit' "$dir/campaign.json")"
   runs_n="$(jq -r '.runs' "$dir/campaign.json")"
   tier_c="$(jq -r '.tier // empty' "$dir/campaign.json")"
   hdir_c="$(jq -r '.harness_dir // empty' "$dir/campaign.json")"
@@ -321,7 +381,13 @@ if [ "$cmd" = "run" ]; then
         args=(--harness "$harness" --scenario "$sc" --arm "$an" --record "$dir")
         if [ "$an" = red ]; then args+=(--base "$abase");
         elif [ "$an" = none ]; then :;
-        else args+=(--plugin "$plugin_ref"); fi
+        elif [ -d "$plugin_ref" ]; then args+=(--plugin "$plugin_ref");
+        else
+          # The FROZEN commit, not the ref: a campaign never re-resolves a
+          # ref at run time, so a tag that moved after the campaign was
+          # prepared cannot become the pin of the run.
+          args+=(--plugin "$plugin_commit");
+        fi
         [ -n "$tier_c" ] && args+=(--tier "$tier_c")
         [ -n "$hdir_c" ] && args+=(--harness-dir "$hdir_c")
         [ -n "$sdir_c" ] && args+=(--scenario-dir "$sdir_c")
