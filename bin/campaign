@@ -26,7 +26,7 @@ usage() {
   cat <<'EOF'
 bin/campaign — run a labelled, pinned scenario set; report it.
 
-  new <label> --plugin <path|ref> --harness H --arms <list>
+  new <label> [--plugin <path|ref>] --harness H --arms <list>
       [--base REF] (--suite NAME | --scenarios a,b,c) --runs N [--tier T]
       [--harness-dir D] [--scenario-dir D]
   run <label>                 execute every planned run
