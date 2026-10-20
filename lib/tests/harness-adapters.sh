@@ -832,11 +832,21 @@ EOS
       | sed -e "s|/path/to/sdlc-skills-evals|$lab|g" \
             -e "s|<harness>|$h|g" \
             -e "s|/path/to/sdlc-skills|$plug|g")"
+    # The procedure must provide the globals the adapter reads, so they are
+    # taken away first: the test's own values would otherwise answer for a
+    # procedure that forgot them, and a user in a fresh shell would not have
+    # them at all.
+    unset errlog timeout_s
     if eval "$prep" >/dev/null 2>"$work/proc-setup.err"; then
       setup_ok=1
       ok "$h the procedure's setup block succeeds"
     else
       bad "$h the procedure's setup block succeeds (see $work/proc-setup.err)"
+    fi
+    if [ -n "${errlog:-}" ] && [ -n "${timeout_s:-}" ]; then
+      ok "$h the procedure's setup block provides the globals the adapter reads"
+    else
+      bad "$h the procedure's setup block provides the globals the adapter reads"
     fi
     if [ -z "$cmd_line" ]; then
       bad "$h the README names no command for the procedure"
