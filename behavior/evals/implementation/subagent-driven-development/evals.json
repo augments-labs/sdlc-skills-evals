@@ -4,13 +4,13 @@
   "evals": [
     {
       "id": "resume-delegated",
-      "prompt": "Continue the delegated build of the plan in .sdlc-skills/plans/2026-10-02-proration/ after a compaction wiped my context. The run ledger is at .sdlc-skills/evidence/2026-10-02-proration/sdd-ledger.md and the approval with the delegated mode is in the plan's decision ledger at .sdlc-skills/plans/2026-10-02-proration/00-index.ledger.md — read the ledger first and resume from it; do not restart anything already done. Build through dispatched workers, never in this session.",
+      "prompt": "Continue the delegated build of the plan in plans/2026-10-02-proration/ after a compaction wiped my context. The run ledger is at evidence/2026-10-02-proration/sdd-ledger.md and the approval with the delegated mode is in the plan's decision ledger at plans/2026-10-02-proration/00-index.ledger.md — read the ledger first and resume from it; do not restart anything already done. Build through dispatched workers, never in this session.",
       "expected_output": "Reads the run ledger first (verifying approval, mode, and binding), dispatches workers only for the pending tasks with recorded dispatch rows, reviews diffs before recording states, leaves completed work and the ledger's first line untouched, and finishes with the ledger telling the whole story.",
       "assertions": []
     },
     {
       "id": "breaker-trips",
-      "prompt": "In .sdlc-skills/plans/2026-10-02-proration/, task T-002 has five recorded fix rounds without convergence and the task's gate still fails. Rule on it under the skill's fix-loop breaker: adjudicate and stop. Do not open a sixth round under any framing.",
+      "prompt": "In plans/2026-10-02-proration/, task T-002 has five recorded fix rounds without convergence and the task's gate still fails. Rule on it under the skill's fix-loop breaker: adjudicate and stop. Do not open a sixth round under any framing.",
       "expected_output": "Writes an adjudication (the finding, what each round changed, why it did not converge) and stops dispatching for T-3 — either deciding it under the ruling rules or handing the row to the user. No sixth-round implementation exists afterwards.",
       "assertions": []
     }

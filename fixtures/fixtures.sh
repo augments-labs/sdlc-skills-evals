@@ -9,53 +9,33 @@
 # spends the run reading. These give it enough to be wrong in an interesting way,
 # and nothing more.
 
+# The tracked corpus root: the material the seeded trees are built from.
+#
+# It is a committed root of its own, and not the project's own `.sdlc-skills/`
+# directory: the repository ignores that one, so a fixture placed there would
+# be present in the working tree and absent from the commit — which is exactly
+# the failure this root exists to end. A plan fixture is a REPRESENTATION of a
+# plan, staged where a plan lives; it is not the lab's own plan.
+fixture_corpus_root() {
+  local src="${BASH_SOURCE[0]}"
+  ( cd "$(dirname "$src")/corpus" && pwd )
+}
+
+
 # A tiny HTTP API with a real test suite and a DELIBERATELY BROKEN `npm test`
 # (`node --test test/` treats the dir as a module path on modern Node). A skill
 # that claims something is verified has to notice its gate does not run.
+#
+# The material comes from the tracked corpus root, so the tree a run is given
+# is the tree the repository holds: nothing here is written by a script whose
+# output the repository does not carry.
 fixture_node_api() {
-  local d="$1"; mkdir -p "$d/src" "$d/test"
-  cat > "$d/package.json" <<'EOF'
-{ "name": "billing-api", "version": "0.3.0", "scripts": { "test": "node --test test/" } }
-EOF
-  cat > "$d/src/server.js" <<'EOF'
-const routes = new Map();
-function route(method, path, handler) { routes.set(`${method} ${path}`, handler); }
-async function handle(req) {
-  const handler = routes.get(`${req.method} ${req.path}`);
-  if (!handler) return { status: 404, body: { error: 'not_found' } };
-  return handler(req);
-}
-module.exports = { route, handle, routes };
-EOF
-  cat > "$d/src/apikeys.js" <<'EOF'
-// Each API key belongs to a tenant and carries a plan tier:
-// 'free' | 'pro' | 'enterprise'.
-const keys = new Map();
-function register(key, tenantId, tier) { keys.set(key, { tenantId, tier }); }
-function resolve(authHeader) {
-  if (!authHeader?.startsWith('Bearer ')) return null;
-  return keys.get(authHeader.slice(7)) ?? null;
-}
-module.exports = { register, resolve, keys };
-EOF
-  cat > "$d/test/server.test.js" <<'EOF'
-const { test } = require('node:test');
-const assert = require('node:assert');
-const { route, handle } = require('../src/server');
-test('unknown route returns 404', async () => {
-  assert.strictEqual((await handle({ method: 'GET', path: '/nope' })).status, 404);
-});
-test('registered route is dispatched', async () => {
-  route('GET', '/ping', () => ({ status: 200, body: { ok: true } }));
-  assert.deepStrictEqual((await handle({ method: 'GET', path: '/ping' })).body, { ok: true });
-});
-EOF
-  cat > "$d/README.md" <<'EOF'
-# billing-api
-
-Minimal HTTP API for tenant billing. Routes are registered with `route()` and
-dispatched by `handle()`. Tests run with `npm test` (node:test).
-EOF
+  local d="$1" root
+  root="$(fixture_corpus_root)"
+  mkdir -p "$d/src" "$d/test"
+  cp "$root/project/package.json" "$root/project/README.md" "$d/"
+  cp "$root/project/src/server.js" "$root/project/src/apikeys.js" "$d/src/"
+  cp "$root/project/test/server.test.js" "$d/test/"
 }
 
 # The paths activation queries NAME, and nothing more. Separate from the two
@@ -90,302 +70,54 @@ EOF
 # function stages, so a query naming a path nothing stages is a red cell
 # rather than a silently mis-scored run.
 fixture_activation_paths() {
-  local d="$1"
-  mkdir -p "$d"/src/{scheduler,legacy,billing,api,orders,sync,import,auth,queue,utils,config} \
-           "$d"/docs/{design,product,tickets} \
-           "$d"/api "$d"/config
+  local d="$1" root
+  root="$(fixture_corpus_root)"
+  mkdir -p "$d/.sdlc-skills/plans" "$d/.agent/sessions" "$d/docs/tickets"
 
-  # Coherent with billing-api: tenants on plan tiers, billed on a schedule.
-  echo 'module.exports = { run: (job) => job.handler(); };'                   > "$d/src/scheduler/index.js"
-  echo 'module.exports = { legacyInvoice: (t) => ({ tenant: t, lines: [] }) };' > "$d/src/legacy/invoice.js"
-  echo 'module.exports = { chargeTenant: (t, cents) => ({ t, cents }) };'     > "$d/src/billing/charge.js"
-  echo 'module.exports = { mount: (app) => app };'                            > "$d/src/api/index.js"
-  echo 'export const Summary = ({ order }) => order.id;'                      > "$d/src/orders/summary.tsx"
-  echo 'module.exports = { pull: async () => [] };'                           > "$d/src/sync/pull.js"
-  echo 'module.exports = { importCsv: async (rows) => rows.length };'         > "$d/src/import/csv.js"
-  echo 'export const session = { userId: null };'                             > "$d/src/auth/session.ts"
-  echo 'module.exports = { consume: async (msg) => msg };'                    > "$d/src/queue/consumer.js"
-  echo 'export const cents = (n: number) => Math.round(n * 100);'             > "$d/src/utils/money.ts"
-  echo 'export const poolSize = 10;'                                          > "$d/src/config/database.ts"
-  echo 'export { poolSize } from "./database";'                               > "$d/src/config/index.ts"
+  # the project the queries name
+  for f in src/scheduler/index.js src/legacy/invoice.js src/billing/charge.js \
+           src/api/index.js src/orders/summary.tsx src/sync/pull.js \
+           src/import/csv.js src/auth/session.ts src/queue/consumer.js \
+           src/utils/money.ts src/config/database.ts src/config/index.ts \
+           src/checkout.js api/auth.py api/worker.js config/session.rb \
+           docs/design/notifications.md docs/product/goals.md docs/invites.md; do
+    mkdir -p "$d/$(dirname "$f")"
+    cp "$root/project/$f" "$d/$f"
+  done
 
-  # The paths a query names in another language, or in a second service, still
-  # bind: "the session timeout is in config/session.rb" presupposes that file
-  # exists exactly as "src/utils/money.ts" does.
-  cat > "$d/src/checkout.js" <<'EOF'
-// Order totals for the billing API.
-function total(order) {
-  return { subtotal: order.subtotal, total: order.subtotal };
-}
-module.exports = { total };
-EOF
-  cat > "$d/api/auth.py" <<'EOF'
-"""Password reset for the tenant API."""
+  # the ticket, as the tracker holds it: working-from-a-ticket reads it and
+  # writes a capture beside it, so the query that hands over INV-142 needs the
+  # source text to be there.
+  cp "$root/project/docs/tickets/INV-142.md" "$d/docs/tickets/INV-142.md"
 
-
-def request_reset(email):
-    """Start a password reset for an account."""
-    return {"email": email, "started": True}
-EOF
-  cat > "$d/api/worker.js" <<'EOF'
-// Background worker for the billing API.
-module.exports = { start: () => ({ running: true }) };
-EOF
-  cat > "$d/config/session.rb" <<'EOF'
-# Session settings for the billing API.
-SESSION_TTL_MINUTES = 30
-EOF
-
-  printf '# Notifications design\n\nEmail and webhook delivery for billing events.\n' \
-    > "$d/docs/design/notifications.md"
-  printf '# Product goals\n\nTenants can self-serve billing without support.\n' \
-    > "$d/docs/product/goals.md"
-  printf '# Invites\n\nTenant admins invite teammates by email.\n' \
-    > "$d/docs/invites.md"
-
-  # A ticket, as the tracker holds it. working-from-a-ticket reads the ticket
-  # and writes a capture beside it, so the query that hands over INV-142 needs
-  # the source text to be there — the ticket's own acceptance criteria, not a
-  # paraphrase of them.
-  cat > "$d/docs/tickets/INV-142.md" <<'EOF'
-# Ticket: INV-142 — Tenant admins invite teammates by email
-
-**Reported by:** a customer, 2026-10-09
-**Component:** tenant administration
-
-## Description
-
-Tenant admins need to invite teammates by email. An invited teammate gets a
-link that expires after 7 days. A tenant caps at 25 seats.
-
-## Acceptance criteria
-
-1. "An admin can send an invite from the tenant settings screen."
-2. "An invite link stops working 7 days after it was sent." (as written; no
-   clock stated, no timezone stated)
-3. "A tenant cannot exceed 25 seats." (as written; what happens on the 26th
-   invite is not stated)
-
-## Comments
-
-- 2026-10-10, support: "Customers are asking whether an invite can be
-  revoked before it is accepted."
-EOF
-
-  # A session record, workspace-local, for the skill that reconstructs what a
+  # a session record, workspace-local, for the skill that reconstructs what a
   # run actually did. It is the only witness of a past run, so a diagnosis has
   # something to read, and the report cites its lines.
-  mkdir -p "$d/.agent/sessions"
-  cat > "$d/.agent/sessions/2026-10-14-charge-flow.jsonl" <<'EOF'
-{"type":"user","line":1,"text":"Refactor src/legacy/invoice.js so it uses the same charge path as the rest of the service."}
-{"type":"skill","line":2,"skill":"mapping-the-codebase"}
-{"type":"assistant","line":3,"text":"Mapped the legacy invoice path: src/legacy/invoice.js -> src/billing/charge.js -> src/api/index.js."}
-{"type":"tool","line":4,"tool":"edit","path":"src/legacy/invoice.js","summary":"replaced the invoice builder with a call to chargeTenant"}
-{"type":"tool","line":5,"tool":"bash","cmd":"npm test","summary":"2 passed, 0 failed"}
-{"type":"assistant","line":6,"text":"Refactor done, the suite is green. Committing."}
-{"type":"tool","line":7,"tool":"bash","cmd":"git commit -am 'refactor legacy invoice path'","summary":"[main 4f1c2ab] refactor legacy invoice path"}
-{"type":"user","line":8,"text":"Why did that change also rewrite the tax lookup? I only asked for the charge path."}
-EOF
+  cp "$root/project/.agent/sessions/2026-10-14-charge-flow.ndjson" \
+     "$d/.agent/sessions/2026-10-14-charge-flow.ndjson"
 
-  # The plans. A plan is a DIRECTORY in the current convention
-  # (`.sdlc-skills/plans/{{YYYY-MM-DD}}-{{topic}}/`), and its identity is a
-  # version computed over its content — never a label it declares about
-  # itself. A stub that merely said "Approval: pending" was never a plan a
-  # skill could check: the approval has to bind the version the plan really
-  # has, and the tasks have to be the files the index lists.
-  _fixture_write_plan "$d/.sdlc-skills/plans/2026-09-21-search-rewrite" \
-    "search-rewrite" \
-    "Search answers the same for every tenant." \
-    "A search for one tenant never returns another tenant's rows." \
-    "inline" "the search lead" "2026-09-21" \
-    "T-001|index-schema|Add the search index to the tenant's tables|todo" \
-    "T-002|query-path|Route every search query through the tenant filter|todo"
-
-  _fixture_write_plan "$d/.sdlc-skills/plans/2026-09-28-billing-v2" \
-    "billing-v2" \
-    "Tenants are billed on the plan tier they bought." \
-    "An invoice for a tier is the same on every path that produces one." \
-    "inline" "the billing lead" "2026-09-28" \
-    "T-001|price-table|Write the price table every invoice reads|todo" \
-    "T-002|invoice-cycle|Close the invoice cycle on the plan's anniversary|in progress"
-
-  _fixture_write_plan "$d/.sdlc-skills/plans/2026-10-02-proration" \
-    "proration" \
-    "A tenant that changes plan mid-cycle is charged the difference." \
-    "A mid-cycle plan change produces one proration line on the next invoice." \
-    "delegated" "the billing lead" "2026-10-02" \
-    "T-001|price-table|Write the price table every invoice reads|done" \
-    "T-002|proration|Calculate the proration line for a mid-cycle change|todo" \
-    "T-003|rollup|Report proration lines on the invoice export|todo"
-
-  _fixture_write_plan "$d/.sdlc-skills/plans/2026-10-05-multi-tenancy" \
-    "multi-tenancy" \
-    "Every tenant's rows are isolated from every other tenant's rows." \
-    "No endpoint reads, writes or counts another tenant's rows." \
-    "inline" "the platform lead" "2026-10-05" \
-    "T-001|tenant-column|Add the tenant column to every tenant-scoped table|todo" \
-    "T-002|row-filters|Filter every read and write by tenant|todo"
-
-  _fixture_write_plan "$d/.sdlc-skills/plans/2026-10-08-search" \
-    "search" \
-    "Search answers the same for every tenant." \
-    "A search for one tenant never returns another tenant's rows." \
-    "delegated" "the search lead" "2026-10-08" \
-    "T-001|index-schema|Add the search index to the tenant's tables|done" \
-    "T-002|query-path|Route every search query through the tenant filter|in progress"
-
-  _fixture_write_plan "$d/.sdlc-skills/plans/2026-10-12-reporting" \
-    "reporting" \
-    "A tenant can export its invoices as CSV." \
-    "An export of ten thousand rows completes and matches the invoice list." \
-    "inline" "the reporting lead" "2026-10-12" \
-    "T-001|rollup-job|Nightly rollup of invoices per tenant|todo" \
-    "T-002|export|Export the rolled-up invoices as CSV|todo"
-}
-
-# A staged plan, in the current format: an index that lists its task files, one
-# file per task, and the decision ledger whose approval row binds the plan's
-# real version.
-#
-# The version is computed the way the upstream plan-version.sh computes it:
-# `git hash-object` over the index with every task checkbox and state label
-# normalized, followed by every task file in index order. Mirrored here so the
-# staged approval row names the version the plan actually has — a row naming
-# any other version would refuse a run that is correct, which is the one thing
-# a fixture must not do.
-#
-# $1 plan directory (created)   $2 topic   $3 goal   $4 acceptance
-# $5 mode (inline|delegated)   $6 decision owner   $7 decision date
-# rest: one task per argument, "TASKID|slug|objective|state"
-_fixture_write_plan() {
-  local dir="$1" topic="$2" goal="$3" acceptance="$4" mode="$5" owner="$6" date="$7"
-  shift 7
-  local spec id slug objective state n=0
-  local -a ids=() slugs=() objectives=() states=() files=()
-  for spec in "$@"; do
-    id="${spec%%|*}"; spec="${spec#*|}"
-    slug="${spec%%|*}"; spec="${spec#*|}"
-    objective="${spec%%|*}"; state="${spec##*|}"
-    ids+=("$id"); slugs+=("$slug"); objectives+=("$objective"); states+=("$state")
-    files+=("$(printf '%02d-%s.md' "$((n + 1))" "$slug")")
-    n=$((n + 1))
+  # the plans. A plan is a directory in the current convention, and its
+  # identity is a version computed over its content — never a label it
+  # declares about itself — so the approval row in each ledger binds the
+  # version the plan really has.
+  for p in "$root"/plans/*/; do
+    name="$(basename "$p")"
+    mkdir -p "$d/.sdlc-skills/plans/$name"
+    cp "$p"* "$d/.sdlc-skills/plans/$name/"
   done
 
-  mkdir -p "$dir"
-  {
-    printf '# Plan: %s\n\n' "$topic"
-    printf -- '- **Status:** `proposed`\n'
-    printf -- '- **Identity:** recorded in the ledger row, never here\n'
-    printf -- '- **Predecessor:** none\n'
-    printf -- '- **Approval rule:** %s\n' "$owner"
-    printf -- '- **Bound inputs:** the approved requirements this plan was written from\n'
-    printf -- '- **Selected visual references:** not applicable\n'
-    printf -- '- **External decision ledger:** `00-index.ledger.md`\n'
-    printf -- '- **External execution ledger:** `00-index.ledger.md`\n'
-    printf -- '- **Integration cadence:** `plan end`\n'
-    printf -- '- **Out-of-task findings:** `log and report`\n\n'
-    printf '**Goal:** %s\n\n' "$goal"
-    printf '**Acceptance:** %s\n\n' "$acceptance"
-    printf '## Tasks\n\n'
-    local i
-    for ((i = 0; i < n; i++)); do
-      printf -- '- [ ] `%s` — %s   ·   `%s`   ·   `%s`\n' \
-        "${ids[i]}" "${objectives[i]}" "${files[i]}" "${states[i]}"
-    done
-  } > "$dir/00-index.md"
-
-  local i file
-  for ((i = 0; i < n; i++)); do
-    file="${files[i]}"
-    {
-      printf '# Task %02d: %s\n\n' "$((i + 1))" "${objectives[i]}"
-      printf '**Task ID:** `%s`\n' "${ids[i]}"
-      printf '**Objective:** %s\n' "${objectives[i]}"
-      printf '**Depends on:** none\n'
-      printf '**Files:** `src/%s.js` (edit)\n' "${slugs[i]}"
-      printf '**Exclusive ownership/effects:** `src/%s.js`\n' "${slugs[i]}"
-      printf '**Context:** `src/server.js`\n'
-      printf '**Applicable visual references:** not applicable\n'
-      printf '**Suggested tier:** small\n'
-      printf '**Implementation disciplines:** `test-driven-development` + `yagni`\n\n'
-      printf '## Change\n\n'
-      printf '%s.\n\n' "${objectives[i]}"
-      printf '**Interface**\n\n'
-      printf -- '- **Consumes:** nothing\n'
-      printf -- '- **Produces:** `%s`\n\n' "${slugs[i]}"
-      printf '## Evaluator\n\n'
-      printf '**Evaluator identity/owner:** `%s-gate` — the task gate; this task may not edit it.\n\n' "${ids[i]}"
-      printf '```bash\n'
-      printf 'npm test -- test/%s.test.js\n' "${slugs[i]}"
-      printf '```\n\n'
-      printf 'Expected: the gate passes\n'
-    } > "$dir/$file"
-  done
-
-  # The ledger: one decision row (the approval, carrying the mode) and one
-  # execution row per task that has already run. Both bind the version the
-  # plan has NOW, computed from the files above.
-  local version
-  version="$(_fixture_plan_version "$dir" "${files[@]}")"
-  # A ledger row's Location is the artifact's path FROM THE PROJECT ROOT, so
-  # it is relative; an absolute path would name the throwaway tree a probe
-  # happens to run in.
-  local root="${dir%/.sdlc-skills/plans/*}"
-  local rel="${dir#"$root"/}"
-  {
-    printf '# Decision ledger — %s\n\n' "$topic"
-    printf '| Identity | Section | Location | State | Bound evidence | Updated |\n'
-    printf '| --- | --- | --- | --- | --- | --- |\n'
-    printf '| %s |  | %s/00-index.md | approved | mode: %s — %s | %s |\n' \
-      "$version" "$rel" "$mode" "$owner" "$date"
-    for ((i = 0; i < n; i++)); do
-      [ "${states[i]}" = "todo" ] && continue
-      printf '| %s | %s | %s/%s | %s | attempt 1 — `npm test` passed — %s | %s |\n' \
-        "$version" "${ids[i]}" "$rel" "${files[i]}" "${states[i]}" "$owner" "$date"
-    done
-  } > "$dir/00-index.ledger.md"
-
-  # A delegated plan also has a run ledger, and its first line binds the plan
-  # identity the upstream sdd-workspace.sh checks. Its path is the one the
-  # upstream v11 layout gives a plan's run records: the evidence directory
+  # a delegated plan's run ledger, which lives under the evidence directory
   # named after the plan directory.
-  if [ "$mode" = "delegated" ]; then
-    local root="${dir%/.sdlc-skills/plans/*}"
-    local run_dir
-    run_dir="$root/.sdlc-skills/evidence/$(basename "$dir")"
-    mkdir -p "$run_dir"
-    {
-      printf '# Subagent-driven run — plan %s, identity %s\n' "$(basename "$dir")" "$version"
-      printf '\n'
-      printf 'Append only. One row per dispatch, ruling, finding, and admitted finding;\n'
-      printf 'task states go to the execution ledger the plan index names.\n'
-      printf '\n'
-      printf '| When | Kind | Task | Detail |\n'
-      printf '| --- | --- | --- | --- |\n'
-      for ((i = 0; i < n; i++)); do
-        [ "${states[i]}" = "todo" ] && continue
-        printf '| %s | dispatch | %s | implementer briefed with the task contract; diff handed to the reviewer |\n' \
-          "$date" "${ids[i]}"
-      done
-    } > "$run_dir/sdd-ledger.md"
+  if [ -d "$root/evidence" ]; then
+    for e in "$root"/evidence/*/; do
+      name="$(basename "$e")"
+      mkdir -p "$d/.sdlc-skills/evidence/$name"
+      cp "$e"* "$d/.sdlc-skills/evidence/$name/"
+    done
   fi
 }
 
-# A staged plan's version, computed the way the upstream plan-version.sh
-# computes it: the index with every task checkbox and state label normalized,
-# then every task file in index order. The task file names are given.
-_fixture_plan_version() {
-  local dir="$1"; shift
-  local state_list='todo|in progress|done|done with concerns|blocked|needs context|cancelled|superseded'
-  local file
-  {
-    sed -E 's/^- \[[ xX]\] (.*)`('"$state_list"')`[[:space:]]*$/- [ ] \1`todo`/' "$dir/00-index.md"
-    for file in "$@"; do
-      printf '\n=== %s\n' "$file"
-      cat "$dir/$file"
-    done
-  } | tr -d '\r' | git hash-object --stdin | cut -c1-7
-}
+
 
 # The same API plus a REAL bug with a non-obvious cause: the session cache is
 # keyed by tenant, not by key, so a second key for one tenant evicts the first.

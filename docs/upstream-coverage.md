@@ -44,9 +44,9 @@ obligation. `bin/check` fails when a task in this table has no verdict.
 | E-2 shared seams in `lib/` (assertion verbs, verdicts, throwaway home, plugin pinning) | the seams stand; the run boundary and the report seams are widened around them | extended | `353485d`; ledger 2026-09-18 `E-2` |
 | E-3 harness launchers, including the opencode behavioral adapter | four launchers stand; the seven missing adapters are added next | extended | `9dc9ca5`; ledger 2026-09-18 `E-3` |
 | E-4 fixtures, behavior runner, scenarios, frozen manifests | the runner and the manifests stand; the scenarios are refreshed against current skill behavior | extended | `26a9ac9`; ledger 2026-09-18 `E-4` |
-| E-5 descriptions runner and query sets (build only) | the runner stands; the sets are rebuilt for all 46 skills against the pinned v11 bodies | extended | `71ea67e`; ledger 2026-09-18 `E-5` |
+| E-5 descriptions runner and query sets (build only) | the runner stands; the sets are rebuilt for all 46 skills against the pinned v11 bodies, and twelve of the retained sets are a CHANGED corpus (the section below names them) | extended | `71ea67e`; ledger 2026-09-18 `E-5` |
 | E-6 output-evals format, grading, benchmark, report | the format stands; the reporting is widened to cover paired comparisons honestly | extended | `6101a0b`; ledger 2026-09-18 `E-6` |
-| E-7 an `evals.json` for every skill | the scope widened from 37 to 46 skills; every skill in the pin now carries a definition with its own fixture tree | extended | `11d3378`, `2f54875`; ledger 2026-09-18 `E-7` |
+| E-7 an `evals.json` for every skill | the scope widened from 37 to 46 skills; every skill in the pin now carries a definition with its own fixture tree, and every case names a path its tree holds | extended | `11d3378`, `2f54875`; ledger 2026-09-18 `E-7` |
 | E-8 campaign tooling and record layout | the tooling stands; the run boundary moves to the user | extended | `4be5e41`; ledger 2026-09-18 `E-8` |
 | E-9 baseline record on opencode against v10.2.1 | the successor drops the campaign obligation; the record tooling it would have used stays | removed | predecessor plan, task list; no commit — it never ran |
 | E-10 scenario hygiene authoring, with the run half deferred | the authoring is refreshed with the scenarios; the deferred run half leaves the scope | extended | `22c7919`; ledger 2026-09-18 `E-10` |
@@ -136,28 +136,73 @@ the skill, and the inputs the corpus stages for it.
 Two staged-input trees exist, and they are different things. The
 **description-query tree** is what `bin/triggering` seeds each run with
 (`fixtures/fixtures.sh`: `fixture_node_api` and `fixture_activation_paths`),
-so a query that names a path finds it real; the "queries name" column lists
-the roots the skill's queries presuppose. The **output-eval tree** is the
-skill's own `files/` directory, copied into the run workdir, so an output
-case is answerable from the project it names. The output-eval tree alone
-does not make a description query ready, and the description-query tree
-alone does not make an output case answerable.
+built from the tracked corpus root `fixtures/corpus/`, so a query that names
+a path finds it real; the "queries name" column lists the roots the skill's
+queries presuppose. The **output-eval tree** is the skill's own `files/`
+directory, copied into the run workdir, so an output case is answerable from
+the project it names. The output-eval tree alone does not make a description
+query ready, and the description-query tree alone does not make an output
+case answerable.
+
+A plan sits at `.sdlc-skills/plans/{{YYYY-MM-DD}}-{{topic}}/` in the
+description-query tree and at `plans/{{YYYY-MM-DD}}-{{topic}}/` in an
+output-eval tree. The first is a throwaway workdir the runner builds; the
+second is a directory the repository tracks, because the repository ignores
+`.sdlc-skills/` — the lab's own plans, ledgers and run state stay local, so
+a fixture under that name would be present in the working tree and absent
+from the commit. One plan material serves both, and a plan's identity covers
+its index and its task files, not its ledger, so the two copies keep the same
+version.
 
 A row that says "no path" is a skill whose queries presuppose nothing: they
 design or ask rather than presuppose an artefact.
 
+### The twelve changed sets — a changed corpus
+
+Twelve of the retained query sets are not the sets that were there before
+this task. Their queries changed, so **a rate measured against them before
+this task is not comparable with one measured after it**, and the corpora are
+a new corpus from here. Every entry that did not change kept its split, so
+the measurement a split carries is unchanged for those entries.
+
+| Set | What changed | Why |
+| --- | --- | --- |
+| `common/clarifying-intent` | five near misses added | the v11 body of `working-from-a-ticket` says the case it declines is `clarifying-intent`'s |
+| `common/writing-skills` | three queries re-pointed | they named `skills/…` and `scripts/…` paths the staged tree does not hold; they now name the library's skills and validator in words |
+| `common/using-sdlc-skills` | one query re-pointed | it named a project outside the run workdir |
+| `common/viewing-artifacts` | one query re-pointed | the plan directory it named is now the current convention |
+| `design/migration-strategy` | five near misses added | the v11 body of `changing-a-live-schema` says the case it declines is `migration-strategy`'s |
+| `design/writing-plans` | one query re-pointed | the plan directory it named is now the current convention |
+| `implementation/executing-plans` | six queries re-pointed | the plan directories they named are now the current convention |
+| `implementation/subagent-driven-development` | three queries re-pointed | the plan directory and the run ledger they named are now the current convention |
+| `maintenance/debugging` | five near misses added | the v11 body of `diagnosing-a-session` says the case it declines is `debugging`'s |
+| `maintenance/post-mortem` | five near misses added | the v11 bodies of `diagnosing-a-session`, `adding-observability` and `rollout-controls` say the cases they decline are `post-mortem`'s |
+| `maintenance/refactor-architecture` | five near misses added | the v11 body of `large-scale-changes` says the case it declines is `refactor-architecture`'s |
+| `testing/requesting-code-review` | five near misses added | the v11 body of `requesting-code-review` names `reviewing-plans` as the skill that reviews a plan document |
+
+The nine new sets — `analysis/working-from-a-ticket`,
+`design/reviewing-plans`, `implementation/adding-observability`,
+`implementation/changing-a-live-schema`, `implementation/rollout-controls`,
+`maintenance/deprecating-an-api`, `maintenance/diagnosing-a-session`,
+`maintenance/large-scale-changes` and `testing/reviewing-a-pr` — have no
+earlier rate at all.
+
+The remaining twenty-five sets are byte-identical to the ones the base held,
+and a rate measured against them before this task is still comparable with
+one measured after it.
+
 | Skill | Upstream source | Positives | Near misses | Output cases | Staged inputs |
 | --- | --- | --- | --- | --- | --- |
-| `analysis/working-from-a-ticket` | `skills/analysis/working-from-a-ticket/SKILL.md` | 10 | 10 | 3 — `ticket-unreadable` | `behavior/evals/analysis/working-from-a-ticket/files/` (11 files: `.sdlc-skills`, `README.md`, `docs`, `package.json`, `src`); queries name `docs` |
+| `analysis/working-from-a-ticket` | `skills/analysis/working-from-a-ticket/SKILL.md` | 10 | 10 | 3 — `ticket-unreadable` | `behavior/evals/analysis/working-from-a-ticket/files/` (11 files: `README.md`, `docs`, `package.json`, `plans`, `src`); queries name `docs` |
 | `analysis/writing-specs` | `skills/analysis/writing-specs/SKILL.md` | 10 | 10 | 2 — `vague-edges` | `behavior/evals/analysis/writing-specs/files/` (5 files: `README.md`, `docs`, `package.json`, `src`); queries name `docs` |
 | `common/clarifying-intent` | `skills/common/clarifying-intent/SKILL.md` | 10 | 15 | 2 — `praise-is-not-approval` | `behavior/evals/common/clarifying-intent/files/` (4 files: `README.md`, `package.json`, `src`); queries name `docs` |
 | `common/dispatching-parallel-agents` | `skills/common/dispatching-parallel-agents/SKILL.md` | 10 | 10 | 2 — `coupled-writes` | `behavior/evals/common/dispatching-parallel-agents/files/` (8 files: `README.md`, `package.json`, `src`); queries name `src` |
-| `common/handoff` | `skills/common/handoff/SKILL.md` | 10 | 10 | 2 — `finished-work` | `behavior/evals/common/handoff/files/` (12 files: `.sdlc-skills`, `README.md`, `package.json`, `src`); queries name no path |
+| `common/handoff` | `skills/common/handoff/SKILL.md` | 10 | 10 | 2 — `finished-work` | `behavior/evals/common/handoff/files/` (10 files: `README.md`, `package.json`, `plans`, `src`); queries name no path |
 | `common/mapping-the-codebase` | `skills/common/mapping-the-codebase/SKILL.md` | 10 | 10 | 2 — `already-mapped` | `behavior/evals/common/mapping-the-codebase/files/` (7 files: `README.md`, `package.json`, `src`); queries name `src` |
 | `common/prototyping` | `skills/common/prototyping/SKILL.md` | 10 | 10 | 2 — `known-answer` | `behavior/evals/common/prototyping/files/` (4 files: `README.md`, `package.json`, `src`); queries name no path |
 | `common/using-git-worktrees` | `skills/common/using-git-worktrees/SKILL.md` | 10 | 10 | 2 — `read-only` | `behavior/evals/common/using-git-worktrees/files/` (4 files: `README.md`, `package.json`, `src`); queries name `src` |
 | `common/using-sdlc-skills` | `skills/common/using-sdlc-skills/SKILL.md` | 10 | 10 | 2 — `status-question` | `behavior/evals/common/using-sdlc-skills/files/` (5 files: `README.md`, `package.json`, `src`); queries name `src` |
-| `common/viewing-artifacts` | `skills/common/viewing-artifacts/SKILL.md` | 10 | 10 | 2 — `write-spec` | `behavior/evals/common/viewing-artifacts/files/` (8 files: `.sdlc-skills`, `README.md`, `docs`, `package.json`, `src`); queries name `.sdlc-skills` |
+| `common/viewing-artifacts` | `skills/common/viewing-artifacts/SKILL.md` | 10 | 10 | 2 — `write-spec` | `behavior/evals/common/viewing-artifacts/files/` (8 files: `README.md`, `docs`, `package.json`, `plans`, `src`); queries name `.sdlc-skills` |
 | `common/writing-skills` | `skills/common/writing-skills/SKILL.md` | 10 | 10 | 2 — `vague-skill` | `behavior/evals/common/writing-skills/files/` (2 files: `README.md`, `package.json`); queries name no path |
 | `common/yagni` | `skills/common/yagni/SKILL.md` | 10 | 10 | 2 — `cutting-correctness` | `behavior/evals/common/yagni/files/` (5 files: `README.md`, `package.json`, `src`); queries name `api`, `src` |
 | `deployment/finishing-a-branch` | `skills/deployment/finishing-a-branch/SKILL.md` | 10 | 10 | 2 — `dirty-branch` | `behavior/evals/deployment/finishing-a-branch/files/` (4 files: `README.md`, `package.json`, `src`); queries name no path |
@@ -166,15 +211,15 @@ design or ask rather than presuppose an artefact.
 | `design/coding-standards` | `skills/design/coding-standards/SKILL.md` | 10 | 10 | 2 — `personal-style` | `behavior/evals/design/coding-standards/files/` (5 files: `README.md`, `package.json`, `src`); queries name no path |
 | `design/data-model` | `skills/design/data-model/SKILL.md` | 10 | 10 | 2 — `stateless-pricing` | `behavior/evals/design/data-model/files/` (5 files: `README.md`, `docs`, `package.json`, `src`); queries name no path |
 | `design/migration-strategy` | `skills/design/migration-strategy/SKILL.md` | 10 | 15 | 2 — `bounded-rename` | `behavior/evals/design/migration-strategy/files/` (6 files: `README.md`, `package.json`, `src`); queries name `src` |
-| `design/reviewing-plans` | `skills/design/reviewing-plans/SKILL.md` | 10 | 10 | 3 — `unwritten-plan` | `behavior/evals/design/reviewing-plans/files/` (9 files: `.sdlc-skills`, `README.md`, `package.json`, `src`); queries name `.sdlc-skills` |
+| `design/reviewing-plans` | `skills/design/reviewing-plans/SKILL.md` | 10 | 10 | 3 — `unwritten-plan` | `behavior/evals/design/reviewing-plans/files/` (9 files: `README.md`, `package.json`, `plans`, `src`); queries name `.sdlc-skills` |
 | `design/system-architecture` | `skills/design/system-architecture/SKILL.md` | 10 | 10 | 2 — `single-function` | `behavior/evals/design/system-architecture/files/` (6 files: `README.md`, `package.json`, `src`); queries name no path |
 | `design/ui-ux-design` | `skills/design/ui-ux-design/SKILL.md` | 10 | 10 | 2 — `decided-copy` | `behavior/evals/design/ui-ux-design/files/` (4 files: `README.md`, `docs`, `package.json`, `src`); queries name `empty` |
-| `design/writing-plans` | `skills/design/writing-plans/SKILL.md` | 10 | 10 | 2 — `ambiguous-intent` | `behavior/evals/design/writing-plans/files/` (8 files: `.sdlc-skills`, `README.md`, `docs`, `package.json`, `src`); queries name `.sdlc-skills`, `docs`, `src` |
+| `design/writing-plans` | `skills/design/writing-plans/SKILL.md` | 10 | 10 | 2 — `ambiguous-intent` | `behavior/evals/design/writing-plans/files/` (8 files: `README.md`, `docs`, `package.json`, `plans`, `src`); queries name `.sdlc-skills`, `docs`, `src` |
 | `implementation/adding-observability` | `skills/implementation/adding-observability/SKILL.md` | 10 | 10 | 3 — `no-facility` | `behavior/evals/implementation/adding-observability/files/` (8 files: `README.md`, `config`, `package.json`, `src`); queries name no path |
 | `implementation/changing-a-live-schema` | `skills/implementation/changing-a-live-schema/SKILL.md` | 10 | 10 | 3 — `pre-release-store` | `behavior/evals/implementation/changing-a-live-schema/files/` (6 files: `README.md`, `package.json`, `src`); queries name no path |
-| `implementation/executing-plans` | `skills/implementation/executing-plans/SKILL.md` | 13 | 13 | 2 — `unapproved-plan` | `behavior/evals/implementation/executing-plans/files/` (18 files: `.sdlc-skills`, `README.md`, `package.json`, `src`); queries name `.sdlc-skills` |
+| `implementation/executing-plans` | `skills/implementation/executing-plans/SKILL.md` | 13 | 13 | 2 — `unapproved-plan` | `behavior/evals/implementation/executing-plans/files/` (14 files: `README.md`, `package.json`, `plans`, `src`); queries name `.sdlc-skills` |
 | `implementation/rollout-controls` | `skills/implementation/rollout-controls/SKILL.md` | 10 | 10 | 3 — `declined-rollout` | `behavior/evals/implementation/rollout-controls/files/` (8 files: `README.md`, `config`, `ops`, `package.json`, `src`); queries name no path |
-| `implementation/subagent-driven-development` | `skills/implementation/subagent-driven-development/SKILL.md` | 10 | 10 | 2 — `breaker-trips` | `behavior/evals/implementation/subagent-driven-development/files/` (12 files: `.sdlc-skills`, `README.md`, `package.json`, `src`); queries name `.sdlc-skills` |
+| `implementation/subagent-driven-development` | `skills/implementation/subagent-driven-development/SKILL.md` | 10 | 10 | 2 — `breaker-trips` | `behavior/evals/implementation/subagent-driven-development/files/` (10 files: `README.md`, `evidence`, `package.json`, `plans`, `src`); queries name `.sdlc-skills` |
 | `implementation/test-driven-development` | `skills/implementation/test-driven-development/SKILL.md` | 10 | 10 | 2 — `config-tweak` | `behavior/evals/implementation/test-driven-development/files/` (4 files: `README.md`, `package.json`, `src`); queries name `api`, `config`, `src` |
 | `maintenance/complexity-audit` | `skills/maintenance/complexity-audit/SKILL.md` | 10 | 10 | 2 — `simple-module` | `behavior/evals/maintenance/complexity-audit/files/` (6 files: `README.md`, `package.json`, `src`); queries name `src` |
 | `maintenance/containing-an-incident` | `skills/maintenance/containing-an-incident/SKILL.md` | 10 | 10 | 2 — `yesterday-test-failure` | `behavior/evals/maintenance/containing-an-incident/files/` (8 files: `README.md`, `config`, `ops`, `package.json`, `src`); queries name `go` |

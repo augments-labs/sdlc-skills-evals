@@ -12,7 +12,7 @@
   {
     "split": "train",
     "should_trigger": true,
-    "query": "There is a session in .agent/sessions/2026-10-14-charge-flow.jsonl — go through it and tell me what it changed and why."
+    "query": "There is a session in .agent/sessions/2026-10-14-charge-flow.ndjson — go through it and tell me what it changed and why."
   },
   {
     "split": "train",

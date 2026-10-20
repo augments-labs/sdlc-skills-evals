@@ -57,14 +57,32 @@ _plan_version_of() { # $1 plan directory
 }
 
 # The path-like tokens the description queries name, one per line.
-_staged_paths() { # $1 descriptions root
-  find "$1" -name '*.json' -type f ! -path '*/holdout/*' | sort | while IFS= read -r f; do
-    jq -r '.[].query' "$f"
-  done | tr ' \t' '\n\n' | tr -d "\'" \
-    | awk '{ gsub(/[`",;:!?()\[\]{}<>]/, ""); sub(/\.$/, ""); print }' \
-    | grep -E '^[A-Za-z0-9_.@-]+(/[A-Za-z0-9_.@-]+)+$' \
-    | grep -vE '^(skills|scripts|json|go|empty|task|release|pending)/' \
-    | sort -u
+#
+# A token is a path the corpus names when it looks like one: it ends in a file
+# extension, or it names a directory the staged tree has at its top. Every
+# root is covered — a query that names `skills/…` or `scripts/…` is naming a
+# path like any other, and a check that excluded those roots would report a
+# guarantee it does not give. A slash-separated list in prose ("json/yaml/
+# table", a branch name) names no file, and is left out by the same rule.
+_staged_paths() { # $1 descriptions root, $2 the staged tree
+  local descs="$1" staged="$2" tok last ext top
+  while IFS= read -r tok; do
+    [ -n "$tok" ] || continue
+    last="${tok##*/}"
+    ext="${last##*.}"
+    if [ "$ext" != "$last" ]; then
+      case "$ext" in [A-Za-z]*) printf '%s\n' "$tok"; continue ;; esac
+    fi
+    top="${tok%%/*}"
+    [ -e "$staged/$top" ] && printf '%s\n' "$tok"
+  done < <(
+    find "$descs" -name '*.json' -type f ! -path '*/holdout/*' | sort \
+      | while IFS= read -r f; do jq -r '.[].query' "$f"; done \
+      | tr ' \t' '\n\n' | tr -d "\'" \
+      | awk '{ gsub(/[`",;:!?()\[\]{}<>]/, ""); sub(/\.$/, ""); print }' \
+      | grep -E '^[A-Za-z0-9_.@-]+(/[A-Za-z0-9_.@-]+)+$' \
+      | sort -u
+  )
 }
 
 expect_fail() { # $1 label, $2 the message the failure must carry
@@ -394,7 +412,7 @@ if [ -d "$snapshot" ]; then
   fi
 
   # the session sample and the ticket are staged too
-  if [ -f "$snapshot/.agent/sessions/2026-10-14-charge-flow.jsonl" ]; then
+  if [ -f "$snapshot/.agent/sessions/2026-10-14-charge-flow.ndjson" ]; then
     ok "the staged tree carries the session sample"
   else
     bad "the staged tree carries the session sample"
@@ -412,11 +430,55 @@ if [ -d "$snapshot" ]; then
     [ -e "$snapshot/$tok" ] && continue
     missing=$((missing + 1))
     printf '       %s is named by a query and not staged\n' "$tok"
-  done < <(_staged_paths "$here/descriptions")
+  done < <(_staged_paths "$here/descriptions" "$snapshot")
   if [ "$missing" -eq 0 ]; then
     ok "every path a query names is staged"
   else
     bad "every path a query names is staged ($missing missing)"
+  fi
+
+  # The check above must be able to see a path nothing stages, whatever its
+  # root: a query that names `skills/…` names a path like any other. So a
+  # query naming one is rejected, and the rejection is shown here rather than
+  # assumed.
+  seam_desc="$work/seam-descriptions"
+  rm -rf "$seam_desc"; cp -a "$here/descriptions" "$seam_desc"
+  jq '.[0].query = "Edit skills/testing/security-audits/SKILL.md — the body is too long and rambles."' \
+    "$seam_desc/common/writing-skills.json" > "$seam_desc/common/writing-skills.json.new"
+  mv "$seam_desc/common/writing-skills.json.new" "$seam_desc/common/writing-skills.json"
+  seam_missing=0
+  while IFS= read -r tok; do
+    [ -n "$tok" ] || continue
+    [ -e "$snapshot/$tok" ] && continue
+    seam_missing=$((seam_missing + 1))
+  done < <(_staged_paths "$seam_desc" "$snapshot")
+  if [ "$seam_missing" -gt 0 ]; then
+    ok "a query naming a path nothing stages is rejected, whatever its root"
+  else
+    bad "a query naming a path nothing stages is rejected, whatever its root"
+  fi
+
+  # The transcript the diagnosis case grades has to carry the edit the case
+  # expects. A case that grades a transcript against a map the transcript
+  # does not match measures nothing, so the paths the case names are read
+  # back out of the transcript itself.
+  transcript="$snapshot/.agent/sessions/2026-10-14-charge-flow.ndjson"
+  diag_case="$here/behavior/evals/maintenance/diagnosing-a-session/evals.json"
+  graded=0
+  graded_missing=0
+  for tok in $(jq -r '.evals[] | select(.id == "why-did-it-change-tax") | .expected_output' \
+      "$diag_case" 2>/dev/null \
+      | tr ' \t' '\n\n' | tr -d "\'" \
+      | awk '{ gsub(/[`",;:!?()\[\]{}<>]/, ""); sub(/\.$/, ""); print }' \
+      | grep -E '^[A-Za-z0-9_.@-]+(/[A-Za-z0-9_.@-]+)+$' | sort -u); do
+    [ -e "$here/behavior/evals/maintenance/diagnosing-a-session/files/$tok" ] || continue
+    graded=$((graded + 1))
+    grep -qF "$tok" "$transcript" 2>/dev/null || graded_missing=$((graded_missing + 1))
+  done
+  if [ "$graded" -gt 0 ] && [ "$graded_missing" -eq 0 ]; then
+    ok "the staged transcript carries the edit the diagnosis case grades ($graded paths)"
+  else
+    bad "the staged transcript carries the edit the diagnosis case grades ($graded named, $graded_missing missing)"
   fi
 
   # --- the rejection: a required staged input is removed ---------------------
