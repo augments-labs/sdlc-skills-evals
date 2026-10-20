@@ -91,6 +91,67 @@ for h in "${adapters[@]}"; do
   fi
 done
 
+# --- the README's provenance and evidence classes ----------------------------
+# The Change paragraph asks the README to keep two evidence classes apart: a
+# parser grounded in versioned official source or documentation may be
+# exercised against a labelled synthetic fixture, and a synthetic fixture is
+# never presented as an observation. So every parser's row names the source
+# and its version, the fixture's provenance, and the runtime status.
+readme="$hh/README.md"
+if [ ! -f "$readme" ]; then
+  bad "harnesses/README.md exists"
+else
+  ok "harnesses/README.md exists"
+  # The two classes are named, and the rule that keeps them apart is stated.
+  if grep -q '^\*\*Observed\.\*\*' "$readme" && \
+     grep -q '^\*\*Documentation-grounded\.\*\*' "$readme" && \
+     grep -qi 'never promotes' "$readme"; then
+    ok "the README names both evidence classes and the rule that keeps them apart"
+  else
+    bad "the README names both evidence classes and the rule that keeps them apart"
+  fi
+  # The provenance table's row for one harness, tab-separated.
+  provenance_row() { # $1 harness
+    awk -v h="$1" '
+      index($0, "| " h " |") == 1 {
+        n = split($0, cell, "|")
+        for (i = 2; i <= n - 1; i++) {
+          gsub(/^[ \t]+|[ \t]+$/, "", cell[i])
+          printf "%s%s", cell[i], (i < n - 1 ? "\t" : "\n")
+        }
+        exit
+      }
+    ' "$readme"
+  }
+  for h in "${adapters[@]}"; do
+    row="$(provenance_row "$h")"
+    if [ -z "$row" ]; then
+      bad "$h has a provenance row (source and version, fixture provenance, runtime status)"
+      continue
+    fi
+    shape="$(printf '%s\n' "$row" | cut -f3)"
+    fixture="$(printf '%s\n' "$row" | cut -f4)"
+    status="$(printf '%s\n' "$row" | cut -f5)"
+    if [ -n "$shape" ] && printf '%s' "$shape" | grep -q '[0-9]'; then
+      ok "$h provenance row names the source and its version"
+    else
+      bad "$h provenance row names the source and its version"
+    fi
+    # A synthetic fixture is labelled synthetic, never presented as an
+    # observation.
+    if printf '%s' "$fixture" | grep -qi 'synthetic'; then
+      ok "$h provenance row labels its fixture synthetic"
+    else
+      bad "$h provenance row labels its fixture synthetic"
+    fi
+    if printf '%s' "$status" | grep -qiE 'observed|unverified'; then
+      ok "$h provenance row states the runtime status"
+    else
+      bad "$h provenance row states the runtime status"
+    fi
+  done
+fi
+
 # --- runnable values are honest -----------------------------------------------
 # A flag the operator's own machine cannot support is `no`, with the reason
 # that says what is missing. Only a harness with RECORDED evidence on this
