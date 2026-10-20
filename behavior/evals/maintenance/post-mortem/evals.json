@@ -5,7 +5,7 @@
     {
       "id": "checkout-outage",
       "prompt": "Last week's outage in this repo (lowercase regions mispriced, payments declined for six hours) is contained. Explain how it reached production and what prevents the next one — the suite was green the whole time.",
-      "expected_output": "A post-mortem tracing the escape path (tests only used uppercase regions, so the green suite proved nothing about the failing input), why impact grew (no region-canary, slow flag response), and concrete prevention — process and technical, not blame.",
+      "expected_output": "A post-mortem tracing the escape path (tests only used uppercase regions, so the green suite proved nothing about the failing input), why impact grew (no region-canary, slow flag response), and concrete prevention — process and technical, not blame. The analysis is issued once and never edited, and it carries its External lifecycle ledger beside it, outside the issued analysis: the ledger is added to and never rewritten, the corrective actions' receipts and external state stay pending there, and each action's proposed state is recorded there rather than in the analysis.",
       "assertions": []
     },
     {
