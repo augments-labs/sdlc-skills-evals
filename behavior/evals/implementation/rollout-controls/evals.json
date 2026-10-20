@@ -1,0 +1,24 @@
+{
+  "skill_name": "rollout-controls",
+  "pending_first_run": true,
+  "evals": [
+    {
+      "id": "kill-switch",
+      "prompt": "Put the new checkout path behind a flag so we can turn it off without a deploy. It touches the request handler and the nightly invoice job.",
+      "expected_output": "Finds the project's rollout policy and, where there is none or a term is unsaid, drafts the missing terms and puts the draft to the release or decision owner — mechanism, target state, cohort stages and their selection rules, the baseline source and window, success and failure thresholds per signal, the minimum observation per stage, the exact kill action and who may take it, and who may expand a stage or abort — and builds nothing until they are accepted. It then uses the facility the project already has (the flag file the runbook documents), defaults the switch off, reads it at runtime in front of every path the change adds (the handler and the invoice job, not the handler alone), tests the on-state and the off-state, records the exact off action and the removal follow-up with its owner, and emits each threshold's signal through the project's existing facility with the switch state carried on it.",
+      "assertions": []
+    },
+    {
+      "id": "no-policy",
+      "prompt": "We want a canary rollout of the new pricing path. There is no rollout policy in this repo and no canary tooling.",
+      "expected_output": "Reads the project's release or rollout policy and its instructions file, finds none, and drafts the missing terms from the change's risk and the project's existing telemetry — a draft, explicitly not policy until accepted — and puts it to the release or decision owner with the three answers. It builds no flag, no threshold and no cohort against an unaccepted draft, and it adds no library, vendor or dashboard tool for the canary.",
+      "assertions": []
+    },
+    {
+      "id": "declined-rollout",
+      "prompt": "The release owner read the rollout draft for the pricing path and said: ship without a staged rollout. Finish the rest of the change.",
+      "expected_output": "Fills the rollout record with Status declined and only its Policy and Next action sections, adds the row to the ledger beside it naming who declined and when, and ends there. It builds no switch, no threshold and no cohort, because an unaccepted or declined draft is not a policy — and it does not itself decide the release, which is release-readiness's, nor expand a rollout or flip a switch in a shared environment.",
+      "assertions": []
+    }
+  ]
+}

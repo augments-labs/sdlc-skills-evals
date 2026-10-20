@@ -1,0 +1,24 @@
+{
+  "skill_name": "large-scale-changes",
+  "pending_first_run": true,
+  "evals": [
+    {
+      "id": "rename-everywhere",
+      "prompt": "Rename `chargeTenant` to `charge` across every package in this monorepo. Hundreds of call sites, nobody can review it by hand. Do it with a script and split it into one PR per owner.",
+      "expected_output": "Writes the transformation as one sentence with the paths it never touches — generated, vendored and lockfile paths, each with the tool that regenerates it — and writes the script in the repository, not outside it. It transforms the syntax tree or uses the language's own refactoring tool, because the pattern depends on the import's shape. It proves the script on three fixtures — an input and its expected output, a second run over that output that changes nothing, an excluded path left untouched — runs it on a small varied sample from different packages, reads every hunk, and runs it over the whole scope. It shards the result by the ownership file, reading CODEOWNERS on the base branch and taking the last matching pattern per path, so a shard for one team is not sent to another; each shard builds and passes its tests alone against the base in any merge order, produced by rerunning the script restricted to that shard's paths. It asks once whether to open a pilot shard first or all of them, and opens no pull request and pings no owner before that answer.",
+      "assertions": []
+    },
+    {
+      "id": "one-pr-fits",
+      "prompt": "We need to rename one local variable in src/server.js and fix the spelling in a comment.",
+      "expected_output": "Declines the codemod route in one line: this fits one reviewable PR, so it is done by hand under test-driven-development. No script is written, no shard manifest is opened, no ownership split is made, and nothing is staged for other owners — the machinery this skill owns exists for changes that are too big for one PR, and it says so rather than running it on a rename.",
+      "assertions": []
+    },
+    {
+      "id": "lockfile",
+      "prompt": "Bump the shared dependency in every workspace and regenerate the lockfiles.",
+      "expected_output": "Regenerates each lockfile with the package manager and reads its diff rather than hand-editing it, reporting every transitive dependency that moved as part of the change. It reads the changelog of every version between the current one and the target, not only the target's, and lists each breaking change as part of the transformation. It keeps one target version per package-manager workspace, and it puts the switch-on — the configuration change that turns a check red — in its own change after every shard has merged, so until then it runs as a warning or not at all.",
+      "assertions": []
+    }
+  ]
+}

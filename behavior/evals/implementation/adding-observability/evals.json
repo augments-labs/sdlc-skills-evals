@@ -1,0 +1,24 @@
+{
+  "skill_name": "adding-observability",
+  "pending_first_run": true,
+  "evals": [
+    {
+      "id": "instrument-checkout",
+      "prompt": "We can't tell whether checkout is working for users. Add the logging, the metrics and the alert that answer it, using the facility this project already has.",
+      "expected_output": "Names the user-visible outcome and the two signals that answer the operator's questions — the success rate and the latency where the user feels it — and says why a liveness check, CPU or a 'function called' counter answers neither. It emits through the facility the project already uses, under its naming and unit conventions, adding no library and no vendor; gives every metric a label set a human can list in advance (outcome, error kind, route template, operation) and never a user id, request id, raw path, email or message text; records latency as a histogram whose buckets include every threshold an alert uses rather than an average; carries the request or trace id on the request's log lines and injects the context across the queue hop; and writes one alert on the user-facing symptom with an owner and the owner's first action. It fires each alert once on purpose and records that it fired.",
+      "assertions": []
+    },
+    {
+      "id": "rollout-thresholds",
+      "prompt": "Add the metrics and the alert for the staged rollout of the new checkout path — the flag is in config/flags.json and the canary thresholds are what we watch.",
+      "expected_output": "Hands the rollout's switch and its threshold signals to rollout-controls and says so, then instruments the signals that still lack an operator's question. It builds no flag, no cohort thresholds and no kill switch, and it does not decide who may expand a stage or who may abort: the alert it does write sits on a user-facing symptom, not on the rollout's own thresholds, and the signal values carry the switch state so the two cohorts do not blend.",
+      "assertions": []
+    },
+    {
+      "id": "no-facility",
+      "prompt": "Add monitoring to the import job so we can see when it fails. This project has no logging or metrics set up at all.",
+      "expected_output": "Asks, and ends the turn: the project has no logging, metrics or tracing facility, so where the new signals go is the user's choice — structured log lines on the process's standard output that the host already collects, with counts and durations as fields of those lines, or a library or vendor the user names — with a recommendation and its reason. It adds no telemetry library or vendor of its own accord, and it writes no signal before the answer comes back.",
+      "assertions": []
+    }
+  ]
+}

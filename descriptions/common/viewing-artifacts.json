@@ -33,7 +33,7 @@
   {"split": "validation", "should_trigger": false, "expect": "none",
    "query": "Show me the sprint burndown and which tickets are in review."},
   {"split": "validation", "should_trigger": false, "expect": "none",
-   "query": "Read .sdlc-skills/plans/reporting/index.md and tell me exactly what task 01 says."},
+   "query": "Read .sdlc-skills/plans/2026-10-12-reporting/00-index.md and tell me exactly what task 01 says."},
   {"split": "validation", "should_trigger": false, "expect": "none",
    "query": "Stand up a hosted status page the whole team can hit, not something local on my machine."},
   {"split": "validation", "should_trigger": false, "expect": "verification-before-completion",
