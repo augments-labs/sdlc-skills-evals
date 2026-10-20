@@ -1,0 +1,96 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>SDLC trail</title>
+<style>
+body { font-family: system-ui, sans-serif; margin: 0; padding: 1rem; }
+section { border-top: 1px solid #ccc; padding: 0.5rem 0; }
+.pill { display: inline-block; padding: 0 0.4rem; border-radius: 0.6rem; font-size: 0.8rem; }
+.conn { font-size: 0.9rem; }
+.vis { margin: 0.5rem 0; }
+table { border-collapse: collapse; }
+td, th { border: 1px solid #ddd; padding: 0.2rem 0.4rem; text-align: left; }
+</style>
+</head>
+<body>
+<h1>SDLC trail — as of 2026-10-20 (UTC)</h1>
+
+<section id="topic-auth-overhaul">
+  <h2>auth-overhaul</h2>
+  <p class="conn">spec-v1 &rarr; spec-v2: the plan consumed spec-v1, and the current spec is spec-v2, so the consumed identity differs from the current one.</p>
+  <div class="record">
+    <span class="adr">ADR-009</span>
+    <span class="pill">superseded</span>
+    <p>token sessions</p>
+  </div>
+  <div class="record">
+    <span class="adr">ADR-014</span>
+    <span class="pill">accepted</span>
+    <p>passkey sessions</p>
+  </div>
+  <div class="record">
+    <span class="adr">ADR-015</span>
+    <span class="pill">rejected</span>
+    <p>recovery mail</p>
+  </div>
+  <div class="record">
+    <span class="adr">ADR-016</span>
+    <span class="pill">cancelled</span>
+    <p>recovery SMS</p>
+  </div>
+</section>
+
+<section id="topic-billing-retry">
+  <h2>billing-retry</h2>
+  <p class="conn">the architecture decision was rejected, so the design's approval state is not derivable from the plan.</p>
+  <div class="record">
+    <span class="adr">arch-v1</span>
+    <span class="pill">rejected</span>
+    <p>the retry state machine design</p>
+  </div>
+  <div class="vis" aria-label="Visuals">
+    <iframe src="2026-08-02-billing-retry/visuals/retry-flow-v1.html" sandbox="allow-same-origin" title="retry flow v1"></iframe>
+    <p><a href="2026-08-02-billing-retry/visuals/retry-flow-v1.html">open file</a></p>
+  </div>
+  <p class="conn">task titles are shown as they were written, entity-encoded: escape &lt;img src=x onerror=alert(1)&gt; &amp; &quot;quotes&quot;</p>
+  <div aria-label="Assurance matrix">
+    <h3>Assurance matrix</h3>
+    <table>
+      <tr><th>Gate</th><th>State</th></tr>
+      <tr><td>unit</td><td>executable</td></tr>
+      <tr><td>integration</td><td>executable</td></tr>
+      <tr><td>contract</td><td>executable</td></tr>
+      <tr><td>load</td><td>blocked</td></tr>
+    </table>
+  </div>
+  <div class="node">
+    <h4>Plan</h4>
+    <p>Freshness: unknown — possible staleness; the binding is not derivable from the record, so no conclusion is drawn.</p>
+  </div>
+</section>
+
+<section id="topic-rate-limiting">
+  <h2>rate-limiting</h2>
+  <p>4/4 tasks done; the plan is approved and needs no attention.</p>
+  <div class="record">
+    <span class="adr">plan-v1</span>
+    <span class="pill">approved</span>
+    <p>the rate-limiting plan</p>
+  </div>
+</section>
+
+<section id="topic-cli-rename">
+  <h2>cli-rename</h2>
+  <p>needs attention: no ledger row records this brief's approval, so its state is unknown rather than approved.</p>
+  <div class="record">
+    <span class="adr">goals-v1</span>
+    <span class="pill">unknown</span>
+    <p>the cli-rename brief</p>
+  </div>
+</section>
+
+<p>billing-retry: 5/9 tasks done — one task is done with concerns and is not counted here.</p>
+
+</body>
+</html>

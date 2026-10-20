@@ -202,6 +202,21 @@ for scen in "${scenarios[@]}"; do
     fi
     if [ -d "$FIX_DIR/$name/success" ]; then
       ( cd "$FIX_DIR/$name/success" && tar cf - . ) | ( cd "$d" && tar xf - )
+      # The repository ignores every directory named `.sdlc-skills`, so the
+      # fixture holds the artifact under a neutral name and the copy renames
+      # it into the place the artifact really lives. A fixture placed under
+      # the ignored name would be present in the working tree and absent from
+      # the commit — the same failure the corpus's tracked root exists to end.
+      while IFS= read -r dir; do
+        [ -n "$dir" ] || continue
+        target="${dir%/_sdlc-skills}/.sdlc-skills"
+        if [ -d "$target" ]; then
+          ( cd "$dir" && tar cf - . ) | ( cd "$target" && tar xf - )
+          rm -rf "$dir"
+        else
+          mv "$dir" "$target"
+        fi
+      done < <(find "$d" -type d -name '_sdlc-skills')
     fi
     stream_file="$work/$name-$case_name.stream"
     : > "$stream_file"
