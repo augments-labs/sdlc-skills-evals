@@ -20,6 +20,98 @@ INV="config/upstream-inventory.json"
 work="$(mktemp -d)"
 trap 'rm -rf "$work"' EXIT
 
+# --- the upstream tree the pin-relative checks read ----------------------------
+#
+# The lab resolves its plugin the way `lib/common.sh:plugin_root` does:
+# SDLC_SKILLS_ROOT when it is set, otherwise `../sdlc-skills` resolved from
+# the lab root — never from the caller's CWD. The extracted pinned tree this
+# machine keeps under /tmp is the last candidate.
+#
+# Every candidate is named, so a skip says WHERE it looked instead of saying
+# only that something was missing.
+#
+# This block is written out identically in lib/tests/scenario-contracts.sh and
+# lib/tests/corpora.sh, so the two gates cannot disagree about which tree
+# they read; the contract test compares the two copies.
+pin_tree_candidates() {
+  if [ -n "${SDLC_SKILLS_ROOT:-}" ]; then
+    printf '%s\n' "$SDLC_SKILLS_ROOT"
+  fi
+  printf '%s\n' "$(dirname "$here")/sdlc-skills"
+  printf '%s\n' "/tmp/opencode/sdlc-skills-pinned"
+}
+
+# The candidates, comma separated, for a message.
+pin_tree_tried() {
+  local cand first=1
+  while IFS= read -r cand; do
+    [ -n "$cand" ] || continue
+    [ "$first" -eq 1 ] || printf ', '
+    printf '%s' "$cand"
+    first=0
+  done < <(pin_tree_candidates)
+  printf '\n'
+}
+
+# The tree the checks may read: the first candidate that holds a `skills/`
+# directory. Prints nothing when there is none.
+pin_tree() {
+  local cand
+  while IFS= read -r cand; do
+    [ -n "$cand" ] || continue
+    if [ -d "$cand/skills" ]; then printf '%s\n' "$cand"; return 0; fi
+  done < <(pin_tree_candidates)
+  return 1
+}
+
+# The pinned commit, from the committed inventory.
+pin_commit() {
+  jq -r '.upstream.commit // empty' "$INV" 2>/dev/null
+}
+
+# The tree's own commit, when the tree carries git metadata. An extracted
+# tree has none, and that is said rather than assumed.
+pin_tree_commit() { # $1 tree
+  git -C "$1" rev-parse HEAD 2>/dev/null || true
+}
+
+# Decide whether the pin-relative checks may run, and say what they are
+# doing. Sets PIN_TREE; returns non-zero when the checks must skip.
+#
+#   $1  what the check would read, for the message
+#   $2  what was NOT checked, for the message
+#
+# A tree that is not the pinned commit is never compared against: the
+# comparison would be against something the pin does not name, and a red or
+# a green from it would be about the wrong tree.
+pin_tree_for_checks() { # $1 label  $2 what was not checked
+  PIN_TREE=""
+  local tree tried commit
+  tree="$(pin_tree || true)"
+  tried="$(pin_tree_tried)"
+  if [ -z "$tree" ]; then
+    printf '  SKIP  %s — no upstream tree found; looked at: %s. NOT CHECKED: %s.\n' \
+      "$1" "$tried" "$2"
+    return 1
+  fi
+  commit="$(pin_tree_commit "$tree")"
+  if [ -n "$commit" ] && [ "$commit" != "$(pin_commit)" ]; then
+    printf '  SKIP  %s — the tree at %s is at commit %s, not the pinned %s. NOT CHECKED: %s.\n' \
+      "$1" "$tree" "$commit" "$(pin_commit)" "$2"
+    printf '        Obtain the pinned tree from a clone: git -C <clone> worktree add <dir> %s\n' \
+      "$(pin_commit)"
+    return 1
+  fi
+  if [ -z "$commit" ]; then
+    printf '  note  %s — running against %s, whose commit could not be determined (an extracted tree carries no git metadata); the tree is NOT verified to be the pinned commit %s.\n' \
+      "$1" "$tree" "$(pin_commit)"
+  else
+    printf '  note  %s — running against %s at the pinned commit %s.\n' "$1" "$tree" "$commit"
+  fi
+  PIN_TREE="$tree"
+  return 0
+}
+
 check_rc=0
 check_out=""
 
@@ -473,22 +565,17 @@ if [ -d "$snapshot" ]; then
     bad "the staged approval binds the plan's real version (staged $staged_version, computed $computed)"
   fi
 
-  # the same version, read with the upstream script itself where a pinned
+  # the same version, read with the upstream script itself where the pinned
   # upstream tree is on this machine: the lab's own rule must agree with it
-  upstream_pv=""
-  for cand in "${SDLC_SKILLS_ROOT:-}/skills/design/writing-plans/scripts/plan-version.sh" \
-              "/tmp/opencode/sdlc-skills-pinned/skills/design/writing-plans/scripts/plan-version.sh"; do
-    if [ -f "$cand" ]; then upstream_pv="$cand"; break; fi
-  done
-  if [ -n "$upstream_pv" ]; then
+  if pin_tree_for_checks "the upstream plan-version agreement" \
+       "the agreement between the lab's plan-version rule and the upstream script"; then
+    upstream_pv="$PIN_TREE/skills/design/writing-plans/scripts/plan-version.sh"
     upstream_version="$(bash "$upstream_pv" "$plan_dir" 2>/dev/null)"
     if [ "$upstream_version" = "$staged_version" ]; then
       ok "the upstream plan-version.sh computes the staged version ($upstream_version)"
     else
       bad "the upstream plan-version.sh computes the staged version (upstream $upstream_version, staged $staged_version)"
     fi
-  else
-    printf '  note  no pinned upstream tree on this machine: the upstream version script was not run\n'
   fi
 
   # the session sample and the ticket are staged too

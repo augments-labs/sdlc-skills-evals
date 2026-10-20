@@ -137,14 +137,98 @@ skill_in_inventory() { # $1 skill, e.g. analysis/working-from-a-ticket
   return 1
 }
 
-# The pinned upstream tree, when this machine has one. The clause check and
-# the plan-version check both read it; without it they SKIP, loudly, rather
-# than pass silently.
-PINNED=""
-for cand in "${SDLC_SKILLS_ROOT:-}/skills" \
-            "/tmp/opencode/sdlc-skills-pinned/skills"; do
-  if [ -d "$cand" ]; then PINNED="$cand"; break; fi
-done
+# --- the upstream tree the pin-relative checks read ----------------------------
+#
+# The lab resolves its plugin the way `lib/common.sh:plugin_root` does:
+# SDLC_SKILLS_ROOT when it is set, otherwise `../sdlc-skills` resolved from
+# the lab root — never from the caller's CWD. The extracted pinned tree this
+# machine keeps under /tmp is the last candidate.
+#
+# Every candidate is named, so a skip says WHERE it looked instead of saying
+# only that something was missing.
+#
+# This block is written out identically in lib/tests/scenario-contracts.sh and
+# lib/tests/corpora.sh, so the two gates cannot disagree about which tree
+# they read; the contract test compares the two copies.
+pin_tree_candidates() {
+  if [ -n "${SDLC_SKILLS_ROOT:-}" ]; then
+    printf '%s\n' "$SDLC_SKILLS_ROOT"
+  fi
+  printf '%s\n' "$(dirname "$here")/sdlc-skills"
+  printf '%s\n' "/tmp/opencode/sdlc-skills-pinned"
+}
+
+# The candidates, comma separated, for a message.
+pin_tree_tried() {
+  local cand first=1
+  while IFS= read -r cand; do
+    [ -n "$cand" ] || continue
+    [ "$first" -eq 1 ] || printf ', '
+    printf '%s' "$cand"
+    first=0
+  done < <(pin_tree_candidates)
+  printf '\n'
+}
+
+# The tree the checks may read: the first candidate that holds a `skills/`
+# directory. Prints nothing when there is none.
+pin_tree() {
+  local cand
+  while IFS= read -r cand; do
+    [ -n "$cand" ] || continue
+    if [ -d "$cand/skills" ]; then printf '%s\n' "$cand"; return 0; fi
+  done < <(pin_tree_candidates)
+  return 1
+}
+
+# The pinned commit, from the committed inventory.
+pin_commit() {
+  jq -r '.upstream.commit // empty' "$INV" 2>/dev/null
+}
+
+# The tree's own commit, when the tree carries git metadata. An extracted
+# tree has none, and that is said rather than assumed.
+pin_tree_commit() { # $1 tree
+  git -C "$1" rev-parse HEAD 2>/dev/null || true
+}
+
+# Decide whether the pin-relative checks may run, and say what they are
+# doing. Sets PIN_TREE; returns non-zero when the checks must skip.
+#
+#   $1  what the check would read, for the message
+#   $2  what was NOT checked, for the message
+#
+# A tree that is not the pinned commit is never compared against: the
+# comparison would be against something the pin does not name, and a red or
+# a green from it would be about the wrong tree.
+pin_tree_for_checks() { # $1 label  $2 what was not checked
+  PIN_TREE=""
+  local tree tried commit
+  tree="$(pin_tree || true)"
+  tried="$(pin_tree_tried)"
+  if [ -z "$tree" ]; then
+    printf '  SKIP  %s — no upstream tree found; looked at: %s. NOT CHECKED: %s.\n' \
+      "$1" "$tried" "$2"
+    return 1
+  fi
+  commit="$(pin_tree_commit "$tree")"
+  if [ -n "$commit" ] && [ "$commit" != "$(pin_commit)" ]; then
+    printf '  SKIP  %s — the tree at %s is at commit %s, not the pinned %s. NOT CHECKED: %s.\n' \
+      "$1" "$tree" "$commit" "$(pin_commit)" "$2"
+    printf '        Obtain the pinned tree from a clone: git -C <clone> worktree add <dir> %s\n' \
+      "$(pin_commit)"
+    return 1
+  fi
+  if [ -z "$commit" ]; then
+    printf '  note  %s — running against %s, whose commit could not be determined (an extracted tree carries no git metadata); the tree is NOT verified to be the pinned commit %s.\n' \
+      "$1" "$tree" "$(pin_commit)"
+  else
+    printf '  note  %s — running against %s at the pinned commit %s.\n' "$1" "$tree" "$commit"
+  fi
+  PIN_TREE="$tree"
+  return 0
+}
+
 
 # The locator an observed regression must carry: a specific record under the
 # lab's record root. A file that merely exists is not evidence — `README.md`
@@ -156,6 +240,19 @@ evidence_locator_ok() { # $1 locator
   esac
   [ -e "$1" ]
 }
+
+# The clause-existence check needs the pinned tree. Whether it may run, and
+# what it did not check, is decided ONCE, loudly, before the scenarios are
+# read — so the log says what was not checked instead of saying only that
+# something was skipped.
+total_clauses=0
+for scen in "${scenarios[@]}"; do
+  total_clauses=$(( total_clauses + $(grep -cE '^# Clause: ' "$scen" || true) ))
+done
+if ! pin_tree_for_checks "the clause-existence check" \
+     "$total_clauses clause quotes across ${#scenarios[@]} scenarios"; then
+  PIN_TREE=""
+fi
 
 for scen in "${scenarios[@]}"; do
   name="$(basename "$scen" .sh)"
@@ -184,25 +281,21 @@ for scen in "${scenarios[@]}"; do
         clause_bad="$clause_bad $cfile(not-in-the-inventory)"
         continue
       fi
-      if [ -z "$PINNED" ]; then
+      if [ -z "$PIN_TREE" ]; then
         clause_skipped=$((clause_skipped + 1))
         continue
       fi
-      if [ ! -f "$PINNED/${cfile#skills/}" ]; then
+      if [ ! -f "$PIN_TREE/$cfile" ]; then
         clause_bad="$clause_bad $cfile(no-such-file)"
         continue
       fi
-      if ! grep -qF -- "$cquote" "$PINNED/${cfile#skills/}"; then
+      if ! grep -qF -- "$cquote" "$PIN_TREE/$cfile"; then
         clause_bad="$clause_bad $cfile(quote-not-in-that-file)"
       fi
     done < <(grep -E '^# Clause: ' "$scen" || true)
     if [ -n "$clause_bad" ]; then
       bad "$name quotes pinned clauses that hold:$clause_bad"
       continue
-    fi
-    if [ "$clause_skipped" -gt 0 ]; then
-      printf '  SKIP  %s — no pinned upstream tree on this machine: %s clause quotes not checked\n' \
-        "$name" "$clause_skipped"
     fi
     # A prospective probe cannot also claim observed-regression evidence.
     if grep -qE '^# Evidence: .+' "$scen"; then
@@ -492,6 +585,19 @@ for scen in "${scenarios[@]}"; do
   fi
 done
 
+# The two gates that read the pinned tree must resolve it the same way, or
+# one of them answers a question about a different tree than the other. The
+# block is written out identically in both files; this compares them.
+tree_block() { # $1 file
+  sed -n '/^# --- the upstream tree the pin-relative checks read/,/^}/p' "$1"
+}
+if [ "$(tree_block "$here/lib/tests/scenario-contracts.sh")" = \
+     "$(tree_block "$here/lib/tests/corpora.sh")" ]; then
+  ok "the two gates resolve the upstream tree the same way"
+else
+  bad "the two gates resolve the upstream tree the same way (the blocks differ)"
+fi
+
 # --- 4. the frozen manifests and the suite membership -------------------------
 
 check_rc=0
@@ -570,14 +676,9 @@ fi
 # upstream script. The lab's own rule is a re-implementation, and one that
 # drifts is worse than none: the scenarios would exercise a version the
 # upstream does not produce.
-upstream_pv=""
-for cand in "${SDLC_SKILLS_ROOT:-}/skills/design/writing-plans/scripts/plan-version.sh" \
-            "$PINNED/design/writing-plans/scripts/plan-version.sh"; do
-  if [ -f "$cand" ]; then upstream_pv="$cand"; break; fi
-done
-if [ -z "$upstream_pv" ]; then
-  printf '  SKIP  the plan-version agreement — no pinned upstream tree on this machine\n'
-else
+if pin_tree_for_checks "the plan-version agreement" \
+     "the agreement between the lab's plan-version rule and the upstream script"; then
+  upstream_pv="$PIN_TREE/skills/design/writing-plans/scripts/plan-version.sh"
   plan_root="$work/plan-version-check"
   mkdir -p "$plan_root"
   # shellcheck source=/dev/null
