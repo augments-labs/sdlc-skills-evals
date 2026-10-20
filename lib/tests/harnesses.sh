@@ -18,6 +18,9 @@ has_fn() { # $1 file $2 function — 0 iff defined after sourcing
 
 required="adapter_check adapter_install adapter_chain adapter_run_activation adapter_run_behavioral"
 
+# The header's runnable flag, read the way the runners read it.
+runnable_of() { grep '^runnable=' "$hh/$1.sh" | sed 's/^runnable=//'; }
+
 # --- the adapter set is exactly the inventory's --------------------------------
 # Exact equality with the 11-member inventory is mandatory: a launcher that
 # is not in the inventory is an unowned adapter, and an inventory member
@@ -149,6 +152,29 @@ else
     else
       bad "$h provenance row states the runtime status"
     fi
+    # A flag is promoted by RECORDED evidence, not by a test's expectation:
+    # a harness whose parser has never seen this CLI's own stream cannot be
+    # called runnable. The one direction that holds is checked — runnable=yes
+    # requires a provenance row that does not say unverified.
+    if [ "$(runnable_of "$h")" = "yes" ] && printf '%s' "$status" | grep -qi 'unverified'; then
+      bad "$h runnable=yes requires a provenance row that records an observed runtime status"
+    else
+      ok "$h runnable=yes requires a provenance row that records an observed runtime status"
+    fi
+  done
+  # The procedure says what a run's evidence changes: the header's flag, the
+  # provenance row's runtime status, and the value the contract test pins.
+  procedure_section="$(awk '
+    /^## The verification procedure/ { inside = 1 }
+    /^## / && inside && $0 !~ /verification procedure/ { inside = 0 }
+    inside { print }
+  ' "$readme")"
+  for want in 'runnable=yes' 'Runtime status' 'lib/tests/harnesses.sh'; do
+    if printf '%s\n' "$procedure_section" | grep -qF -- "$want"; then
+      ok "the procedure names what a run's evidence changes ($want)"
+    else
+      bad "the procedure names what a run's evidence changes ($want)"
+    fi
   done
 fi
 
@@ -156,7 +182,6 @@ fi
 # A flag the operator's own machine cannot support is `no`, with the reason
 # that says what is missing. Only a harness with RECORDED evidence on this
 # machine may say `yes`.
-runnable_of() { grep '^runnable=' "$hh/$1.sh" | sed 's/^runnable=//'; }
 expect_runnable() { # $1 harness $2 yes|no
   if [ "$(runnable_of "$1")" = "$2" ]; then
     ok "$1 runnable=$2"
