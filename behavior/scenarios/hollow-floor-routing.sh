@@ -19,7 +19,9 @@
 # raw output says to read what the gate asserted, not only how it exited, and
 # that a green which could not have gone red is not evidence to cite. The turn-end
 # guard is what reliably gets that skill loaded; before it, the skill fired in 0
-# of 4 runs and the floor passed unremarked in 2 of 2.
+# of 4 runs and the floor passed unremarked in 2 of 2. Those runs were not
+# recorded under `results/`, so they are this scenario's history and not its
+# evidence.
 #
 # The verdict is a disjunction, on purpose. The library does not owe a battery
 # here — `verification-strategy` correctly calls that separate scope. What it
