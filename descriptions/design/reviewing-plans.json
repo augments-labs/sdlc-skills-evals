@@ -1,0 +1,112 @@
+[
+  {
+    "split": "train",
+    "should_trigger": true,
+    "query": "This plan is written and its route is high-risk. Get an independent reviewer to look at it before I approve it."
+  },
+  {
+    "split": "train",
+    "should_trigger": true,
+    "query": "Is the plan in .sdlc-skills/plans/2026-10-05-multi-tenancy/ sound? I want an independent look before it goes up."
+  },
+  {
+    "split": "train",
+    "should_trigger": true,
+    "query": "Check this plan before I approve it — the migration cutover worries me."
+  },
+  {
+    "split": "train",
+    "should_trigger": true,
+    "query": "The plan is ready to present. Get a second reader on it, and not the person who wrote it."
+  },
+  {
+    "split": "train",
+    "should_trigger": true,
+    "query": "Review the plan version I just showed you, independently, before I sign it off."
+  },
+  {
+    "split": "train",
+    "should_trigger": true,
+    "query": "The plan touches the live database. Before it goes for approval, someone who didn't write it should read it."
+  },
+  {
+    "split": "validation",
+    "should_trigger": true,
+    "query": "Give me an independent review of the plan in .sdlc-skills/plans/2026-09-28-billing-v2/ before it is presented."
+  },
+  {
+    "split": "validation",
+    "should_trigger": true,
+    "query": "Our policy says high-risk plans need a second reader. Get one for the plan we have written."
+  },
+  {
+    "split": "validation",
+    "should_trigger": true,
+    "query": "I want the plan reviewed by someone else before I approve it — is it sound?"
+  },
+  {
+    "split": "validation",
+    "should_trigger": true,
+    "query": "Review the exact plan version we are about to present — not the draft from last week."
+  },
+  {
+    "split": "train",
+    "should_trigger": false,
+    "query": "The implementation is done and the gates are green. Get it independently reviewed before it merges.",
+    "expect": "requesting-code-review"
+  },
+  {
+    "split": "train",
+    "should_trigger": false,
+    "query": "Reviewed and green. Merge it and clean up the branch.",
+    "expect": "finishing-a-branch"
+  },
+  {
+    "split": "train",
+    "should_trigger": false,
+    "query": "The reviewer left twelve comments on my PR. Work through them.",
+    "expect": "receiving-code-review"
+  },
+  {
+    "split": "train",
+    "should_trigger": false,
+    "query": "Postgres or DynamoDB for the new service? Record the decision and the reasoning.",
+    "expect": "architecture-decisions"
+  },
+  {
+    "split": "train",
+    "should_trigger": false,
+    "query": "What's the difference between a plan and a spec? Asking for a team glossary.",
+    "expect": "none"
+  },
+  {
+    "split": "train",
+    "should_trigger": false,
+    "query": "We're converting 400 components with a codemod. What has to be preserved and proven through the cutover?",
+    "expect": "migration-strategy"
+  },
+  {
+    "split": "validation",
+    "should_trigger": false,
+    "query": "Our suite is green but it catches nothing. Design the correctness battery this project needs.",
+    "expect": "verification-strategy"
+  },
+  {
+    "split": "validation",
+    "should_trigger": false,
+    "query": "Model the domain for the subscriptions feature — entities, relationships and invariants.",
+    "expect": "data-model"
+  },
+  {
+    "split": "validation",
+    "should_trigger": false,
+    "query": "Requirements are approved. Design the target system — components, boundaries, data flow, failure and recovery.",
+    "expect": "system-architecture"
+  },
+  {
+    "split": "validation",
+    "should_trigger": false,
+    "query": "The goal is settled. Write the detailed requirements for the invite flow, each with how we'd verify it.",
+    "expect": "writing-specs"
+  }
+]

@@ -1,0 +1,8 @@
+[
+{"type":"system","subtype":"init","model":"hermes-model","session_id":"sess-hermes-1"},
+{"type":"text","text":"loading"},
+{"type":"tool_use","name":"skill_view","tool_call_id":"tc-1","input":{"name":"sdlc-skills:using-sdlc-skills"}},
+{"type":"tool_result","name":"skill_view","tool_call_id":"tc-1","output":"# router","duration_ms":12,"is_error":false},
+{"type":"text","text":"loaded"},
+{"type":"result","session_id":"sess-hermes-1","exit_code":0,"text":"loaded","tokens":{"input":90,"output":12,"total":102,"cache_read":0,"cache_write":0}}
+]

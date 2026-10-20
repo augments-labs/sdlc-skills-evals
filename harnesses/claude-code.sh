@@ -8,15 +8,63 @@
 # This file holds only what is true of the `claude` CLI: how skills are loaded,
 # how it is invoked, how an activation is detected, and what a run costs.
 # Anything harness-agnostic belongs in the dispatcher, not here.
+#
+# ISOLATION. A launch runs under an environment this file builds explicitly
+# (claude_env): the throwaway home, the XDG directories inside it, a runtime
+# directory and a dead session-bus socket inside it, and the CLI's own
+# CLAUDE_CONFIG_DIR — which is where the credentials file is copied. The
+# operator's environment is NOT inherited: it carries the operator's own
+# session bus, their SSH agent, their IDE tokens and their credential
+# helpers, and a launch that inherited them would be a run that could read
+# the operator's stored credentials. The one exception is the operator's
+# credential seed ($LAB_CREDENTIAL_SEED/claude-code/env), which the runner
+# exports for a harness whose auth is environmental: it is sourced INSIDE
+# the child process, so its values reach the CLI and never reach a command
+# line, a log or this shell.
 
 adapter_name='claude-code'
 
 runnable=yes
-runnable_reason="claude CLI and credentials on this machine; streams battle-tested"
+runnable_reason="claude CLI and credentials on this machine; the recorded activation stream was observed here; the launch environment was rebuilt for isolation, so the next run is the first under it"
 permission_flags="--permission-mode acceptEdits"
 capabilities="subagent-loads-skills=yes(documentation) nesting-depth=unknown(documentation) tier-settable=yes(run) session-start-event=yes(run) post-compaction-event=unknown(documentation)"
 
 source_claude_home="${CLAUDE_CONFIG_DIR:-${HOME:-}/.claude}"
+
+# THE LAUNCH ENVIRONMENT, built explicitly (see the header): the operator's
+# environment is not inherited, so a launch can reach neither the operator's
+# files nor their credentials. The throwaway home and every XDG directory
+# point inside it, and the runtime directory and the session-bus address
+# point inside it too: with neither, a D-Bus client falls back to the passwd
+# entry's runtime directory — the operator's own session bus.
+claude_env() {
+  CLAUDE_ENV=(
+    "PATH=$PATH"
+    "HOME=$harness_home"
+    "CLAUDE_CONFIG_DIR=$harness_home"
+    "XDG_CONFIG_HOME=$harness_home/.config"
+    "XDG_DATA_HOME=$harness_home/.local/share"
+    "XDG_CACHE_HOME=$harness_home/.cache"
+    "XDG_RUNTIME_DIR=$harness_home/.runtime"
+    "DBUS_SESSION_BUS_ADDRESS=unix:path=$harness_home/.runtime/bus"
+    "TMPDIR=$harness_home/tmp"
+  )
+  mkdir -p "$harness_home/.config" "$harness_home/.local/share" "$harness_home/.cache" \
+           "$harness_home/.runtime" "$harness_home/tmp"
+}
+
+# Run the CLI under that environment. The operator's credential seed, when
+# the runner exported one for this harness, is sourced INSIDE the child: its
+# values reach the CLI and never reach a command line, a log or this shell.
+claude_exec() { # $@ the CLI and its arguments
+  local seed="${LAB_CREDENTIAL_SEED:-}/$adapter_name/env"
+  if [ -f "$seed" ]; then
+    timeout "$timeout_s" env -i "${CLAUDE_ENV[@]}" \
+      sh -c 'set -a; . "$1"; set +a; shift; exec "$@"' _ "$seed" "$@"
+  else
+    timeout "$timeout_s" env -i "${CLAUDE_ENV[@]}" "$@"
+  fi
+}
 
 _libdir="$(cd "$(dirname "${BASH_SOURCE[0]}")/../lib" && pwd)"
 # shellcheck source=../lib/common.sh
@@ -110,9 +158,10 @@ adapter_ran() {
 # operator, whose default mode would otherwise prompt and hang.
 adapter_run_activation() { # $1 workdir  $2 prompt  $3 stream  $4 extra flags...
   local wd="$1" prompt="$2" stream="$3"; shift 3
+  claude_env
   # --max-turns bounds a run that never reaches the expected skill; without it a
   # miss burns a full session instead of stopping.
-  ( cd "$wd" && exec timeout "$timeout_s" env CLAUDE_CONFIG_DIR="$harness_home" claude -p "$prompt" \
+  ( cd "$wd" && claude_exec claude -p "$prompt" \
       --output-format stream-json --verbose "$@" \
       --max-turns "${maxturns:-6}" \
        --tools "Skill,Read,Glob,Grep" \
@@ -154,9 +203,10 @@ adapter_model_flags() {
 # run happens in a disposable fixture copy under /tmp, never in this repo.
 adapter_run_behavioral() { # $1 workdir  $2 opening file  $3 stream
   local plugin=() model=()
+  claude_env
   [ -n "${plugin_dir:-}" ] && plugin=(--plugin-dir "$plugin_dir")
   mapfile -t model < <(adapter_model_flags)
-  ( cd "$1" && exec timeout "$timeout_s" env CLAUDE_CONFIG_DIR="$harness_home" claude -p "$(cat "$2")" \
+  ( cd "$1" && claude_exec claude -p "$(cat "$2")" \
       --output-format stream-json --verbose \
       ${plugin[@]+"${plugin[@]}"} ${model[@]+"${model[@]}"} \
       --allowedTools Skill Read Glob Grep Write Edit Bash TodoWrite \
@@ -170,9 +220,10 @@ adapter_continue_behavioral() { # $1 workdir  $2 prompt  $3 new stream  $4 prior
   local wd="$1" prompt="$2" out="$3" prior="$4" session_id plugin=() model=()
   session_id="$(jq -r 'select(.session_id? != null) | .session_id' "$prior" 2>/dev/null | head -1)"
   [ -n "$session_id" ] || { echo "Claude stream contains no resumable session id" >&2; return 2; }
+  claude_env
   [ -n "${plugin_dir:-}" ] && plugin=(--plugin-dir "$plugin_dir")
   mapfile -t model < <(adapter_model_flags)
-  ( cd "$wd" && exec timeout "$timeout_s" env CLAUDE_CONFIG_DIR="$harness_home" claude -p "$prompt" \
+  ( cd "$wd" && claude_exec claude -p "$prompt" \
       --resume "$session_id" \
       --output-format stream-json --verbose \
       ${plugin[@]+"${plugin[@]}"} ${model[@]+"${model[@]}"} \

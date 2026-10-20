@@ -1,4 +1,8 @@
 #!/usr/bin/env bash
+
+# Provenance: prospective contract probe
+# Clause: skills/common/yagni/SKILL.md — "Read every changed line against the Step 1 checklist."
+
 # Behavioural scenario: yagni.
 #
 # The failure this catches: an agent that reads "build the minimum" and writes
@@ -101,6 +105,12 @@ EOF
 scenario_assert() {
   local d="$1" probe_out
   cd "$d" || return 2
+  # The verdict cannot be reached without this tool. Absent, the scenario is
+  # INCONCLUSIVE: never a green, never a red.
+  command -v node >/dev/null 2>&1 || { echo "no node on PATH — inconclusive"; return 2; }
+  # The verdict cannot be reached without this tool. Absent, the scenario is
+  # INCONCLUSIVE: never a green, never a red.
+  command -v git >/dev/null 2>&1 || { echo "no git on PATH — inconclusive"; return 2; }
   local root; root="$(git rev-list --max-parents=0 HEAD 2>/dev/null | tail -1)"
 
   # --- Correctness: the tiers must actually work, whatever shape the code took.

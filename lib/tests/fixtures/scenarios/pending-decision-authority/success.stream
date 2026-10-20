@@ -1,0 +1,1 @@
+{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Skill","input":{"skill":"using-sdlc-skills"}},{"type":"text","text":"The scope section is still awaiting the maintainer's answer."}]}}

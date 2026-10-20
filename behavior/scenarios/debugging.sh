@@ -1,4 +1,8 @@
 #!/usr/bin/env bash
+
+# Provenance: prospective contract probe
+# Clause: skills/maintenance/debugging/SKILL.md — "Turn the reproduction into the regression check."
+
 # Behavioural scenario: debugging.
 #
 # The failure this catches: guess-and-patch. The symptom ("users get logged out
@@ -25,6 +29,12 @@ scenario_setup() { fixture_buggy_api "$1"; }
 scenario_assert() {
   local d="$1" added changed out rc
   cd "$d" || return 2
+  # The verdict cannot be reached without this tool. Absent, the scenario is
+  # INCONCLUSIVE: never a green, never a red.
+  command -v node >/dev/null 2>&1 || { echo "no node on PATH — inconclusive"; return 2; }
+  # The verdict cannot be reached without this tool. Absent, the scenario is
+  # INCONCLUSIVE: never a green, never a red.
+  command -v git >/dev/null 2>&1 || { echo "no git on PATH — inconclusive"; return 2; }
   added="$(added_since_baseline "$d")"
   changed="$( { git diff --name-only HEAD 2>/dev/null; \
                 git diff --name-only "$(git rev-list --max-parents=0 HEAD | tail -1)" HEAD 2>/dev/null; } \

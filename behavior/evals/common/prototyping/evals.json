@@ -4,7 +4,7 @@
   "evals": [
     {
       "id": "tax-spike",
-      "prompt": "I am not sure the region-code normalization in ~/work/checkout-api actually fixes lowercase regions end to end. Spike it: throwaway proof, quick and dirty, we will throw it away.",
+      "prompt": "I am not sure the region-code normalization in this repo actually fixes lowercase regions end to end. Spike it: throwaway proof, quick and dirty, we will throw it away.",
       "expected_output": "A minimal throwaway that exercises the lowercase-region path and reports the observed behavior — clearly marked disposable, no production wiring, no cleanup owed beyond deletion.",
       "assertions": []
     },

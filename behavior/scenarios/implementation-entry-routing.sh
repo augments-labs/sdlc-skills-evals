@@ -1,4 +1,11 @@
 #!/usr/bin/env bash
+
+# Provenance: prospective contract probe
+# Clause: skills/common/using-sdlc-skills/SKILL.md — "`test-driven-development` and `yagni` before the first edit."
+# Note: the run this scenario grew out of was not recorded under results/,
+# so it is this scenario's history and not its evidence; the probe stands on
+# the clause above.
+
 # Behavioural scenario: does routing hold at the IMPLEMENTATION ENTRY boundary?
 #
 # Scope, so the name does not overclaim: this judges exactly one boundary — the
@@ -9,7 +16,9 @@
 #
 # The failure it guards was observed, not imagined: in a real session on this
 # repository the agent read a task, skipped routing entirely, and went straight
-# to editing. A PreToolUse hook caught it — real enforcement, but it existed
+# to editing. That session was not recorded under `results/`, so it is this
+# scenario's history and not its evidence. A PreToolUse hook caught it — real
+# enforcement, but it existed
 # because the session-start injection was a ~90-token POINTER asking for a
 # discretionary tool call, and a discretionary call gets skipped.
 #

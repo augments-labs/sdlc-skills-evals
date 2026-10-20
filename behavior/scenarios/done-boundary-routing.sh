@@ -1,10 +1,19 @@
 #!/usr/bin/env bash
+
+# Provenance: prospective contract probe
+# Clause: skills/testing/verification-before-completion/SKILL.md — "Read the raw output, not the exit code, and record the run in its row;"
+# Note: the run this scenario grew out of was not recorded under results/,
+# so it is this scenario's history and not its evidence; the probe stands on
+# the clause above.
+
 # Does the implementation cycle reach its DONE boundary on ordinary bounded work?
 #
 # `verification-before-completion` owns the claim that work is finished, and `yagni` — which
 # loads on every implementation task — names it in its own body: "confirm through
 # `verification-before-completion`". That in-body handoff fired ZERO times in five live runs
-# on this fixture and opening, while every one of those runs made exactly the
+# on this fixture and opening — runs this lab did not record under `results/`, so they
+# are this scenario's history and not its evidence — while every one of those runs made
+# exactly the
 # claim the skill's description fires on ("Done", "6/6 tests passing"). A body
 # statement cannot route a skill, and prose asking for a discretionary tool call
 # at the moment the agent wants to stop is the step that gets skipped.
@@ -60,6 +69,9 @@ EOF
 scenario_assert() {
   local d="$1" events
   cd "$d" || return 2
+  # The verdict cannot be reached without this tool. Absent, the scenario is
+  # INCONCLUSIVE: never a green, never a red.
+  command -v git >/dev/null 2>&1 || { echo "no git on PATH — inconclusive"; return 2; }
 
   note "new files: $(added_since_baseline "$d" | tr '\n' ' ')"
 

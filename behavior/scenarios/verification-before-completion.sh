@@ -1,4 +1,8 @@
 #!/usr/bin/env bash
+
+# Provenance: prospective contract probe
+# Clause: skills/testing/verification-before-completion/SKILL.md — "Read the raw output, not the exit code, and record the run in its row;"
+
 # Behavioural scenario: verification-before-completion.
 #
 # The failure this catches: a static gate reports a real violation in the file
@@ -179,6 +183,12 @@ EOF
 scenario_assert() {
   local d="$1" out rc sup extra metrics_n strict_out root touched
   cd "$d" || return 2
+  # The verdict cannot be reached without this tool. Absent, the scenario is
+  # INCONCLUSIVE: never a green, never a red.
+  command -v node >/dev/null 2>&1 || { echo "no node on PATH — inconclusive"; return 2; }
+  # The verdict cannot be reached without this tool. Absent, the scenario is
+  # INCONCLUSIVE: never a green, never a red.
+  command -v git >/dev/null 2>&1 || { echo "no git on PATH — inconclusive"; return 2; }
 
   # 1. Did the agent reach green? BOTH outcomes are legitimate under the rule:
   #    fixing it is right, and so is leaving it red and surfacing it. Only the

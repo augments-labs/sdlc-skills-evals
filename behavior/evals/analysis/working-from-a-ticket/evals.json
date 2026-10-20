@@ -1,0 +1,24 @@
+{
+  "skill_name": "working-from-a-ticket",
+  "pending_first_run": true,
+  "evals": [
+    {
+      "id": "ticket-pasted",
+      "prompt": "Here is the ticket for this work — INV-142, and the tracker copy is at docs/tickets/INV-142.md. Capture it: its text and acceptance criteria as written, and what it leaves unclear. Don't build anything yet.",
+      "expected_output": "A capture written to .sdlc-skills/briefs/2026-10-13-inv-142-ticket.md (identifier lowercased, runs of other characters collapsed to one dash) holding the ticket's text and each acceptance criterion copied as written — including \"An invite link stops working 7 days after it was sent.\" with its \"no clock stated, no timezone stated\" note and the seat-cap criterion whose consequence on the 26th invite is unstated — plus one Unclear line per point the ticket and the code together do not settle (whether an unaccepted invite can be revoked, which clock the 7 days runs on), a ledger row carrying the capture's identity, the state captured and the source and read time, and no requirement of its own written into it.",
+      "assertions": []
+    },
+    {
+      "id": "ticket-unreadable",
+      "prompt": "The ticket for this work is PLAT-2290 in the tracker. I don't have a tracker tool here. Capture it so the plan and the tests bind to the ticket's text.",
+      "expected_output": "Stops reading and asks once, in the skill's own shape: that PLAT-2290 cannot be read from here and why, then the three ways forward — paste the ticket with its acceptance criteria and comments, name a tool or path it may read it through, or continue from what was read so far, recorded as partial — and ends the turn. No capture is written from memory, from a similar ticket or from the title alone, and no requirement is invented to fill the gap.",
+      "assertions": []
+    },
+    {
+      "id": "ticket-changed",
+      "prompt": "We captured INV-142 yesterday and built against it. The tracker now says the seat cap is 50, not 25, and there is a new comment. Before we call this done, re-read the ticket.",
+      "expected_output": "Re-reads the ticket the way the capture was read, finds that the criteria differ, and writes a successor capture in its own new file naming the predecessor, adding a superseded row to the predecessor's ledger and returning to the handoff step. It does not edit the capture in place, and it does not quietly widen the seat cap to 50 and call the ticket satisfied — the changed criterion is a difference, and the done condition follows the ticket's current text.",
+      "assertions": []
+    }
+  ]
+}

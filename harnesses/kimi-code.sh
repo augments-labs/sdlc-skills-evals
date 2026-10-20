@@ -4,6 +4,19 @@
 # plugin_dir, harness_home) are set by the runner sourcing this file.
 # Kimi Code CLI adapter. Sourced by the runners under tests/ — behavioural,
 # plugin-smoke, and trigger-eval — never executed directly.
+#
+# ISOLATION. Every launch runs under an environment this file builds
+# explicitly (kimi_env): the throwaway home, the CLI's own KIMI_CODE_HOME —
+# which is where the credentials and the installed plugin live — the XDG
+# directories inside the throwaway home, a runtime directory and a dead
+# session-bus socket inside it. The operator's environment is NOT inherited:
+# it carries the operator's own session bus, their SSH agent, their IDE
+# tokens and their credential helpers, and a launch that inherited them
+# could read the operator's stored credentials. The one exception is the
+# operator's credential seed ($LAB_CREDENTIAL_SEED/kimi-code/env), which the
+# runner exports for a harness whose auth is environmental: it is sourced
+# INSIDE the child process, so its values reach the CLI and never reach a
+# command line, a log or this shell.
 
 adapter_name='kimi-code'
 
@@ -15,6 +28,35 @@ permission_flags="--output-format stream-json"
 capabilities="subagent-loads-skills=yes(documentation) nesting-depth=unknown(documentation) tier-settable=no(run) session-start-event=unknown(documentation) post-compaction-event=unknown(documentation)"
 
 source_kimi_home="${KIMI_CODE_HOME:-${HOME:-}/.kimi-code}"
+
+# THE LAUNCH ENVIRONMENT, built explicitly (see the header).
+kimi_env() {
+  KIMI_ENV=(
+    "PATH=$PATH"
+    "HOME=$harness_home"
+    "KIMI_CODE_HOME=$harness_home"
+    "XDG_CONFIG_HOME=$harness_home/.config"
+    "XDG_DATA_HOME=$harness_home/.local/share"
+    "XDG_CACHE_HOME=$harness_home/.cache"
+    "XDG_RUNTIME_DIR=$harness_home/.runtime"
+    "DBUS_SESSION_BUS_ADDRESS=unix:path=$harness_home/.runtime/bus"
+    "TMPDIR=$harness_home/tmp"
+  )
+  mkdir -p "$harness_home/.config" "$harness_home/.local/share" "$harness_home/.cache" \
+           "$harness_home/.runtime" "$harness_home/tmp"
+}
+
+# Run the CLI under that environment, with the operator's credential seed
+# sourced inside the child when there is one.
+kimi_exec() { # $@ the CLI and its arguments
+  local seed="${LAB_CREDENTIAL_SEED:-}/$adapter_name/env"
+  if [ -f "$seed" ]; then
+    timeout "$timeout_s" env -i "${KIMI_ENV[@]}" \
+      sh -c 'set -a; . "$1"; set +a; shift; exec "$@"' _ "$seed" "$@"
+  else
+    timeout "$timeout_s" env -i "${KIMI_ENV[@]}" "$@"
+  fi
+}
 
 _libdir="$(cd "$(dirname "${BASH_SOURCE[0]}")/../lib" && pwd)"
 # shellcheck source=../lib/common.sh
@@ -108,15 +150,17 @@ adapter_prompt_suffix() { :; }
 # an absolute path outside that directory is not prevented by anything here.
 # Do not point this adapter at a directory whose contents matter.
 adapter_run_activation() { # $1 workdir  $2 prompt  $3 stream
-  ( cd "$1" && exec timeout "$timeout_s" env KIMI_CODE_HOME="$harness_home" \
-      kimi -p "$2" --output-format stream-json ) < /dev/null > "$3" 2>>"$errlog"
+  kimi_env
+  ( cd "$1" && kimi_exec kimi -p "$2" --output-format stream-json ) \
+    < /dev/null > "$3" 2>>"$errlog"
 }
 
 adapter_activation_flags() { :; }
 
 adapter_run_behavioral() { # $1 workdir  $2 opening file  $3 stream
-  ( cd "$1" && exec timeout "$timeout_s" env KIMI_CODE_HOME="$harness_home" \
-      kimi -p "$(cat "$2")" --output-format stream-json ) < /dev/null > "$3" 2>>"$errlog"
+  kimi_env
+  ( cd "$1" && kimi_exec kimi -p "$(cat "$2")" --output-format stream-json ) \
+    < /dev/null > "$3" 2>>"$errlog"
 }
 
 # Continue a multi-turn behavioural session through Kimi's structured resume
@@ -127,8 +171,8 @@ adapter_continue_behavioral() { # $1 workdir  $2 prompt  $3 new stream  $4 prior
   session_id="$(jq -r 'select(.role == "meta" and .type == "session.resume_hint")
                        | .session_id // empty' "$prior" 2>/dev/null | tail -1)"
   [ -n "$session_id" ] || { echo "Kimi stream contains no resumable session id" >&2; return 2; }
-  ( cd "$wd" && exec timeout "$timeout_s" env KIMI_CODE_HOME="$harness_home" \
-      kimi --session "$session_id" -p "$prompt" --output-format stream-json \
+  kimi_env
+  ( cd "$wd" && kimi_exec kimi --session "$session_id" -p "$prompt" --output-format stream-json \
     ) < /dev/null > "$out" 2>>"$errlog"
 }
 

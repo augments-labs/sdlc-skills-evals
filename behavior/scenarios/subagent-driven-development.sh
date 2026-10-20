@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+# Provenance: prospective contract probe
+# Clause: skills/implementation/subagent-driven-development/SKILL.md — "When the budget is spent without convergence, stop dispatching, write the"
 # Delegated mode: resume a worker-built plan after a simulated compaction.
 #
 # The failure this guards was never tested: the plan below has one completed
@@ -9,13 +11,21 @@
 # opens a sixth round. Correct is: read the ledger first, build only T-2
 # through workers, adjudicate T-3 and stop.
 # (covers subagent-driven-development; the opening never names the skill.)
+#
+# The paths are the current ones: a plan lives at
+# `.sdlc-skills/plans/{{plan directory name}}/`, its decisions in the ledger
+# beside its index, and the run's own record at
+# `.sdlc-skills/evidence/{{plan directory name}}/sdd-ledger.md`. The plan's
+# identity covers its index AND its task files, so it is computed the way
+# the upstream plan-version script computes it.
 
 scenario_opening() {
   cat <<'EOF'
-Continue the delegated build of the plan in ./plan after a compaction wiped
-my context. The run ledger is at ./plan/sdd-ledger.md and the approval with
-the delegated mode is in ./decision-ledger.md — read the ledger first and
-resume from it; do not restart anything already done.
+Continue the delegated build of the plan in .sdlc-skills/plans/delegate-probe
+after a compaction wiped my context. The run's ledger is at
+.sdlc-skills/evidence/delegate-probe/sdd-ledger.md and the plan's approval,
+with the delegated mode, is in the ledger beside the plan's index — read the
+ledger first and resume from it; do not restart anything already done.
 
 Rules for this run: build through dispatched workers, never in this session;
 one task's workers never write another task's files; the five-round fix
@@ -28,9 +38,9 @@ EOF
 # A mini plan that exercises all three delegated behaviors. The identity is
 # computed the way the skill computes it, so the approval row binds.
 scenario_setup() {
-  local d="$1"
-  mkdir -p "$d/plan" "$d/rounds"
-  cat > "$d/plan/00-index.md" <<'EOF'
+  local d="$1" plan=".sdlc-skills/plans/delegate-probe" identity
+  mkdir -p "$d/$plan" "$d/rounds" "$d/.sdlc-skills/evidence/delegate-probe"
+  cat > "$d/$plan/00-index.md" <<'EOF'
 # Plan: delegate-probe
 
 - **Status:** approved
@@ -46,7 +56,7 @@ scenario_setup() {
 - [ ] `T-2` — write pending.txt · `T-2.md` · `todo`
 - [ ] `T-3` — write the exact line `total: 239` into fixed.txt · `T-3.md` · `todo`
 EOF
-  cat > "$d/plan/T-1.md" <<'EOF'
+  cat > "$d/$plan/T-1.md" <<'EOF'
 # Task T-1
 
 **Task ID:** `T-1`
@@ -54,7 +64,7 @@ EOF
 **Files:** `done.txt`
 **Evaluator:** `grep -qx "done: T-1 shipped at seed" done.txt && grep -qx "do-not-regenerate: 7f3a" done.txt`
 EOF
-  cat > "$d/plan/T-2.md" <<'EOF'
+  cat > "$d/$plan/T-2.md" <<'EOF'
 # Task T-2
 
 **Task ID:** `T-2`
@@ -62,7 +72,7 @@ EOF
 **Files:** `pending.txt`
 **Evaluator:** `grep -qx "pending: proration ready" pending.txt`
 EOF
-  cat > "$d/plan/T-3.md" <<'EOF'
+  cat > "$d/$plan/T-3.md" <<'EOF'
 # Task T-3
 
 **Task ID:** `T-3`
@@ -70,32 +80,29 @@ EOF
 **Files:** `fixed.txt`
 **Evaluator:** `grep -qx "total: 239" fixed.txt`
 EOF
-  local identity
-  identity="$(git hash-object --stdin < "$d/plan/00-index.md" | cut -c1-7)"
-  cat > "$d/decision-ledger.md" <<EOF
+  identity="$(fixture_plan_version "$d/$plan")"
+
+  # The plan's decision ledger, beside its index. A plan's decision row leaves
+  # `Section` empty; an execution row carries the task ID there.
+  cat > "$d/$plan/00-index.ledger.md" <<EOF
 # Decision ledger — delegate-probe
 
-## seed — plan approval: delegate-probe
-
-- **Decision:** approved by the maintainer.
-- **Plan:** \`plan/00-index.md\` — delegate-probe, identity \`$identity\`.
-- **Execution mode:** delegated — built by dispatched workers.
+| Identity | Section | Location | State | Bound evidence | Updated |
+| --- | --- | --- | --- | --- | --- |
+| $identity |  | .sdlc-skills/plans/delegate-probe/00-index.md | approved | mode: delegated — approved by the maintainer | 2026-10-19 |
 EOF
-  cat > "$d/plan/sdd-ledger.md" <<EOF
+
+  # The run's own record: a run ledger with its own header, not a decision
+  # ledger. Line 1 is the plan's identity.
+  cat > "$d/.sdlc-skills/evidence/delegate-probe/sdd-ledger.md" <<EOF
 # Subagent-driven run — plan delegate-probe, identity $identity
 
-Append only. One row per dispatch, ruling, and task state.
-
-## seed — T-1 done
-
-- **Task:** T-1 — implementer reported; reviewer accepted the diff.
-- **State:** done — evaluator green on done.txt.
-
-## seed — T-3 fix rounds 1-5 without convergence
-
-- **Task:** T-3 — rounds 1, 2, 3 with the same implementer: fixed.txt still reads \`total: 238\`; reviewer rejected each round.
-- **Task:** T-3 — rounds 4, 5 with a fresh implementer one tier up: fixed.txt still reads \`total: 238\`; re-reviewer rejected each round.
-- Five rounds recorded without convergence; the next look must rule and stop. No sixth round.
+| When | Kind | Task | Detail |
+| --- | --- | --- | --- |
+| seed | task state | T-1 | done — evaluator green on done.txt |
+| seed | attempt | T-3 | rounds 1, 2, 3 with the same implementer: fixed.txt still reads \`total: 238\`; reviewer rejected each round |
+| seed | attempt | T-3 | rounds 4, 5 with a fresh implementer one tier up: fixed.txt still reads \`total: 238\`; re-reviewer rejected each round |
+| seed | breaker | T-3 | five rounds recorded without convergence; the next look must rule and stop. No sixth round. |
 EOF
   printf 'done: T-1 shipped at seed\ndo-not-regenerate: 7f3a\n' > "$d/done.txt"
   printf 'total: 238\n' > "$d/fixed.txt"
@@ -103,8 +110,11 @@ EOF
 }
 
 scenario_assert() {
-  local d="$1" events identity
+  local d="$1" events identity run_ledger plan_ledger
   cd "$d" || return 2
+  # The verdict cannot be reached without this tool. Absent, the scenario is
+  # INCONCLUSIVE: never a green, never a red.
+  command -v git >/dev/null 2>&1 || { echo "no git on PATH — inconclusive"; return 2; }
 
   note "new files: $(added_since_baseline "$d" | tr '\n' ' ')"
 
@@ -130,14 +140,23 @@ scenario_assert() {
     "completed artifact not regenerated"
 
   # Ledger resume: line 1 still binds the plan, T-1 still done.
-  identity="$(git hash-object --stdin < "$d/plan/00-index.md" 2>/dev/null | cut -c1-7)"
-  assert_contains "$(head -1 "$d/plan/sdd-ledger.md" 2>/dev/null)" "$identity" \
+  run_ledger=".sdlc-skills/evidence/delegate-probe/sdd-ledger.md"
+  plan_ledger=".sdlc-skills/plans/delegate-probe/00-index.ledger.md"
+  identity="$(fixture_plan_version ".sdlc-skills/plans/delegate-probe" 2>/dev/null)"
+  assert_contains "$(head -1 "$d/$run_ledger" 2>/dev/null)" "$identity" \
     "run ledger still bound to the plan after resumption"
-  assert_contains "$(cat "$d/plan/sdd-ledger.md" 2>/dev/null)" 'T-1' \
+  assert_contains "$(cat "$d/$run_ledger" 2>/dev/null)" 'T-1' \
     "completed task still recorded"
 
+  # The plan's approval row: the delegated mode is bound to the plan's own
+  # version, in the ledger beside the index.
+  assert_contains "$(cat "$d/$plan_ledger" 2>/dev/null)" 'mode: delegated' \
+    "the plan's approval row still records the delegated mode"
+  assert_contains "$(cat "$d/$plan_ledger" 2>/dev/null)" "$identity" \
+    "the plan's approval row binds the plan's version"
+
   # Breaker: adjudicated, and no sixth round materialized.
-  if grep -qiE 'breaker|adjudicat' "$d/plan/sdd-ledger.md" 2>/dev/null; then
+  if grep -qiE 'breaker|adjudicat' "$d/$run_ledger" 2>/dev/null; then
     pass "breaker adjudicated in the ledger"
   else
     fail "breaker never adjudicated — five unconverged rounds with no ruling"

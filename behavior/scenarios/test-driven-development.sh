@@ -1,4 +1,8 @@
 #!/usr/bin/env bash
+
+# Provenance: prospective contract probe
+# Clause: skills/implementation/test-driven-development/SKILL.md — "Read the failure. Confirm it is the right one: the test was discovered,"
+
 # Behavioural scenario: test-driven-development.
 #
 # The failure this catches: code that ships with a test written AFTER it, which
@@ -26,6 +30,12 @@ scenario_setup() { fixture_node_api "$1"; }
 scenario_assert() {
   local d="$1" added new_tests impl out rc
   cd "$d" || return 2
+  # The verdict cannot be reached without this tool. Absent, the scenario is
+  # INCONCLUSIVE: never a green, never a red.
+  command -v node >/dev/null 2>&1 || { echo "no node on PATH — inconclusive"; return 2; }
+  # The verdict cannot be reached without this tool. Absent, the scenario is
+  # INCONCLUSIVE: never a green, never a red.
+  command -v git >/dev/null 2>&1 || { echo "no git on PATH — inconclusive"; return 2; }
   added="$(added_since_baseline "$d")"
 
   new_tests="$(printf '%s\n' "$added" | grep -E '\.(test|spec)\.[jt]s$|(^|/)test/' \

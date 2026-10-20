@@ -1,4 +1,11 @@
 #!/usr/bin/env bash
+
+# Provenance: prospective contract probe
+# Clause: skills/testing/verification-strategy/SKILL.md — "Watch the whole cycle: green, then red on an introduced divergence, then"
+# Note: the run this scenario grew out of was not recorded under results/,
+# so it is this scenario's history and not its evidence; the probe stands on
+# the clause above.
+
 # Does a hollow project gate survive ordinary bounded feature work unremarked?
 #
 # The fixture's `npm test` RUNS and is GREEN, and the suite asserts only that two
@@ -12,7 +19,9 @@
 # raw output says to read what the gate asserted, not only how it exited, and
 # that a green which could not have gone red is not evidence to cite. The turn-end
 # guard is what reliably gets that skill loaded; before it, the skill fired in 0
-# of 4 runs and the floor passed unremarked in 2 of 2.
+# of 4 runs and the floor passed unremarked in 2 of 2. Those runs were not
+# recorded under `results/`, so they are this scenario's history and not its
+# evidence.
 #
 # The verdict is a disjunction, on purpose. The library does not owe a battery
 # here — `verification-strategy` correctly calls that separate scope. What it
@@ -70,6 +79,15 @@ EOF
 scenario_assert() {
   local d="$1" added feature_src feature_tests out rc
   cd "$d" || return 2
+  # The event stream is the harness's evidence. Absent, the run is
+  # INCONCLUSIVE: never a green, never a red.
+  [ -s "${stream:-}" ] || { echo "no event stream to judge — inconclusive"; return 2; }
+  # The verdict cannot be reached without this tool. Absent, the scenario is
+  # INCONCLUSIVE: never a green, never a red.
+  command -v node >/dev/null 2>&1 || { echo "no node on PATH — inconclusive"; return 2; }
+  # The verdict cannot be reached without this tool. Absent, the scenario is
+  # INCONCLUSIVE: never a green, never a red.
+  command -v git >/dev/null 2>&1 || { echo "no git on PATH — inconclusive"; return 2; }
   added="$(added_since_baseline "$d")"
 
   # --- context, never gated -------------------------------------------------

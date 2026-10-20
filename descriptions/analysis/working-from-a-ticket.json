@@ -1,0 +1,112 @@
+[
+  {
+    "split": "train",
+    "should_trigger": true,
+    "query": "Here's INV-142 — the tracker copy is at docs/tickets/INV-142.md. Treat that ticket and its acceptance criteria as the definition of the work."
+  },
+  {
+    "split": "train",
+    "should_trigger": true,
+    "query": "JIRA-4471 is the ticket for this work. Capture what it actually says before we start."
+  },
+  {
+    "split": "train",
+    "should_trigger": true,
+    "query": "I'll paste the issue below. Take it as the definition of done and write down what it leaves unclear."
+  },
+  {
+    "split": "train",
+    "should_trigger": true,
+    "query": "Read issue #212 from the tracker and capture it, acceptance criteria and comments included."
+  },
+  {
+    "split": "train",
+    "should_trigger": true,
+    "query": "Here is the story as the tracker holds it — description, three criteria and a comment that narrows the scope. That text is the definition of done."
+  },
+  {
+    "split": "train",
+    "should_trigger": true,
+    "query": "Before we call this finished, re-read the ticket and tell me whether it still says what we built."
+  },
+  {
+    "split": "validation",
+    "should_trigger": true,
+    "query": "Our tracker ticket has a description, three acceptance criteria and a comment that contradicts the description. Capture all of it."
+  },
+  {
+    "split": "validation",
+    "should_trigger": true,
+    "query": "Use ticket ENG-99 as the brief — it is the only written statement of what this change must do."
+  },
+  {
+    "split": "validation",
+    "should_trigger": true,
+    "query": "I'm handing you the story, not the ticket. Read it as written and make that the text the work binds to."
+  },
+  {
+    "split": "validation",
+    "should_trigger": true,
+    "query": "The ticket's last comment changed the ask. Capture the ticket again and tell me what it says now."
+  },
+  {
+    "split": "train",
+    "should_trigger": false,
+    "query": "Add reporting.",
+    "expect": "clarifying-intent"
+  },
+  {
+    "split": "train",
+    "should_trigger": false,
+    "query": "The goal is settled and agreed. Write the detailed requirements for the invite flow, each with how we would verify it.",
+    "expect": "writing-specs"
+  },
+  {
+    "split": "train",
+    "should_trigger": false,
+    "query": "A brand new internal tool starts Monday and nobody has agreed the objective, the stakeholders or what success looks like.",
+    "expect": "define-goals"
+  },
+  {
+    "split": "train",
+    "should_trigger": false,
+    "query": "Objectives are signed off. Now draw the line: what ships in v1 and what explicitly waits.",
+    "expect": "scoping"
+  },
+  {
+    "split": "train",
+    "should_trigger": false,
+    "query": "Tenants with two API keys get logged out at random and nobody can see why. Find the cause before anything else.",
+    "expect": "debugging"
+  },
+  {
+    "split": "train",
+    "should_trigger": false,
+    "query": "The requirements are approved and this is a dozen steps across four services. Write the per-task plan before anyone edits a file.",
+    "expect": "writing-plans"
+  },
+  {
+    "split": "validation",
+    "should_trigger": false,
+    "query": "What's the difference between a bug and an issue? Asking for a team glossary.",
+    "expect": "none"
+  },
+  {
+    "split": "validation",
+    "should_trigger": false,
+    "query": "Our suite is green but it catches nothing about the outage. Design the checks this project should have.",
+    "expect": "verification-strategy"
+  },
+  {
+    "split": "validation",
+    "should_trigger": false,
+    "query": "It's merged and tagged. Before we cut 2.4.0 to npm, is this safe to promote?",
+    "expect": "release-readiness"
+  },
+  {
+    "split": "validation",
+    "should_trigger": false,
+    "query": "Leadership wants offline sync by Q3. Before I commit the team, can we actually deliver that?",
+    "expect": "feasibility-check"
+  }
+]

@@ -1,0 +1,5 @@
+{
+  "checkoutV2":    { "enabled": false, "rollout": 0 },
+  "asyncReceipts": { "enabled": true,  "rollout": 100 },
+  "newInvoicePdf": { "enabled": false, "rollout": 0 }
+}

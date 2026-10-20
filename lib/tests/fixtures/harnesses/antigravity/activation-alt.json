@@ -1,0 +1,5 @@
+[
+{"event":"init","conversation_id":"conv-antigravity-3","init":{"cwd":"/tmp/lab-fixture","tools":["view_file"],"permission_mode":"request-review"}},
+{"event":"step_update","step_update":{"conversation_id":"conv-antigravity-3","step_index":1,"state":"DONE","step_type":"tool_call","tool_name":"view_file","path":"/tmp/lab-home/skills/using-sdlc-skills/SKILL.md"}},
+{"event":"result","result":{"conversation_id":"conv-antigravity-3","status":"SUCCESS","response":"done","num_turns":1}}
+]

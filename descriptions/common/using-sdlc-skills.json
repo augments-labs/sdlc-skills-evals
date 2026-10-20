@@ -1,6 +1,6 @@
 [
   {"split": "train", "should_trigger": true,
-   "query": "In ~/work/billing-api the tenant session cache evicts the wrong entry when two API keys share a tenant. Find the cause and fix it."},
+   "query": "In this repo the tenant session cache evicts the wrong entry when two API keys share a tenant. Find the cause and fix it."},
   {"split": "train", "should_trigger": true,
    "query": "We settled on usage-based pricing for billing-v2 yesterday. Write the executable plan for it and run the first task."},
   {"split": "train", "should_trigger": true,

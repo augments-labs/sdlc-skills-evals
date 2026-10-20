@@ -1,0 +1,112 @@
+[
+  {
+    "split": "train",
+    "should_trigger": true,
+    "query": "Our policy requires a staged rollout for changes like this. Build the flag and the signals it needs before it ships."
+  },
+  {
+    "split": "train",
+    "should_trigger": true,
+    "query": "Add a kill switch for the new checkout path — default off, and it has to stop the background job too, not just the request."
+  },
+  {
+    "split": "train",
+    "should_trigger": true,
+    "query": "We want a canary rollout of the new pricing path. What flag do we use, and what thresholds do we watch?"
+  },
+  {
+    "split": "train",
+    "should_trigger": true,
+    "query": "Put this behind a feature flag so we can roll it out in stages, with the signals each stage reads."
+  },
+  {
+    "split": "train",
+    "should_trigger": true,
+    "query": "Release readiness blocked us: there is no rollout policy and no signals for this change. Sort both out."
+  },
+  {
+    "split": "train",
+    "should_trigger": true,
+    "query": "Add a switch that turns the new invoice path off without a deploy, and the metrics the rollout's thresholds read."
+  },
+  {
+    "split": "validation",
+    "should_trigger": true,
+    "query": "How do we roll this out to five percent and then fifty? I want the flag and the signals that decide each stage."
+  },
+  {
+    "split": "validation",
+    "should_trigger": true,
+    "query": "Build the rollout controls for the tenant migration: the flag, the guarded paths, and the kill action."
+  },
+  {
+    "split": "validation",
+    "should_trigger": true,
+    "query": "The new search index needs a staged rollout with a kill switch. Set it up before it goes out."
+  },
+  {
+    "split": "validation",
+    "should_trigger": true,
+    "query": "We need a feature flag for the pricing change and the telemetry to watch it — the release policy says a staged rollout."
+  },
+  {
+    "split": "train",
+    "should_trigger": false,
+    "query": "We cannot tell whether checkout works for users. Add the logs, the metrics and the alert that answer it.",
+    "expect": "adding-observability"
+  },
+  {
+    "split": "train",
+    "should_trigger": false,
+    "query": "We're rewriting the totals path while it serves live traffic. Plan how behaviour is preserved through cutover and recovery.",
+    "expect": "migration-strategy"
+  },
+  {
+    "split": "train",
+    "should_trigger": false,
+    "query": "It's merged and tagged. Before we cut 2.4.0 to npm, is this safe to promote?",
+    "expect": "release-readiness"
+  },
+  {
+    "split": "train",
+    "should_trigger": false,
+    "query": "Design the correctness battery this project should have — which checks catch which defects.",
+    "expect": "verification-strategy"
+  },
+  {
+    "split": "train",
+    "should_trigger": false,
+    "query": "What's the difference between a canary release and a blue-green deploy? General question.",
+    "expect": "none"
+  },
+  {
+    "split": "train",
+    "should_trigger": false,
+    "query": "The new admin endpoint lets one tenant impersonate another. Assess what an attacker can make it do.",
+    "expect": "security-audits"
+  },
+  {
+    "split": "validation",
+    "should_trigger": false,
+    "query": "The 0.4.0 deploy went out with no flag and took the site down for forty minutes. It is contained — why did our process let it out?",
+    "expect": "post-mortem"
+  },
+  {
+    "split": "validation",
+    "should_trigger": false,
+    "query": "Add the `--dry-run` flag to the import command so it prints what it would do without writing.",
+    "expect": "test-driven-development"
+  },
+  {
+    "split": "validation",
+    "should_trigger": false,
+    "query": "The feature branch is green and reviewed. Merge it and delete the branch.",
+    "expect": "finishing-a-branch"
+  },
+  {
+    "split": "validation",
+    "should_trigger": false,
+    "query": "The old `checkout_v1` metric is being renamed. Retire the old name properly — dashboards read it.",
+    "expect": "deprecating-an-api"
+  }
+]

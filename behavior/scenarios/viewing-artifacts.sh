@@ -1,4 +1,8 @@
 #!/usr/bin/env bash
+
+# Provenance: prospective contract probe
+# Clause: skills/common/viewing-artifacts/SKILL.md — "Entity-encode every artifact-derived value before inserting:"
+
 # Behavioural scenario: viewing-artifacts.
 #
 # The failure this catches: a "viewer" that fabricates state instead of
@@ -375,6 +379,12 @@ PY_STATE
 scenario_assert() {
   local d="$1" page html base mut untracked nviews
   cd "$d" || return 2
+  # The verdict cannot be reached without this tool. Absent, the scenario is
+  # INCONCLUSIVE: never a green, never a red.
+  command -v python3 >/dev/null 2>&1 || { echo "no python3 on PATH — inconclusive"; return 2; }
+  # The verdict cannot be reached without this tool. Absent, the scenario is
+  # INCONCLUSIVE: never a green, never a red.
+  command -v git >/dev/null 2>&1 || { echo "no git on PATH — inconclusive"; return 2; }
   page=".sdlc-skills/views/index.html"
 
   if [ ! -f "$page" ]; then

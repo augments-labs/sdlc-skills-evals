@@ -1,4 +1,8 @@
 #!/usr/bin/env bash
+
+# Provenance: prospective contract probe
+# Clause: skills/testing/verification-strategy/SKILL.md — "Watch the whole cycle: green, then red on an introduced divergence, then"
+
 # Behavioural scenario: verification-strategy.
 #
 # The failure this catches: an agent that can *describe* a verification battery
@@ -28,6 +32,12 @@ scenario_setup() { fixture_node_api "$1"; }
 scenario_assert() {
   local d="$1" added new_tests out rc
   cd "$d" || return 2
+  # The verdict cannot be reached without this tool. Absent, the scenario is
+  # INCONCLUSIVE: never a green, never a red.
+  command -v node >/dev/null 2>&1 || { echo "no node on PATH — inconclusive"; return 2; }
+  # The verdict cannot be reached without this tool. Absent, the scenario is
+  # INCONCLUSIVE: never a green, never a red.
+  command -v git >/dev/null 2>&1 || { echo "no git on PATH — inconclusive"; return 2; }
   added="$(added_since_baseline "$d")"
 
   # 1. An acceptance layer exists — new test files beyond the fixture's own.
