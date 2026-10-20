@@ -112,6 +112,9 @@ EOF
 scenario_assert() {
   local d="$1"
   cd "$d" || return 2
+  # The verdict cannot be reached without this tool. Absent, the scenario is
+  # INCONCLUSIVE: never a green, never a red.
+  command -v git >/dev/null 2>&1 || { echo "no git on PATH — inconclusive"; return 2; }
   [ -s "${stream:-}" ] || { echo "no event stream to judge — inconclusive"; return 2; }
 
   local brief=".sdlc-skills/briefs/2026-02-10-rate-limiting.md"

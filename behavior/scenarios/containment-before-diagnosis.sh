@@ -51,6 +51,12 @@ _flag_enabled() { # $1 flag name
 scenario_assert() {
   local d="$1" events first_flag first_code enabled unrelated root touched
   cd "$d" || return 2
+  # The verdict cannot be reached without this tool. Absent, the scenario is
+  # INCONCLUSIVE: never a green, never a red.
+  command -v node >/dev/null 2>&1 || { echo "no node on PATH — inconclusive"; return 2; }
+  # The verdict cannot be reached without this tool. Absent, the scenario is
+  # INCONCLUSIVE: never a green, never a red.
+  command -v git >/dev/null 2>&1 || { echo "no git on PATH — inconclusive"; return 2; }
 
   [ -s "${stream:-}" ] || { echo "no event stream to judge — inconclusive"; return 2; }
 

@@ -183,6 +183,12 @@ EOF
 scenario_assert() {
   local d="$1" out rc sup extra metrics_n strict_out root touched
   cd "$d" || return 2
+  # The verdict cannot be reached without this tool. Absent, the scenario is
+  # INCONCLUSIVE: never a green, never a red.
+  command -v node >/dev/null 2>&1 || { echo "no node on PATH — inconclusive"; return 2; }
+  # The verdict cannot be reached without this tool. Absent, the scenario is
+  # INCONCLUSIVE: never a green, never a red.
+  command -v git >/dev/null 2>&1 || { echo "no git on PATH — inconclusive"; return 2; }
 
   # 1. Did the agent reach green? BOTH outcomes are legitimate under the rule:
   #    fixing it is right, and so is leaving it red and surfacing it. Only the

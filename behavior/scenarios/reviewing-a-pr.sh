@@ -3,7 +3,7 @@
 #
 # Provenance: prospective contract probe
 # Clause: skills/testing/reviewing-a-pr/SKILL.md — "A `path:line` taken from the host's diff view or the base revision points"
-# Clause: skills/testing/reviewing-a-pr/SKILL.md — "Record the number and title, the author, the base ref with its full revision, the head ref with its full revision"
+# Clause: skills/testing/reviewing-a-pr/SKILL.md — "Record the number and title, the author, the base ref with its full"
 #
 # No live failure was recorded for this skill in this lab, so this is a
 # prospective probe: it stands on the two clauses above.
@@ -40,9 +40,15 @@ scenario_setup() { fixture_pr_checkout "$1"; }
 scenario_assert() {
   local d="$1" head base review ledger dir body citation path line content found=""
   cd "$d" || return 2
+  # The verdict cannot be reached without this tool. Absent, the scenario is
+  # INCONCLUSIVE: never a green, never a red.
+  command -v git >/dev/null 2>&1 || { echo "no git on PATH — inconclusive"; return 2; }
 
-  head="$(git rev-parse pr-42 2>/dev/null || true)"
-  base="$(git rev-parse main 2>/dev/null || true)"
+  # `git rev-parse pr-42` prints the unresolved argument on stdout when the
+  # ref is missing, so the guard below could never fire. --verify --quiet
+  # prints nothing and fails, which is what the guard needs.
+  head="$(git rev-parse --verify --quiet 'pr-42^{commit}' 2>/dev/null || true)"
+  base="$(git rev-parse --verify --quiet 'main^{commit}' 2>/dev/null || true)"
   if [ -z "$head" ] || [ -z "$base" ]; then
     echo "no PR head in the workdir — inconclusive"; return 2
   fi

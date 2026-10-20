@@ -3,7 +3,7 @@
 #
 # Provenance: prospective contract probe
 # Clause: skills/analysis/working-from-a-ticket/SKILL.md — "Copy each acceptance criterion as written, informal or partial ones"
-# Clause: skills/analysis/working-from-a-ticket/SKILL.md — "Search the codebase before listing a point as unclear; never list what the code answers."
+# Clause: skills/analysis/working-from-a-ticket/SKILL.md — "Search the codebase before listing a point as unclear; never list what the"
 #
 # No live failure was recorded for this skill in this lab, so this is a
 # prospective probe: it stands on the two clauses above, and the check that
@@ -42,6 +42,9 @@ scenario_setup() { fixture_ticket_capture "$1"; }
 scenario_assert() {
   local d="$1" capture ledger body unclear criteria identity row
   cd "$d" || return 2
+  # The verdict cannot be reached without this tool. Absent, the scenario is
+  # INCONCLUSIVE: never a green, never a red.
+  command -v git >/dev/null 2>&1 || { echo "no git on PATH — inconclusive"; return 2; }
 
   # 1. THE CAPTURE EXISTS. Its absence is the deliverable missing, not a
   #    paraphrase — the two failures are reported differently on purpose.

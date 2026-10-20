@@ -79,6 +79,15 @@ EOF
 scenario_assert() {
   local d="$1" added feature_src feature_tests out rc
   cd "$d" || return 2
+  # The event stream is the harness's evidence. Absent, the run is
+  # INCONCLUSIVE: never a green, never a red.
+  [ -s "${stream:-}" ] || { echo "no event stream to judge — inconclusive"; return 2; }
+  # The verdict cannot be reached without this tool. Absent, the scenario is
+  # INCONCLUSIVE: never a green, never a red.
+  command -v node >/dev/null 2>&1 || { echo "no node on PATH — inconclusive"; return 2; }
+  # The verdict cannot be reached without this tool. Absent, the scenario is
+  # INCONCLUSIVE: never a green, never a red.
+  command -v git >/dev/null 2>&1 || { echo "no git on PATH — inconclusive"; return 2; }
   added="$(added_since_baseline "$d")"
 
   # --- context, never gated -------------------------------------------------

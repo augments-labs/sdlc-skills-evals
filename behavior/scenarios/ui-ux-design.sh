@@ -56,6 +56,9 @@ EOF
 scenario_assert() {
   local d="$1" section visuals nvariants html
   cd "$d" || return 2
+  # The verdict cannot be reached without this tool. Absent, the scenario is
+  # INCONCLUSIVE: never a green, never a red.
+  command -v jq >/dev/null 2>&1 || { echo "no jq on PATH — inconclusive"; return 2; }
 
   section="$(ls .sdlc-skills/designs/*.md 2>/dev/null | head -1)"
   if [ -n "$section" ]; then

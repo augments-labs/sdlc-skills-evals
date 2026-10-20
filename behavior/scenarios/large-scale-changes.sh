@@ -3,8 +3,8 @@
 #
 # Provenance: prospective contract probe
 # Clause: skills/maintenance/large-scale-changes/SKILL.md — "Split by the project's ownership file, or by package when there is none."
-# Clause: skills/maintenance/large-scale-changes/SKILL.md — "Instead of one shard per directory or per file, make one per owner: a reviewer handed ten shards approves none of them."
-# Clause: skills/maintenance/large-scale-changes/SKILL.md — "Write the transformation as one sentence ... List the paths it never touches: generated, vendored, and lockfile paths, each with the tool that regenerates it."
+# Clause: skills/maintenance/large-scale-changes/SKILL.md — "Instead of one shard per directory or per file, make one per owner: a"
+# Clause: skills/maintenance/large-scale-changes/SKILL.md — "Write the transformation as one sentence: from what, to what, over which"
 #
 # No live failure was recorded for this skill in this lab, so this is a
 # prospective probe: it stands on the three clauses above.
@@ -37,6 +37,12 @@ scenario_setup() { fixture_owned_packages "$1"; }
 scenario_assert() {
   local d="$1" manifest body shards excluded notcovered script rows owners
   cd "$d" || return 2
+  # The verdict cannot be reached without this tool. Absent, the scenario is
+  # INCONCLUSIVE: never a green, never a red.
+  command -v node >/dev/null 2>&1 || { echo "no node on PATH — inconclusive"; return 2; }
+  # The verdict cannot be reached without this tool. Absent, the scenario is
+  # INCONCLUSIVE: never a green, never a red.
+  command -v git >/dev/null 2>&1 || { echo "no git on PATH — inconclusive"; return 2; }
 
   # 1. THE SWEEP REACHED EVERY SOURCE FILE, AND LEFT THE GENERATED ONE.
   local stale

@@ -3,8 +3,8 @@
 #
 # Provenance: prospective contract probe
 # Clause: skills/design/reviewing-plans/SKILL.md — "Print the plan's version with the `plan-version.sh` script that"
-# Clause: skills/design/reviewing-plans/SKILL.md — "A finding that cites no task ID, section, or `path:line`: record it as `not a finding: uncited`."
-# Clause: skills/design/reviewing-plans/SKILL.md — "This review is void when the plan's printed version changes."
+# Clause: skills/design/reviewing-plans/SKILL.md — "A finding that cites no task ID, section, or `path:line`: record it as"
+# Clause: skills/design/reviewing-plans/assets/plan-reviewer.md — "This review is void"
 #
 # No live failure was recorded for this skill in this lab, so this is a
 # prospective probe: it stands on the three clauses above.
@@ -39,6 +39,9 @@ scenario_setup() { fixture_reviewable_plan "$1"; }
 scenario_assert() {
   local d="$1" plan report version dir finding
   cd "$d" || return 2
+  # The verdict cannot be reached without this tool. Absent, the scenario is
+  # INCONCLUSIVE: never a green, never a red.
+  command -v git >/dev/null 2>&1 || { echo "no git on PATH — inconclusive"; return 2; }
 
   plan=".sdlc-skills/plans/2026-10-19-tenant-rollout"
   if [ ! -d "$plan" ]; then

@@ -3,8 +3,8 @@
 #
 # Provenance: prospective contract probe
 # Clause: skills/implementation/adding-observability/SKILL.md — "A counter incremented only on failure has no series until the first"
-# Clause: skills/implementation/adding-observability/SKILL.md — "Never a user id, request id, raw URL path, email, or error message text."
-# Clause: skills/implementation/adding-observability/SKILL.md — "Write each alert on a user-facing symptom ... with an owner and the first action the owner takes."
+# Clause: skills/implementation/adding-observability/SKILL.md — "Never a user id, request id, raw URL"
+# Clause: skills/implementation/adding-observability/SKILL.md — "Write each alert on a user-facing symptom"
 #
 # No live failure was recorded for this skill in this lab, so this is a
 # prospective probe: it stands on the three clauses above.
@@ -36,15 +36,17 @@ EOF
 scenario_setup() { fixture_observable_service "$1"; }
 
 scenario_assert() {
-  local d="$1" added out keys alert owner action symptom
+  local d="$1" out keys alert owner action symptom
   cd "$d" || return 2
-  added="$(added_since_baseline "$d")"
+  # The verdict cannot be reached without this tool. Absent, the scenario is
+  # INCONCLUSIVE: never a green, never a red.
+  command -v node >/dev/null 2>&1 || { echo "no node on PATH — inconclusive"; return 2; }
+  # The verdict cannot be reached without this tool. Absent, the scenario is
+  # INCONCLUSIVE: never a green, never a red.
+  command -v jq >/dev/null 2>&1 || { echo "no jq on PATH — inconclusive"; return 2; }
 
   # 1. A SIGNAL ON THE SUCCESS PATH. The call is made once and succeeds; a
   #    counter that only moves on failure emits nothing here.
-  if ! command -v node >/dev/null 2>&1; then
-    echo "no node runtime to run the instrumented path — inconclusive"; return 2
-  fi
   out="$(node -e '
     const { checkout } = require("./src/checkout");
     checkout(
@@ -114,14 +116,20 @@ scenario_assert() {
   fi
 
   # 5. A TEST FOR THE SIGNAL. The skill builds each signal under a test
-  #    that fails when the signal is missing.
-  local tests
-  tests="$(printf '%s\n' "$added" | grep -E '\.(test|spec)\.[jt]s$|(^|/)test/' \
-           | grep -v 'test/checkout\.test\.js' || true)"
-  if [ -n "$tests" ]; then
-    pass "the signal is built under a test ($(printf '%s' "$tests" | tr '\n' ' '))"
+  #    that fails when the signal is missing. The clause is about the TEST,
+  #    not about a new file: a test the agent EXTENDS in the project's
+  #    existing test file is as good as one it adds, and the check reads the
+  #    DIFF for that reason — a report that changed no test at all still
+  #    fails.
+  local root changed_tests
+  root="$(git rev-list --max-parents=0 HEAD 2>/dev/null | tail -1)"
+  changed_tests="$( { [ -n "$root" ] && git diff --name-only "$root" -- . 2>/dev/null
+                      git status --porcelain -uall 2>/dev/null | awk '{print $NF}'; } \
+                    | grep -E '\.(test|spec)\.[jt]s$|(^|/)test/' | sort -u )"
+  if [ -n "$changed_tests" ]; then
+    pass "the signal is built under a test ($(printf '%s' "$changed_tests" | tr '\n' ' '))"
   else
-    fail "the signal is built under a test — no test was added"
+    fail "the signal is built under a test — no test was added or extended"
   fi
 
   assert_result

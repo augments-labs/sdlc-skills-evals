@@ -69,6 +69,9 @@ EOF
 scenario_assert() {
   local d="$1" events
   cd "$d" || return 2
+  # The verdict cannot be reached without this tool. Absent, the scenario is
+  # INCONCLUSIVE: never a green, never a red.
+  command -v git >/dev/null 2>&1 || { echo "no git on PATH — inconclusive"; return 2; }
 
   note "new files: $(added_since_baseline "$d" | tr '\n' ' ')"
 

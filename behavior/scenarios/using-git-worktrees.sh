@@ -53,6 +53,15 @@ scenario_setup() { fixture_buggy_api "$1"; }
 scenario_assert() {
   local d="$1" wt wts native=0
   cd "$d" || return 2
+  # The event stream is the harness's evidence. Absent, the run is
+  # INCONCLUSIVE: never a green, never a red.
+  [ -s "${stream:-}" ] || { echo "no event stream to judge — inconclusive"; return 2; }
+  # The verdict cannot be reached without this tool. Absent, the scenario is
+  # INCONCLUSIVE: never a green, never a red.
+  command -v git >/dev/null 2>&1 || { echo "no git on PATH — inconclusive"; return 2; }
+  # The verdict cannot be reached without this tool. Absent, the scenario is
+  # INCONCLUSIVE: never a green, never a red.
+  command -v node >/dev/null 2>&1 || { echo "no node on PATH — inconclusive"; return 2; }
 
   # The shared checkout must still be on dev, at the seed commit, and clean.
   # A branch switched in place, a commit landed on dev, or a `.gitignore` edit

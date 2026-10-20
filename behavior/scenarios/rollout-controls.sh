@@ -3,7 +3,7 @@
 #
 # Provenance: prospective contract probe
 # Clause: skills/implementation/rollout-controls/SKILL.md — "List every path the change adds: request handler, background job, event"
-# Clause: skills/implementation/rollout-controls/SKILL.md — "Make turning it off change behaviour without a deploy: read the switch at runtime, never as a build-time constant."
+# Clause: skills/implementation/rollout-controls/SKILL.md — "Make turning it off change behaviour without a deploy: read the switch at"
 #
 # No live failure was recorded for this skill in this lab, so this is a
 # prospective probe: it stands on the two clauses above.
@@ -39,6 +39,9 @@ scenario_setup() { fixture_rollout_service "$1"; }
 scenario_assert() {
   local d="$1" record body guarded switch_section flags_backup
   cd "$d" || return 2
+  # The verdict cannot be reached without this tool. Absent, the scenario is
+  # INCONCLUSIVE: never a green, never a red.
+  command -v node >/dev/null 2>&1 || { echo "no node on PATH — inconclusive"; return 2; }
 
   assert_file '.sdlc-skills/designs/*-rollout.md' 'wrote the rollout record'
   record="$ASSERT_MATCH"
@@ -91,9 +94,6 @@ scenario_assert() {
   # 5. THE CODE. Both paths, both states. The flag file is the project's own
   #    facility; every flag in it is turned on for the probe and restored
   #    afterwards, so the check does not have to know the flag's name.
-  if ! command -v node >/dev/null 2>&1; then
-    echo "no node runtime to run the paths — inconclusive"; return 2
-  fi
   if [ ! -f config/flags.json ] || [ ! -f src/handler.js ] || [ ! -f src/consumer.js ]; then
     fail "the switch is read on every path the change adds — the project's flag file or a path is missing"
     assert_result

@@ -41,6 +41,9 @@ scenario_setup() { fixture_deprecated_api "$1"; }
 scenario_assert() {
   local d="$1" record body use_section signal status
   cd "$d" || return 2
+  # The verdict cannot be reached without this tool. Absent, the scenario is
+  # INCONCLUSIVE: never a green, never a red.
+  command -v node >/dev/null 2>&1 || { echo "no node on PATH — inconclusive"; return 2; }
 
   assert_file '.sdlc-skills/designs/*-deprecation.md' 'wrote the deprecation record'
   record="$ASSERT_MATCH"
@@ -104,7 +107,7 @@ scenario_assert() {
   #    it was meant to warn have to still be able to call it.
   if [ ! -f src/profile.js ]; then
     fail "the old path is still there — src/profile.js was removed in the change that marked it deprecated"
-  elif command -v node >/dev/null 2>&1; then
+  else
     local out; out="$(node -e '
       const { legacyProfile } = require("./src/profile");
       console.log(JSON.stringify(legacyProfile({ id: "u1", name: "A", street: "s", city: "c", zip: "z" })));
@@ -114,8 +117,6 @@ scenario_assert() {
     else
       fail "the old path still returns the old shape — it returns $out"
     fi
-  else
-    note "no node runtime — the old path was not called"
   fi
 
   assert_result

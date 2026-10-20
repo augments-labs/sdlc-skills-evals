@@ -3,7 +3,7 @@
 #
 # Provenance: prospective contract probe
 # Clause: skills/implementation/changing-a-live-schema/SKILL.md — "Every phase before contract leaves the store in a shape both the new and the"
-# Clause: skills/implementation/changing-a-live-schema/SKILL.md — "This is the point of no return: its rollback is a restore from the retained backup or snapshot, never an application rollback."
+# Clause: skills/implementation/changing-a-live-schema/SKILL.md — "This is the point of no return: its"
 #
 # No live failure was recorded for this skill in this lab, so this is a
 # prospective probe: it stands on the two clauses above.
