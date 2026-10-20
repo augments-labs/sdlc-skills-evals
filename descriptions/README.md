@@ -89,12 +89,16 @@ diagnostic; the scorer does not evaluate that activity.
 **The shape of a set is enforced by `bin/check`** (override root:
 `DESCRIPTIONS_ROOT`): at least ten positives and ten near-miss negatives
 (holdout files: 5–10), no duplicates, every entry with `split` and boolean
-`should_trigger`, every negative with a non-empty `expect`, a validation
-split between a quarter and a half of the set with the same
-positive-to-negative proportion as train, and no query shared between a set
-and its holdout. A set is only worth the money it costs to run if it can
-actually decide something: twenty happy-path positives will pass every eval
-they are ever run through and prove nothing.
+`should_trigger`, every negative with a non-empty `expect` that names a skill
+the pin holds or the activity it belongs to, a validation split between a
+quarter and a half of the set with the same positive-to-negative proportion
+as train, and no query shared between a set and its holdout. Ten of each is
+twenty queries: a set that cannot decide anything is not worth the money it
+costs to run. A main set may not carry a `holdout` entry — that role belongs
+to the holdout file, which is written after the selection. A set is only
+worth the money it costs to run if it can actually decide something: twenty
+happy-path positives will pass every eval they are ever run through and
+prove nothing.
 
 **The near-misses are the point.** A description firing on its own happy-path
 opening proves nothing, because every description does that. The runner observes the subject anywhere in the bounded skill chain, including

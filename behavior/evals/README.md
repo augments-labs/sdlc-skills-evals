@@ -10,6 +10,12 @@ baseline. The standard's evaluating-skills procedure, as files:
   one edge case. Write `assertions` only **after** the first recorded run,
   from the outputs you actually saw — until then the file carries
   `"pending_first_run": true` and empty assertions.
+- `files/` per skill — the inputs every case of that skill is handed.
+  `bin/campaign` copies this directory into the run workdir, so it is the
+  project the case runs against: a prompt that names a path must name one
+  this tree holds, or the case is asking about a file that is not there.
+  A case names paths, not a project that does not exist: `~/work/...` is
+  not a path the run can read.
 - Workspace — `workspaces/<campaign>/iteration-N/<eval-id>/{with_skill,
   without_skill|old_skill}/{outputs/,timing.json,grading.json}`, plus
   `iteration-N/benchmark.json` and `feedback.json`. One iteration per

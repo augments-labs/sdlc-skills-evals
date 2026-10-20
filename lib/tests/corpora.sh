@@ -177,6 +177,14 @@ mv "$m3/descriptions/common/yagni.json.new" "$m3/descriptions/common/yagni.json"
 run_gate "$m3"
 expect_fail "a duplicated query is rejected" "has duplicate queries"
 
+# 3b. a set too small to decide anything: ten positives and ten near misses
+#     is twenty queries, so a set that loses a near miss loses that too
+m3b="$work/m3b"; copy_repo "$m3b"
+jq 'del(.[19])' "$m3b/descriptions/common/yagni.json" > "$m3b/descriptions/common/yagni.json.new"
+mv "$m3b/descriptions/common/yagni.json.new" "$m3b/descriptions/common/yagni.json"
+run_gate "$m3b"
+expect_fail "a query set holding fewer than ten near misses is rejected" "needs >= 10 negatives"
+
 # 4. validation leaks into the holdout role, and the holdout role leaks
 #    back into a main set
 m4="$work/m4"; copy_repo "$m4"

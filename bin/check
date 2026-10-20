@@ -333,11 +333,11 @@ _check_set() { # $1 file $2 holdout(0|1)
   pos="$(jq '[.[] | select(.should_trigger == true)] | length' "$f")"
   neg="$(jq '[.[] | select(.should_trigger == false)] | length' "$f")"
   if [ "$hold" -eq 0 ]; then
+    # At least ten positives and ten near misses is at least twenty queries:
+    # the two counts are what the corpus is made of, and a set that cannot
+    # decide anything is not worth the money it costs to run.
     [ "$pos" -ge 10 ] || { echo "check: FAIL $f needs >= 10 positives (has $pos)"; return 1; }
     [ "$neg" -ge 10 ] || { echo "check: FAIL $f needs >= 10 negatives (has $neg)"; return 1; }
-    # the corpus is at least twenty queries: a set that cannot decide
-    # anything is not worth the money it costs to run
-    [ "$total" -ge 20 ] || { echo "check: FAIL $f needs >= 20 queries (has $total)"; return 1; }
     # the holdout role belongs to the holdout file, which is written after
     # selection. A main set carrying a holdout entry leaks the untouched
     # role into the split that is tuned on.
