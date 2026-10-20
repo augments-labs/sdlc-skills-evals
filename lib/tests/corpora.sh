@@ -298,11 +298,91 @@ expect_fail "the holdout cross-check follows the descriptions root seam" "reuses
 
 m9b="$work/m9b"; copy_repo "$m9b"
 mkdir -p "$m9b/seam-docs"
+cp "$m9b/docs/upstream-coverage.md" "$m9b/seam-docs/upstream-coverage.md"
 printf '# a record\n' > "$m9b/seam-docs/record.md"
 chmod +x "$m9b/seam-docs/record.md"
 check_out="$(cd "$m9b" && DOCS_ROOT=seam-docs bash bin/check 2>&1)"
 check_rc=$?
 expect_fail "the docs no-exec-bit rule follows the docs root seam" "executable under docs/"
+
+# --- the corpus state the gate holds against ---------------------------------
+#
+# The gate reads the coverage record: the frozen per-entry split assignment,
+# the selections that have happened, and the corpus audit's own numbers. Each
+# of these cases breaks one of them and expects the gate's refusal.
+
+# E-1, first direction: a case carries an assertion and the definition
+# records no observation state. The gate cannot know where the assertion came
+# from, and a fabricated one would be graded against a real run.
+m10="$work/m10"; copy_repo "$m10"
+jq 'del(.pending_first_run) | .evals[0].assertions = ["[check:file-exists src/server.js]"]' \
+  "$m10/behavior/evals/common/yagni/evals.json" > "$m10/behavior/evals/common/yagni/evals.json.new"
+mv "$m10/behavior/evals/common/yagni/evals.json.new" "$m10/behavior/evals/common/yagni/evals.json"
+run_gate "$m10"
+expect_fail "a case with an assertion and no observation state is rejected" \
+  "carries an assertion but records no observation state"
+
+# E-1, second direction: the same assertion added to a case that is still
+# pending its first run. A different message, because the fault is different.
+m11="$work/m11"; copy_repo "$m11"
+jq '.evals[0].assertions = ["[check:file-exists src/server.js]"]' \
+  "$m11/behavior/evals/common/yagni/evals.json" > "$m11/behavior/evals/common/yagni/evals.json.new"
+mv "$m11/behavior/evals/common/yagni/evals.json.new" "$m11/behavior/evals/common/yagni/evals.json"
+run_gate "$m11"
+expect_fail "a case with an assertion while pending its first run is rejected" \
+  "is pending its first run and must carry empty assertions"
+
+# E-2: two entries of a frozen set swap splits. The ratios the shape check
+# reads stay the same, so only the frozen assignment catches it.
+m12="$work/m12"; copy_repo "$m12"
+jq '.[0].split = "validation" | .[5].split = "train"' \
+  "$m12/descriptions/common/yagni.json" > "$m12/descriptions/common/yagni.json.new"
+mv "$m12/descriptions/common/yagni.json.new" "$m12/descriptions/common/yagni.json"
+run_gate "$m12"
+expect_fail "an entry that moves between splits is rejected" \
+  "does not hold the frozen split assignment"
+
+# E-2, second direction: an entry moves into the holdout role.
+m13="$work/m13"; copy_repo "$m13"
+jq '.[0].split = "holdout"' "$m13/descriptions/common/yagni.json" \
+  > "$m13/descriptions/common/yagni.json.new"
+mv "$m13/descriptions/common/yagni.json.new" "$m13/descriptions/common/yagni.json"
+run_gate "$m13"
+expect_fail "an entry moved into the holdout role is rejected" \
+  "carries a holdout entry"
+
+# E-4: the staged plan's approval row, and the task file its index names.
+# Each is a required staged input, and the gate refuses without it.
+m14="$work/m14"; copy_repo "$m14"
+rm -f "$m14/fixtures/corpus/plans/2026-10-05-multi-tenancy/00-index.ledger.md"
+run_gate "$m14"
+expect_fail "a staged plan with no approval row is rejected" \
+  "the staged plan 2026-10-05-multi-tenancy carries no ledger"
+
+m15="$work/m15"; copy_repo "$m15"
+rm -f "$m15/fixtures/corpus/plans/2026-10-05-multi-tenancy/01-tenant-column.md"
+run_gate "$m15"
+expect_fail "a staged plan with a missing task file is rejected" \
+  "names a task file it does not hold"
+
+# E-5: the corpus audit's own numbers. A row that no longer recomputes is a
+# false claim in the record.
+m16="$work/m16"; copy_repo "$m16"
+sed -i 's#| `common/yagni` | `skills/common/yagni/SKILL.md` | 10 | 10 |#| `common/yagni` | `skills/common/yagni/SKILL.md` | 9 | 10 |#' \
+  "$m16/docs/upstream-coverage.md"
+run_gate "$m16"
+expect_fail "a corpus audit row whose numbers no longer recompute is rejected" \
+  "states 9 positives and the set holds another number"
+
+# E-6: a holdout file placed in the corpus before the selection step. It is
+# a falsely untouched test set, and the gate refuses it.
+m17="$work/m17"; copy_repo "$m17"
+mkdir -p "$m17/descriptions/holdout/common"
+jq -n '[range(5) | {query: "a fresh holdout query \(.)", should_trigger: false, split: "holdout", expect: "none"}]' \
+  > "$m17/descriptions/holdout/common/yagni.json"
+run_gate "$m17"
+expect_fail "a holdout placed before the selection step is rejected" \
+  "names no recorded selection"
 
 # --- the staged description-query tree ---------------------------------------
 #

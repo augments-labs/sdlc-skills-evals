@@ -124,6 +124,78 @@ documentation still name the old tag, so the re-pin is not yet everywhere.
 - `README.md:39` — the `bin/campaign new sdd-opencode --plugin v10.2.1` example still names the tag. `README.md` is V3-DOCS's file.
 - `README.md:73` — the `SDLC_SKILLS_PIN` row of the environment-variable table still names the `v10.2.1` tag. The variable is read by no shell file, so this is a documented pin rather than a live default; the run-time plugin ref is V3-RUNNERS's to pin.
 
+### The frozen split assignment
+
+A rate is only comparable with a rate measured against the same entries in
+the same splits, so the per-entry split of every retained set is frozen
+here and `bin/check` compares each set against it: an entry that moves
+between `train` and `validation` fails the gate. The nine new sets have no
+earlier assignment and are not frozen.
+
+The block below is the data the gate reads. `frozen_splits` maps a skill to
+one letter per entry, in the set's order: `T` is `train`, `V` is
+`validation`. `selections` names the selections that have happened; a holdout
+file is accepted only when the selection it follows is named here, so a
+holdout cannot simply be placed in the corpus before the selection step.
+
+<!-- corpus-state:begin -->
+```json
+{
+  "frozen_splits": {
+    "analysis/writing-specs": "TTTTTVVVTVTTTTTVVVTV",
+    "common/clarifying-intent": "TTTTTVVVTVTTTTTVVVTVTTTVV",
+    "common/dispatching-parallel-agents": "TTTTTVVVTVTTTTTVVVTV",
+    "common/handoff": "TTTTTVVVTVTTTTTVVVTV",
+    "common/mapping-the-codebase": "TTTTTVVVTVTTTTTVVVTV",
+    "common/prototyping": "TTTTTVVVTVTTTTTVVVTV",
+    "common/using-git-worktrees": "TTTTTVVVTVTTTTTVVVTV",
+    "common/using-sdlc-skills": "TTTTTTTTTTTTVVVVVVVV",
+    "common/viewing-artifacts": "TTTTTVVVVVTTTTTVVVVV",
+    "common/writing-skills": "TTTTTVVVTVTTTTTVVVTV",
+    "common/yagni": "TTTTTVVVTVTTTTTVVVTV",
+    "deployment/finishing-a-branch": "TTTTTVTVVVTTTTTVVVTV",
+    "deployment/release-readiness": "TTTTTVVVTVTTTTTVVVTV",
+    "design/architecture-decisions": "TTTTTVVVTVTTTTTVVVTV",
+    "design/coding-standards": "TTTTTVVVTVTTTTTVVVTV",
+    "design/data-model": "TTTTTVVVTVTTTTTVVVTV",
+    "design/migration-strategy": "TTTTTVVVTVTTTTTVVVTVTTTVV",
+    "design/system-architecture": "TTTTTVVVTVTTTTTVVVTV",
+    "design/ui-ux-design": "TTTTTVVVTVTTTTTVVVTV",
+    "design/writing-plans": "TTTTTVVVTVTTTTTVVVTV",
+    "implementation/executing-plans": "TTTTTVVVTVTVVTTTTTVVVTVTVV",
+    "implementation/subagent-driven-development": "TTTTTTTTTTTTVVVVVVVV",
+    "implementation/test-driven-development": "TTTTTVVVTVTTTTTVVVTV",
+    "maintenance/complexity-audit": "TTTTTVVVTVTTTTTVVVTV",
+    "maintenance/containing-an-incident": "TTTTTTTTTTTTVVVVVVVV",
+    "maintenance/debugging": "TTTTTVVVTVTTTTTVVVTVTTTVV",
+    "maintenance/post-mortem": "TTTTTVVVTVTTTTTVVVTVTTTVV",
+    "maintenance/refactor-architecture": "TTTTTVVVTVTTTTTVVVTVTTTVV",
+    "planning/define-goals": "TTTTTVVVTVTTTTTVVVTV",
+    "planning/feasibility-check": "TTTTTVVVTVTTTTTVVVTV",
+    "planning/scoping": "TTTTTVVVTVTTTTTVVVTV",
+    "testing/receiving-code-review": "TTTTTVVVTVTTTTTVVVTV",
+    "testing/requesting-code-review": "TTTTTVVVTVTTTTTVVVTVTTTVV",
+    "testing/security-audits": "TTTTTVVVTVTTTTTVVVTV",
+    "testing/verification-before-completion": "TTTTTVVVTVTTTTTVVVTV",
+    "testing/verification-strategy": "TTTTTVVVTVTTTTTVVVTV",
+    "testing/visual-ui-verification": "TTTTTVVVTVTTTTTVVVTV"
+  },
+  "new_sets": [
+    "analysis/working-from-a-ticket",
+    "design/reviewing-plans",
+    "implementation/adding-observability",
+    "implementation/changing-a-live-schema",
+    "implementation/rollout-controls",
+    "maintenance/deprecating-an-api",
+    "maintenance/diagnosing-a-session",
+    "maintenance/large-scale-changes",
+    "testing/reviewing-a-pr"
+  ],
+  "selections": {}
+}
+```
+<!-- corpus-state:end -->
+
 ## The corpus audit — one row per skill
 
 Every skill in the pin carries two corpora: a description set of at least
@@ -157,42 +229,6 @@ version.
 A row that says "no path" is a skill whose queries presuppose nothing: they
 design or ask rather than presuppose an artefact.
 
-### The twelve changed sets — a changed corpus
-
-Twelve of the retained query sets are not the sets that were there before
-this task. Their queries changed, so **a rate measured against them before
-this task is not comparable with one measured after it**, and the corpora are
-a new corpus from here. Every entry that did not change kept its split, so
-the measurement a split carries is unchanged for those entries.
-
-| Set | What changed | Why |
-| --- | --- | --- |
-| `common/clarifying-intent` | five near misses added | the v11 body of `working-from-a-ticket` says the case it declines is `clarifying-intent`'s |
-| `common/writing-skills` | three queries re-pointed | they named `skills/…` and `scripts/…` paths the staged tree does not hold; they now name the library's skills and validator in words |
-| `common/using-sdlc-skills` | one query re-pointed | it named a project outside the run workdir |
-| `common/viewing-artifacts` | one query re-pointed | the plan directory it named is now the current convention |
-| `design/migration-strategy` | five near misses added | the v11 body of `changing-a-live-schema` says the case it declines is `migration-strategy`'s |
-| `design/writing-plans` | one query re-pointed | the plan directory it named is now the current convention |
-| `implementation/executing-plans` | six queries re-pointed | the plan directories they named are now the current convention |
-| `implementation/subagent-driven-development` | three queries re-pointed | the plan directory and the run ledger they named are now the current convention |
-| `maintenance/debugging` | five near misses added | the v11 body of `diagnosing-a-session` says the case it declines is `debugging`'s |
-| `maintenance/post-mortem` | five near misses added | the v11 bodies of `diagnosing-a-session`, `adding-observability` and `rollout-controls` say the cases they decline are `post-mortem`'s |
-| `maintenance/refactor-architecture` | five near misses added | the v11 body of `large-scale-changes` says the case it declines is `refactor-architecture`'s |
-| `testing/requesting-code-review` | five near misses added | the v11 body of `requesting-code-review` names `reviewing-plans` as the skill that reviews a plan document |
-
-The nine new sets — `analysis/working-from-a-ticket`,
-`design/reviewing-plans`, `implementation/adding-observability`,
-`implementation/changing-a-live-schema`, `implementation/rollout-controls`,
-`maintenance/deprecating-an-api`, `maintenance/diagnosing-a-session`,
-`maintenance/large-scale-changes` and `testing/reviewing-a-pr` — have no
-earlier rate at all.
-
-The remaining twenty-five sets are byte-identical to the ones the base held,
-and a rate measured against them before this task is still comparable with
-one measured after it.
-
-| Skill | Upstream source | Positives | Near misses | Output cases | Staged inputs |
-| --- | --- | --- | --- | --- | --- |
 | `analysis/working-from-a-ticket` | `skills/analysis/working-from-a-ticket/SKILL.md` | 10 | 10 | 3 — `ticket-unreadable` | `behavior/evals/analysis/working-from-a-ticket/files/` (11 files: `README.md`, `docs`, `package.json`, `plans`, `src`); queries name `docs` |
 | `analysis/writing-specs` | `skills/analysis/writing-specs/SKILL.md` | 10 | 10 | 2 — `vague-edges` | `behavior/evals/analysis/writing-specs/files/` (5 files: `README.md`, `docs`, `package.json`, `src`); queries name `docs` |
 | `common/clarifying-intent` | `skills/common/clarifying-intent/SKILL.md` | 10 | 15 | 2 — `praise-is-not-approval` | `behavior/evals/common/clarifying-intent/files/` (4 files: `README.md`, `package.json`, `src`); queries name `docs` |
@@ -239,6 +275,55 @@ one measured after it.
 | `testing/verification-before-completion` | `skills/testing/verification-before-completion/SKILL.md` | 10 | 10 | 2 — `stale-evidence` | `behavior/evals/testing/verification-before-completion/files/` (3 files: `package.json`, `src`, `test`); queries name `src` |
 | `testing/verification-strategy` | `skills/testing/verification-strategy/SKILL.md` | 10 | 10 | 2 — `single-feature` | `behavior/evals/testing/verification-strategy/files/` (5 files: `README.md`, `package.json`, `src`); queries name no path |
 | `testing/visual-ui-verification` | `skills/testing/visual-ui-verification/SKILL.md` | 10 | 10 | 2 — `backend-only` | `behavior/evals/testing/visual-ui-verification/files/` (5 files: `README.md`, `docs`, `package.json`, `src`); queries name no path |
+
+### The twelve changed sets — a changed corpus
+
+Twelve of the retained query sets are not the sets that were there before
+this task. Their queries changed, so **a rate measured against them before
+this task is not comparable with one measured after it**, and the corpora are
+a new corpus from here. Every entry that did not change kept its split, so
+the measurement a split carries is unchanged for those entries.
+
+The counts below are recounted from the corpus against the task's base —
+the revision before this task touched it, `691ea5e` — and they are
+per-set, so a reader can check them rather than take them. Two shapes
+occur:
+
+- **grown** — the set gained near misses. Six sets.
+- **re-pointed** — the set's queries were re-pointed at a path that exists
+  (or at the run workdir), so the query is answerable where it is asked.
+  Six sets.
+
+No entry of any set changed its split, and no entry was removed.
+
+| Set | Shape | Entries added | Entries re-pointed | Why |
+| --- | --- | --- | --- | --- |
+| `common/clarifying-intent` | grown | 5 | 0 | the v11 body of `working-from-a-ticket` says the case it declines is `clarifying-intent`'s |
+| `common/using-sdlc-skills` | re-pointed | 0 | 1 | the query named a project outside the run workdir |
+| `common/viewing-artifacts` | re-pointed | 0 | 1 | the plan directory it named is now the current convention |
+| `common/writing-skills` | re-pointed | 0 | 3 | they named `skills/…` and `scripts/…` paths the staged tree does not hold; they now name the library's skills and validator in words |
+| `design/migration-strategy` | grown | 5 | 0 | the v11 body of `changing-a-live-schema` says the case it declines is `migration-strategy`'s |
+| `design/writing-plans` | re-pointed | 0 | 1 | the plan directory it named is now the current convention |
+| `implementation/executing-plans` | re-pointed | 0 | 6 | the plan directories they named are now the current convention |
+| `implementation/subagent-driven-development` | re-pointed | 0 | 3 | the plan directory and the run ledger they named are now the current convention |
+| `maintenance/debugging` | grown | 5 | 0 | the v11 body of `diagnosing-a-session` says the case it declines is `debugging`'s |
+| `maintenance/post-mortem` | grown | 5 | 0 | the v11 bodies of `diagnosing-a-session`, `adding-observability` and `rollout-controls` say the cases they decline are `post-mortem`'s |
+| `maintenance/refactor-architecture` | grown | 5 | 0 | the v11 body of `large-scale-changes` says the case it declines is `refactor-architecture`'s |
+| `testing/requesting-code-review` | grown | 5 | 0 | the v11 body of `requesting-code-review` names `reviewing-plans` as the skill that reviews a plan document |
+
+The nine new sets — `analysis/working-from-a-ticket`,
+`design/reviewing-plans`, `implementation/adding-observability`,
+`implementation/changing-a-live-schema`, `implementation/rollout-controls`,
+`maintenance/deprecating-an-api`, `maintenance/diagnosing-a-session`,
+`maintenance/large-scale-changes` and `testing/reviewing-a-pr` — have no
+earlier rate at all.
+
+The remaining twenty-five sets are byte-identical to the ones the base held,
+and a rate measured against them before this task is still comparable with
+one measured after it.
+
+| Skill | Upstream source | Positives | Near misses | Output cases | Staged inputs |
+| --- | --- | --- | --- | --- | --- |
 
 **Static readiness is not measured quality.** Nothing here is a trigger rate,
 a pass rate or a score. It says the corpus is well formed, grounded and
