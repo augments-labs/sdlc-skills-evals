@@ -27,10 +27,11 @@
 # outright. The install below writes the layout the CLI on this machine
 # actually reads.
 #
-# ISOLATION. Every launch runs under an environment this file builds
-# explicitly (opencode_env): the throwaway home, the XDG directories inside
-# it, a runtime directory and a dead session-bus socket inside it. The
-# operator's environment is NOT inherited: it carries the operator's own
+# ISOLATION. Every invocation of the CLI runs under an environment this file
+# builds explicitly (opencode_env): the throwaway home, the XDG directories
+# inside it, a runtime directory and a dead session-bus socket inside it. The
+# version probe is an invocation too, and gets the same environment (see
+# _opencode_detect). The operator's environment is NOT inherited: it carries the operator's own
 # session bus, their SSH agent, their IDE tokens and their credential
 # helpers, and a launch that inherited them could read the operator's
 # stored credentials. The one exception is the operator's credential seed
@@ -47,19 +48,24 @@ capabilities="subagent-loads-skills=yes(run) nesting-depth=yes(run) tier-settabl
 adapter_name='opencode'
 
 # THE LAUNCH ENVIRONMENT, built explicitly (see the header).
-opencode_env() {
+opencode_env() { _opencode_env_for "$harness_home"; }
+
+# The same environment, around a given home. The launch uses the throwaway
+# home; the version probe uses the throwaway home too, so both are closed in
+# the same way (see _opencode_detect).
+_opencode_env_for() { # $1 the home the environment is built around
+  local home="$1"
   OPENCODE_ENV=(
     "PATH=$PATH"
-    "HOME=$harness_home"
-    "XDG_CONFIG_HOME=$harness_home/xdg"
-    "XDG_DATA_HOME=$harness_home/xdg"
-    "XDG_CACHE_HOME=$harness_home/.cache"
-    "XDG_RUNTIME_DIR=$harness_home/.runtime"
-    "DBUS_SESSION_BUS_ADDRESS=unix:path=$harness_home/.runtime/bus"
-    "TMPDIR=$harness_home/tmp"
+    "HOME=$home"
+    "XDG_CONFIG_HOME=$home/xdg"
+    "XDG_DATA_HOME=$home/xdg"
+    "XDG_CACHE_HOME=$home/.cache"
+    "XDG_RUNTIME_DIR=$home/.runtime"
+    "DBUS_SESSION_BUS_ADDRESS=unix:path=$home/.runtime/bus"
+    "TMPDIR=$home/tmp"
   )
-  mkdir -p "$harness_home/xdg" "$harness_home/.cache" "$harness_home/.runtime" \
-           "$harness_home/tmp"
+  mkdir -p "$home/xdg" "$home/.cache" "$home/.runtime" "$home/tmp"
 }
 
 # Run the CLI under that environment, with the operator's credential seed
@@ -75,21 +81,37 @@ opencode_exec() { # $@ the CLI and its arguments
 }
 
 # `opencode --version` prints e.g. `opencode v2.0.13`; keep only the number.
-# The probe runs under an environment of its own — a throwaway home, no
-# operator variable — so a version check cannot reach the operator's
-# session bus or their credential helpers either.
-_opencode_detect() {
-  local probe_home
-  probe_home="$(mktemp -d)" || return 1
-  opencode_version="$(env -i PATH="$PATH" HOME="$probe_home" \
+#
+# The probe is a CLI invocation, so it runs under the SAME closed environment
+# a launch gets: the throwaway home, the XDG directories inside it, a runtime
+# directory and a dead session-bus socket inside it. A throwaway HOME alone
+# closes nothing for a D-Bus client: with neither a runtime directory nor a
+# bus address of its own, it falls back to the passwd entry's runtime
+# directory — the operator's own session bus, and the route to the operator's
+# stored credentials.
+#
+# The probe's home is the throwaway home when there is one — an install has
+# built it by then, and the probe's own record is then visible in it — and a
+# home of its own before that (adapter_check runs first). It is never the
+# operator's home.
+_opencode_detect() { # $1 the home the probe runs in ("" = a home of its own)
+  local probe_home own=0
+  if [ -n "${1:-}" ]; then
+    probe_home="$1"
+  else
+    probe_home="$(mktemp -d)" || return 1
+    own=1
+  fi
+  _opencode_env_for "$probe_home"
+  opencode_version="$(env -i "${OPENCODE_ENV[@]}" \
     opencode --version 2>/dev/null | head -1 | tr -cd '0-9.')"
-  rm -rf "$probe_home"
+  [ "$own" -eq 1 ] && rm -rf "$probe_home"
   opencode_major="${opencode_version%%.*}"
 }
 
 adapter_check() {
   command -v opencode >/dev/null 2>&1 || { echo "no \`opencode\` CLI on PATH" >&2; return 3; }
-  _opencode_detect
+  _opencode_detect "${harness_home:-}"
   case "$opencode_major" in
     1|2) ;;
     *) echo "unrecognised \`opencode\` version: ${opencode_version:-none}" >&2; return 3;;
@@ -109,8 +131,10 @@ adapter_install() { # $1 plugin source ("" = NONE arm, load nothing)
   # The layout depends on the major version: 1.x names a plugin FILE under
   # `plugin`, 2.x names the plugin DIRECTORY under `plugins` and resolves
   # `<dir>/index.js` inside it. The version is read at install time, never
-  # carried over from an earlier install.
-  _opencode_detect
+  # carried over from an earlier install. The probe runs in the throwaway
+  # home this install just built, so it is closed like every other
+  # invocation.
+  _opencode_detect "$harness_home"
   case "$opencode_major" in
     1|2) ;;
     *) echo "unrecognised \`opencode\` version: ${opencode_version:-none}" >&2; return 3;;

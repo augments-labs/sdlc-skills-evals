@@ -289,6 +289,28 @@ EOS
     bad "$h install invokes the CLI ($install_pattern) — log: $(printf '%s\n' "$calls" | grep '^call ' | tr '\n' '|')"
   fi
 
+  # --- the version probe is an invocation too --------------------------------
+  # A version check is a CLI invocation, and it must run under the same
+  # closed environment as the launches. With neither a runtime directory nor
+  # a bus address of its own, a D-Bus client in the probe falls back to the
+  # passwd entry's runtime directory — the operator's own session bus — which
+  # is the one route a "throwaway HOME" does not close.
+  #
+  # So the probe runs in the throwaway home the adapter built, and its own
+  # record is visible there. opencode is the only adapter that probes a
+  # version; the other ten make no such call.
+  if [ "$h" = "opencode" ]; then
+    local probe_log="$green_home/.fake-harness.log"
+    if grep -q '^call opencode --version' "$probe_log" 2>/dev/null &&
+       grep -q "^env opencode HOME=$green_home\$" "$probe_log" 2>/dev/null &&
+       grep -q "^env opencode XDG_RUNTIME_DIR=$green_home/" "$probe_log" 2>/dev/null &&
+       grep -q "^env opencode DBUS_SESSION_BUS_ADDRESS=unix:path=$green_home/" "$probe_log" 2>/dev/null; then
+      ok "opencode the version probe runs under the throwaway home"
+    else
+      bad "opencode the version probe runs under the throwaway home"
+    fi
+  fi
+
   # --- the none arm ----------------------------------------------------------
   : > "$log"
   local none_calls
