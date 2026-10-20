@@ -170,77 +170,113 @@ first observation is therefore made **by hand**, and the flag is promoted
 afterwards. Nothing in this repository can promote it: the offline tests
 run against a fake CLI, and fake evidence never promotes a status.
 
-The procedure, per harness:
+The procedure, per harness.
 
-1. **Read the adapter's `runnable_reason`.** It names what is missing:
-   a stream that was never observed, an isolation fact that is not
-   established, a credential the adapter does not carry.
-2. **Install and launch, the way the adapter would.** Source the adapter
-   in a shell of your own and call its own functions, so the run is made
-   under the isolation environment the adapter builds — not under your
-   shell's environment:
+### 1. Read the adapter's `runnable_reason`
 
-   ```bash
-   cd /path/to/sdlc-skills-evals
-   source harnesses/<harness>.sh
-   adapter_install /path/to/sdlc-skills   # writes into a throwaway home
-   <harness>_env                          # the isolation environment
-   <harness>_exec <cli> <the command below>
-   ```
+It names what is missing: a stream that was never observed, an isolation
+fact that is not established, a credential the adapter does not carry.
 
-   The command each adapter makes, and the record to look for in the
-   stream it writes:
+### 2. Install the plugin and prepare the run
 
-   | harness | the command | the record that counts as an activation |
-   | --- | --- | --- |
-   | antigravity | `agy --output-format stream-json --mode accept-edits --print="<prompt>"` | a `step_update` carrying `skill_name`, or a `view_file`/`read_file` call whose path ends in `SKILL.md` |
-   | claude-code | `claude -p "<prompt>" --output-format stream-json --verbose --plugin-dir <plugin>` | an `assistant` record whose `message.content[]` holds a `tool_use` named `Skill` |
-   | codex | `codex exec --json --ephemeral --skip-git-repo-check -s read-only -C <workdir> "<prompt>"` | an `item.completed` whose `item.type` is `command_execution` and whose `command` names a `SKILL.md` |
-   | cursor | `cursor-agent --print --output-format stream-json --mode plan --workspace <workdir> "<prompt>"` | a `tool_call` whose `tool_call.toolName` is a read and whose `argsJson` names a `SKILL.md` |
-   | devin | `devin --permission-mode auto acp` (JSON-RPC 2.0 over stdio) | a `session/update` whose `update.sessionUpdate` is `tool_call` and whose `rawInput` names a skill |
-   | grok | `grok -p "<prompt>" --output-format streaming-messages-json --permission-mode plan --cwd <workdir>` | a `content_block_start` whose `content_block.type` is `tool_use` and whose name is the skill tool |
-   | hermes | `hermes chat -q "<prompt>" --format stream-json --tools read_file,search_files,grep,skill_view,skills_list` | a `tool_use` record whose `name` is `skill_view` |
-   | kimi-code | `kimi -p "<prompt>" --output-format stream-json` | an `assistant` record whose `tool_calls[]` holds a `Skill` call |
-   | muse | `muse exec --json --trust-workspace --approval-mode on-request "<prompt>"` | a record whose `payload_type` is a `tool.*` and whose payload names the skill |
-   | opencode | `opencode run --format json --auto --dir <workdir> "<prompt>"` | a `tool` part whose `tool` is `skill` |
-   | pi | `pi --mode json --session-dir <dir> --tools read,grep,find,ls "<prompt>"` | a `tool_execution_start` whose `toolName` is `read` and whose `args.path` is a `SKILL.md` |
+In a shell of your own, in the lab checkout. Replace `<harness>` with the
+harness you are making the observation for: `antigravity`, `claude-code`,
+`codex`, `cursor`, `devin`, `grok`, `hermes`, `kimi-code`, `muse`,
+`opencode` or `pi`.
 
-   Run it in a disposable directory. A real run costs a model call, and
-   the agent may write, so the working directory is the only thing
-   standing between the run and a real checkout: never point this at a
-   directory whose contents matter.
-3. **Read the stream through the adapter's own parser.** That is the
-   point of the procedure: the parser is what the lab judges, so the
-   hand-made observation has to satisfy it.
+```bash
+cd /path/to/sdlc-skills-evals
+workdir="$(mktemp -d)"; stream="$(mktemp)"; opening="$(mktemp)"
+printf 'the opening\n' > "$opening"
+prompt='Name the skill that routes this repository.'
+errlog="$(mktemp)"; timeout_s="${timeout_s:-300}"; export errlog timeout_s
+source harnesses/<harness>.sh
+adapter_install /path/to/sdlc-skills
+```
 
-   ```bash
-   adapter_chain <stream>   # prints the skill name, or nothing
-   adapter_ran <stream>     # succeeds only if the model actually spoke
-   adapter_usage <stream>   # the run's own token count, or nothing
-   ```
+The adapter expects four things from the runner, and this block gives it
+all four:
 
-   An empty chain on a stream that did load a skill means the parser is
-   wrong, not the run: the field names in the table above are the ones
-   to check.
-4. **Record the evidence, outside this repository.** The CLI version, the
-   date, the command, the stream file, and the outcome of each parser
-   call. A stream is a transcript: it may carry the operator's own
-   words, so it stays out of the repository (`CLAUDE.md`: no session logs,
-   no run artifacts) and goes wherever the lab keeps its records.
-5. **Change the status, and only then.** With that record in hand:
-   - the adapter's header: `runnable=yes` with a `runnable_reason` that
-     names the run (the CLI version and the date), and the capability
-     rows whose evidence the stream earned: `documentation` becomes
-     `run`, and what the stream did *not* show stays `documentation`;
-   - this file's provenance table: the row's "Runtime status" becomes
-     the observed one, and the "Parser shape grounded in" column names
-     the version the observation was made on;
-   - `lib/tests/harnesses.sh` pins the `runnable` value of every
-     harness, so it is updated in the same commit.
+| global | what it is | who sets it |
+| --- | --- | --- |
+| `errlog` | the file the CLI's errors are written to | you: `errlog="$(mktemp)"` |
+| `timeout_s` | the wall-clock bound, in seconds, each launch gets | you: `timeout_s=300` |
+| `harness_home` | the throwaway home the run happens in | `adapter_install` |
+| `plugin_dir` | the installed plugin tree (empty in the none arm) | `adapter_install` |
 
-   A harness whose run produced no skill record, or whose stream the
-   parser could not read, stays `runnable=no` — with the reason naming
-   what the run showed instead. The flag is never promoted by a test.
+`adapter_install` builds the throwaway home, copies in the credentials that
+harness needs, and installs the plugin there. It never writes to the
+operator's own CLI home, and an empty plugin path installs nothing — that
+is the none arm.
+
+**Run the whole thing in a disposable directory.** A real run costs a
+model call, and the agent may write, so the working directory is the only
+thing standing between the run and a real checkout: never point this at a
+directory whose contents matter.
+
+### 3. Launch, the way the adapter would
+
+The command for your harness, in the same shell. Each one is the CLI's own
+command, run through the adapter's own `*_exec` helper — so the run
+happens under the isolation environment the adapter builds (the throwaway
+home, the XDG directories inside it, a runtime directory and a dead
+session-bus socket inside it) rather than under your shell's environment,
+which carries your own session bus, your SSH agent and your credential
+helpers.
+
+| harness | the command | the environment the CLI needs | what to observe in the stream | what to record |
+| --- | --- | --- | --- | --- |
+| `antigravity` | `agy_env && agy_exec agy --output-format stream-json --mode accept-edits --print="$prompt" > "$stream" 2>>"$errlog"` | a credential from the OS keyring: the launch reaches no keyring by design, so this run needs one you supply | a `step_update` carrying `skill_name`, or a `view_file`/`read_file` call whose path ends in `SKILL.md` | the `agy --version` output, the date, and whether a skill record appeared |
+| `claude-code` | `claude_env && claude_exec claude -p "$prompt" --output-format stream-json --verbose --plugin-dir "$plugin_dir" > "$stream" 2>>"$errlog"` | its own credentials file, copied into the throwaway home; the plugin tree comes from `--plugin-dir` | an `assistant` record whose `message.content[]` holds a `tool_use` named `Skill` | the `claude --version` output, the date, and whether a skill record appeared |
+| `codex` | `codex_env && codex_exec codex exec --json --ephemeral --skip-git-repo-check -s read-only -C "$workdir" "$prompt" > "$stream" 2>>"$errlog"` | its own `CODEX_HOME` credentials, copied into the throwaway home | an `item.completed` whose `item.type` is `command_execution` and whose `command` names a `SKILL.md` | the `codex --version` output, the date, and whether a skill record appeared |
+| `cursor` | `cursor_env && cursor_exec cursor-agent --print --output-format stream-json --mode plan --workspace "$workdir" "$prompt" > "$stream" 2>>"$errlog"` | nothing beyond the throwaway home; the plugin is the copy under `~/.cursor/plugins/local/` | a `tool_call` whose `tool_call.toolName` is a read and whose `argsJson` names a `SKILL.md` | the `cursor-agent --version` output, the date, and whether a skill record appeared |
+| `devin` | `adapter_run_behavioral "$workdir" "$opening" "$stream"` | its own credentials file, copied into the throwaway home. Devin is an **ACP client**, not a process you start: the adapter holds the JSON-RPC 2.0 conversation over stdio (`initialize`, `session/new`, `session/prompt`) and answers the agent's permission requests | a `session/update` whose `update.sessionUpdate` is `tool_call` and whose `rawInput` names a skill | the `devin --version` output, the date, and whether a skill record appeared |
+| `grok` | `grok_env && grok_exec grok -p "$prompt" --output-format streaming-messages-json --permission-mode plan --cwd "$workdir" > "$stream" 2>>"$errlog"` | nothing beyond the throwaway home; the plugin's rules file is the routing channel | a `content_block_start` whose `content_block.type` is `tool_use` and whose name is the skill tool | the `grok --version` output, the date, and whether a skill record appeared |
+| `hermes` | `hermes_env && hermes_exec hermes chat -q "$prompt" --format stream-json --tools read_file,search_files,grep,skill_view,skills_list > "$stream" 2>>"$errlog"` | its Python environment, which hermes fetches into the throwaway home — the one network call in this procedure | a `tool_use` record whose `name` is `skill_view` | the `hermes --version` output, the date, and whether a skill record appeared |
+| `kimi-code` | `kimi_env && kimi_exec kimi -p "$prompt" --output-format stream-json > "$stream" 2>>"$errlog"` | its own `KIMI_CODE_HOME` credentials, copied into the throwaway home | an `assistant` record whose `tool_calls[]` holds a `Skill` call | the `kimi --version` output, the date, and whether a skill record appeared |
+| `muse` | `muse_env && muse_exec muse exec --json --trust-workspace --approval-mode on-request "$prompt" > "$stream" 2>>"$errlog"` | nothing beyond the throwaway home; the plugin's own install script puts the skills under the throwaway config directory | a record whose `payload_type` is a `tool.*` and whose payload names the skill | the `muse --version` output, the date, and whether a skill record appeared |
+| `opencode` | `opencode_env && opencode_exec opencode run --format json --auto --dir "$workdir" "$prompt" > "$stream" 2>>"$errlog"` | nothing beyond the throwaway home: the credential here is infrastructure-provided | a `tool` part whose `tool` is `skill` | the `opencode --version` output, the date, and whether a skill record appeared |
+| `pi` | `pi_env && pi_exec pi --mode json --session-dir "$harness_home/sessions" --tools read,grep,find,ls "$prompt" > "$stream" 2>>"$errlog"` | nothing beyond the throwaway home; the plugin is registered by reference from the checkout | a `tool_execution_start` whose `toolName` is `read` and whose `args.path` is a `SKILL.md` | the `pi --version` output, the date, and whether a skill record appeared |
+
+### 4. Read the stream through the adapter's own parser
+
+That is the point of the procedure: the parser is what the lab judges, so
+the hand-made observation has to satisfy it.
+
+```bash
+adapter_chain "$stream"   # prints the skill name, or nothing
+adapter_ran "$stream"     # succeeds only if the model actually spoke
+adapter_usage "$stream"   # the run's own token count, or nothing
+```
+
+An empty chain on a stream that did load a skill means the parser is
+wrong, not the run: the field names in the table above are the ones to
+check.
+
+### 5. Record the evidence, outside this repository
+
+The CLI version, the date, the command, the stream file, and the outcome
+of each parser call. A stream is a transcript: it may carry the operator's
+own words, so it stays out of the repository (`CLAUDE.md`: no session logs,
+no run artifacts) and goes wherever the lab keeps its records.
+
+### 6. Change the status, and only then
+
+With that record in hand:
+
+- the adapter's header: `runnable=yes` with a `runnable_reason` that
+  names the run (the CLI version and the date), and the capability rows
+  whose evidence the stream earned: `documentation` becomes `run`, and
+  what the stream did *not* show stays `documentation`;
+- this file's provenance table: the row's "Runtime status" becomes the
+  observed one, and the "Parser shape grounded in" column names the
+  version the observation was made on;
+- `lib/tests/harnesses.sh` pins the `runnable` value of every harness, so
+  it is updated in the same commit.
+
+A harness whose run produced no skill record, or whose stream the parser
+could not read, stays `runnable=no` — with the reason naming what the run
+showed instead. The flag is never promoted by a test.
 
 ## The adapter tests
 
@@ -259,6 +295,12 @@ The procedure, per harness:
   runtime directory and bus address point inside the throwaway home, and
   that the operator's credential seed reaches the CLI (except for the
   harness that deliberately carries none).
+- It also runs **the verification procedure above**, for every harness: the
+  setup block and the per-harness command are read out of this file and
+  executed against the fake, so a procedure whose commands do not work
+  fails here rather than on the operator's machine. The commands are read
+  from this document on purpose — the document and the check cannot drift
+  apart.
 - `lib/tests/opencode-adapter.sh` — the opencode parser and the 1.x/2.x
   install layouts.
 

@@ -49,6 +49,47 @@ command -v jq >/dev/null 2>&1 || { echo "needs \`jq\`" >&2; exit 2; }
 
 mapfile -t adapters < <(jq -r '.harnesses[]' "$INVENTORY")
 
+# --- the README's verification procedure -------------------------------------
+# The procedure is how the user makes the first observation, so its commands
+# must work as written — and the suite runs them, against the fake. The
+# commands are read OUT of the README, so the document and this check cannot
+# drift apart: a procedure that no longer works fails here, not on the
+# operator's machine.
+readme="$hh/README.md"
+
+# The shared setup block: the fenced bash block that installs the plugin and
+# prepares the isolation environment.
+procedure_setup() {
+  awk '
+    /^[ \t]*```bash[ \t]*$/ { inblock = 1; buf = ""; next }
+    /^[ \t]*```[ \t]*$/ {
+      if (inblock) {
+        if (buf ~ /adapter_install/) { printf "%s", buf; exit }
+        inblock = 0
+      }
+      next
+    }
+    inblock { buf = buf $0 "\n" }
+  ' "$readme"
+}
+
+# The command for one harness: the second cell of its row in the procedure's
+# table. The table marks its rows with the harness name in backticks, so it
+# is not confused with the provenance table above it.
+procedure_command() { # $1 harness
+  awk -v h="$1" '
+    index($0, "| `" h "` |") == 1 {
+      line = $0
+      sub(/^[^|]*\|[^|]*\|/, "", line)
+      sub(/\|.*$/, "", line)
+      gsub(/`/, "", line)
+      gsub(/^[ \t]+|[ \t]+$/, "", line)
+      print line
+      exit
+    }
+  ' "$readme"
+}
+
 # --- the adapter set equals the inventory, exactly ---------------------------
 found="$(cd "$hh" && ls *.sh 2>/dev/null | sed 's/\.sh$//' | sort)"
 want="$(printf '%s\n' "${adapters[@]}" | sort)"
@@ -771,6 +812,60 @@ EOS
       bad "$h binds no tier (the CLI documents no small/medium/large mapping)"
     else
       ok "$h binds no tier (the CLI documents no small/medium/large mapping)"
+    fi
+  fi
+
+  # --- the verification procedure's own commands -----------------------------
+  # The README's procedure is how the user makes the first observation. A
+  # procedure whose commands fail is not a procedure, so the suite runs them,
+  # against the fake: the commands are read out of the README, so the
+  # document and this check cannot drift apart.
+  local setup prep cmd_line setup_ok=0
+  setup="$(procedure_setup)"
+  cmd_line="$(procedure_command "$h")"
+  if [ -z "$setup" ]; then
+    bad "$h the README names no procedure to run"
+  else
+    # The procedure's own paths: the lab checkout and the plugin checkout are
+    # the operator's, and here they are the lab's and the fake plugin tree.
+    prep="$(printf '%s\n' "$setup" \
+      | sed -e "s|/path/to/sdlc-skills-evals|$lab|g" \
+            -e "s|<harness>|$h|g" \
+            -e "s|/path/to/sdlc-skills|$plug|g")"
+    if eval "$prep" >/dev/null 2>"$work/proc-setup.err"; then
+      setup_ok=1
+      ok "$h the procedure's setup block succeeds"
+    else
+      bad "$h the procedure's setup block succeeds (see $work/proc-setup.err)"
+    fi
+    if [ -z "$cmd_line" ]; then
+      bad "$h the README names no command for the procedure"
+    elif [ "$setup_ok" -eq 0 ]; then
+      bad "$h the procedure's command succeeds (the setup block did not run)"
+    else
+      if eval "$cmd_line" >/dev/null 2>"$work/proc-run.err"; then
+        ok "$h the procedure's command succeeds"
+      else
+        bad "$h the procedure's command succeeds (see $work/proc-run.err)"
+      fi
+      if [ -s "$stream" ]; then
+        ok "$h the procedure's command writes the stream"
+      else
+        bad "$h the procedure's command writes the stream"
+      fi
+      # The command must reach the CLI through the adapter, under the
+      # isolation environment the adapter builds: a command run outside it
+      # would inherit the operator's session bus and their credential
+      # helpers, which is the whole reason the procedure uses the adapter.
+      local proc_log proc_ok=1
+      proc_log="$harness_home/.fake-harness.log"
+      grep -q "^env $want_cli HOME=$harness_home\$" "$proc_log" 2>/dev/null || proc_ok=0
+      grep -q "^env $want_cli XDG_RUNTIME_DIR=$harness_home/" "$proc_log" 2>/dev/null || proc_ok=0
+      if [ "$proc_ok" -eq 1 ]; then
+        ok "$h the procedure's command runs the CLI under the isolation environment"
+      else
+        bad "$h the procedure's command runs the CLI under the isolation environment"
+      fi
     fi
   fi
 
