@@ -473,7 +473,12 @@ if [ -d "$snapshot" ]; then
       | grep -E '^[A-Za-z0-9_.@-]+(/[A-Za-z0-9_.@-]+)+$' | sort -u); do
     [ -e "$here/behavior/evals/maintenance/diagnosing-a-session/files/$tok" ] || continue
     graded=$((graded + 1))
-    grep -qF "$tok" "$transcript" 2>/dev/null || graded_missing=$((graded_missing + 1))
+    # The path has to be the one the EDIT landed on, not merely one the
+    # transcript mentions: a transcript whose edit lands on another file
+    # disagrees with the map the case grades, and the case then measures
+    # nothing.
+    grep -iE 'edit' "$transcript" 2>/dev/null | grep -qF "$tok" \
+      || graded_missing=$((graded_missing + 1))
   done
   if [ "$graded" -gt 0 ] && [ "$graded_missing" -eq 0 ]; then
     ok "the staged transcript carries the edit the diagnosis case grades ($graded paths)"
