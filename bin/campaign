@@ -7,8 +7,10 @@
 # readable without the lab: summary.md says what ran, on what, and what
 # came out, with indeterminate counted separately from pass and fail.
 #
-# Manual tool, never CI. Live runs (new covers pricing via bin/behavior's
-# own observation; run spends tokens) start only on a recorded go.
+# Manual tool, never CI. Live runs (run spends tokens) start only on a
+# recorded go; new and --dry-run plan without spending anything: they
+# report the number of planned runs and the exact invocations, and state
+# no monetary figure of their own.
 
 set -uo pipefail
 if [ -n "${SDLC_SKILLS_EVALS_ROOT:-}" ]; then
@@ -18,12 +20,14 @@ else
 fi
 # shellcheck source=../lib/common.sh
 source "$lab_root/lib/common.sh"
+# shellcheck source=../lib/pin.sh
+source "$lab_root/lib/pin.sh"
 
 usage() {
   cat <<'EOF'
 bin/campaign — run a labelled, pinned scenario set; report it.
 
-  new <label> --plugin <path|ref> --harness H --arms <list>
+  new <label> [--plugin <path|ref>] --harness H --arms <list>
       [--base REF] (--suite NAME | --scenarios a,b,c) --runs N [--tier T]
       [--harness-dir D] [--scenario-dir D]
   run <label>                 execute every planned run
@@ -38,29 +42,36 @@ while runs are pending, then writes summary.md (## Commit,
 ## Behavior scenarios, ## Chains from chains.json when present, ## Costs,
 ## Against baseline with --against).
 
-  --help                      this text
+--plugin is optional: the pinned upstream commit is used when it is left
+out. A ref that IS named is frozen to the commit it names, and the run
+uses that commit — a ref that moves after the campaign was prepared
+cannot become the pin of the run.
 
-  campaign --evals [--dry-run] --plugin P --harness H
+  campaign --evals [--dry-run] [--plugin P] --harness H
       (--skill S ... | --all) [--without none|old] [--old-plugin REF]
       [--campaign NAME] [--iteration N] [--timeout SEC] [--harness-dir D]
                                 run output-eval pairs into a workspace iteration
 
-new freezes campaign.json {plugin_ref, plugin_commit, harness,
-arms: [{name, base}], suite, scenarios, runs, tier, lab_commit, created}.
-run executes every planned run through bin/behavior --record (raw streams
-under raw/, run homes under TMPDIR, never under results/). report refuses
-while runs are pending, then writes summary.md (## Commit,
-## Behavior scenarios, ## Chains from chains.json when present, ## Costs,
-## Against baseline with --against).
-
 A `fake` harness name routes to lib/tests/fake-cli/ for self-tests.
 EOF
+  _pin_line
+}
+
+# The pin a campaign uses when the caller names none: the committed
+# upstream commit, read from config/upstream-inventory.json. It is a
+# commit, never a mutable tag, so a campaign never selects new work from
+# a moving ref.
+_pin_line() {
+  local pin
+  if pin="$(lab_inventory_commit 2>/dev/null)"; then
+    printf 'default pin: %s  (config/upstream-inventory.json)\n' "$pin"
+  else
+    printf 'default pin: (unreadable — config/upstream-inventory.json names no commit)\n'
+  fi
 }
 
 if [ "${1:-}" = "--evals" ]; then
   shift
-  # shellcheck source=../lib/pin.sh
-  source "$lab_root/lib/pin.sh"
   # shellcheck source=../lib/home-env.sh
   source "$lab_root/lib/home-env.sh"
   dry=""; plugin=""; harness=""; without="none"; old_plugin=""; campaign_n=""; iteration=""
@@ -107,18 +118,60 @@ if [ "${1:-}" = "--evals" ]; then
   for ef in "${evals_files[@]}"; do
     total_cases=$((total_cases + $(jq '.evals | length' "$ef")))
   done
+  # The plugin an eval run uses: the caller's, or the committed upstream
+  # commit. A commit, never a mutable tag.
+  plugin_defaulted=""
+  if [ -z "$plugin" ]; then
+    plugin="$(lab_inventory_commit 2>/dev/null)" || {
+      echo "no usable upstream pin: config/upstream-inventory.json names no commit" >&2; exit 2; }
+    plugin_defaulted="1"
+  fi
+  # The tree a run installs, and where it came from: a directory is the
+  # operator's own working tree and is used as it is, so the tree is the
+  # path; a ref is pinned into a worktree, so the tree is the commit it
+  # names.
+  if [ -n "$plugin_defaulted" ]; then
+    plugin_tree="$plugin"
+    plugin_note="config/upstream-inventory.json"
+  else
+    plugin_tree="$(lab_pin_tree "$plugin" 2>/dev/null)" || plugin_tree="$plugin"
+    plugin_note="$(lab_pin_note --plugin "$plugin")"
+  fi
   if [ -n "$dry" ]; then
     printf '%s eval(s) x 2 arms = %s runs, billed to your own harness account. Calls nothing.\n' \
       "$total_cases" "$((total_cases * 2))"
+    # The command carries the TREE the plan names — a commit for a ref, a
+    # path for a directory — so a ref that moves after the plan cannot
+    # change what the plan installs.
+    evals_cmd="bin/campaign --evals --plugin $(printf '%q' "$plugin_tree") --harness $(printf '%q' "$harness")"
+    if [ -n "$all_evals" ]; then evals_cmd="$evals_cmd --all"; else
+      for sk in "${skills[@]}"; do evals_cmd="$evals_cmd --skill $(printf '%q' "$sk")"; done
+    fi
+    evals_cmd="$evals_cmd --without $without"
+    [ -n "$old_plugin" ] && evals_cmd="$evals_cmd --old-plugin $(printf '%q' "$old_plugin")"
+    [ -n "$campaign_n" ] && evals_cmd="$evals_cmd --campaign $(printf '%q' "$campaign_n")"
+    [ -n "$iteration" ] && evals_cmd="$evals_cmd --iteration $(printf '%q' "$iteration")"
+    evals_cmd="$evals_cmd --timeout $timeout_s"
+    [ -n "$harnessdir_override" ] && evals_cmd="$evals_cmd --harness-dir $(printf '%q' "$harnessdir_override")"
+    echo "pin        : $plugin_tree  ($plugin_note)"
+    echo "harness    : $harness"
+    echo "command    : $evals_cmd"
     exit 0
   fi
-  [ -n "$plugin" ] || { echo "--evals needs --plugin (dry-run excepted)" >&2; exit 2; }
   hdir="${harnessdir_override:-$lab_root/harnesses}"
   [ "$harness" = fake ] && [ -z "$harnessdir_override" ] && hdir="$lab_root/lib/tests/fake-cli"
   [ -f "$hdir/$harness.sh" ] || { echo "no harness adapter: $harness" >&2; exit 2; }
   if [ "$(grep '^runnable=' "$hdir/$harness.sh" | sed 's/^runnable=//')" != "yes" ]; then
     echo "harness $harness is unrunnable here — measuring nothing" >&2; exit 2
   fi
+  # The adapters redirect the launch's stderr to "$errlog" — the contract
+  # every harness/*.sh header states. The file must exist before the
+  # adapter is sourced: under `set -u` an unset errlog aborts the
+  # LAUNCH with an unbound-variable error, so the CLI is never called
+  # and the campaign measures nothing while still reporting the eval as
+  # graded. Each arm's stderr starts empty; the file goes at exit.
+  errlog="$(mktemp)"
+  trap 'rm -f "${errlog:-}"' EXIT
   # shellcheck source=/dev/null
   source "$hdir/$harness.sh"
   require_tool jq timeout || exit 2
@@ -139,7 +192,7 @@ if [ "${1:-}" = "--evals" ]; then
   # through same-shell redirects (never $()) so their worktrees outlive
   # the call; everything is removed at campaign exit.
   _pin_run="$(lab_run_dir evals-pin)" || exit 2
-  trap 'lab_pin_cleanup "$_pin_run" 2>/dev/null; lab_home_cleanup "$_pin_run" 2>/dev/null' EXIT
+  trap 'lab_pin_cleanup "$_pin_run" 2>/dev/null; lab_home_cleanup "$_pin_run" 2>/dev/null; rm -f "${errlog:-}"' EXIT
   if [ -d "$plugin" ]; then with_src="$plugin";
   else
     lab_pin_plugin "$plugin" "$_pin_run/with" >"$_pin_run/with-commit.txt" 2>/dev/null || {
@@ -186,6 +239,7 @@ if [ "${1:-}" = "--evals" ]; then
         prompt_file="$(mktemp)"; printf '%s' "$prompt" > "$prompt_file"
         stream="$dest/stream.jsonl"
         start_ms="$(date +%s)000"
+        : > "$errlog"   # this arm's stderr starts empty
         adapter_run_behavioral "$workdir" "$prompt_file" "$stream"; status=$?
         end_ms="$(date +%s)000"
         rm -f "$prompt_file"
@@ -243,7 +297,6 @@ if [ "$cmd" = "new" ]; then
       *) echo "unknown argument: $1" >&2; exit 2;;
     esac
   done
-  [ -n "$plugin" ] || { echo "new needs --plugin <path|ref>" >&2; exit 2; }
   [ -n "$harness" ] || { echo "new needs --harness" >&2; exit 2; }
   [ -n "$arms" ] || { echo "new needs --arms" >&2; exit 2; }
   case "$runs" in ''|*[!0-9]*|0) echo "--runs needs a positive integer" >&2; exit 2;; esac
@@ -260,16 +313,31 @@ if [ "$cmd" = "new" ]; then
   if printf '%s' ",$arms," | grep -q ",red,"; then
     [ -n "$base" ] || { echo "--arms red needs --base REF" >&2; exit 2; }
   fi
-  # Freeze the plugin: a directory resolves to its HEAD, a ref resolves in
-  # SDLC_SKILLS_ROOT. Nothing global, nothing installed, ever satisfies this.
-  plugin_commit=""
-  if [ -d "$plugin" ]; then
-    plugin_commit="$(git -C "$plugin" rev-parse HEAD 2>/dev/null)" || {
-      echo "--plugin is not a plugin checkout: $plugin" >&2; exit 2; }
+  # The plugin a campaign freezes: the caller's, or the committed upstream
+  # commit. A ref is frozen to the COMMIT it names, so a tag that moves
+  # after the campaign was prepared cannot become the pin of the run.
+  # Nothing global, nothing installed, ever satisfies this.
+  plugin_defaulted=""
+  if [ -z "$plugin" ]; then
+    plugin="$(lab_inventory_commit 2>/dev/null)" || {
+      echo "no usable upstream pin: config/upstream-inventory.json names no commit" >&2; exit 2; }
+    plugin_defaulted="1"
+  fi
+  plugin_commit="$(lab_pin_commit_of "$plugin")" || {
+    echo "new needs a --plugin the plugin checkout can resolve" >&2; exit 2; }
+  # The tree the run installs, and where it came from. A directory is the
+  # operator's own working tree and is used as it is, so the tree is the
+  # path and the commit is only where that tree is; a ref is frozen to
+  # the commit it names, so the tree is that commit.
+  if [ -n "$plugin_defaulted" ]; then
+    plugin_tree="$plugin"
+    plugin_note="config/upstream-inventory.json"
+  elif [ -d "$plugin" ]; then
+    plugin_tree="$plugin"
+    plugin_note="$(lab_pin_note --plugin "$plugin")"
   else
-    proot="$(plugin_root 2>/dev/null)" || { echo "cannot resolve --plugin '$plugin' (no plugin checkout)" >&2; exit 2; }
-    plugin_commit="$(git -C "$proot" rev-parse "$plugin^{commit}" 2>/dev/null)" || {
-      echo "cannot resolve --plugin '$plugin' in $proot" >&2; exit 2; }
+    plugin_tree="$plugin_commit"
+    plugin_note="$(lab_pin_note --plugin "$plugin")"
   fi
   lab_commit="$(git -C "$lab_root" rev-parse HEAD 2>/dev/null || printf 'uncommitted')"
   day="$(date -u +%Y-%m-%d)"; created="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
@@ -297,9 +365,33 @@ if [ "$cmd" = "new" ]; then
     printf '  "created": '; jq -n --arg c "$created" '$c'; printf '\n}\n'
   } > "$dir/campaign.json"
   jq -e '.plugin_commit and (.arms | type == "array")' "$dir/campaign.json" >/dev/null || exit 2
-  planned="$(printf '%s\n' "$scenarios" | tr ',' '\n' | grep -c .)"
-  planned=$(( planned * $(printf '%s\n' "$arms" | tr ',' '\n' | grep -c .) * runs ))
-  echo "planned $planned runs into $dir"
+  planned_scenarios="$(printf '%s\n' "$scenarios" | tr ',' '\n' | grep -c .)"
+  planned_arms="$(printf '%s\n' "$arms" | tr ',' '\n' | grep -c .)"
+  planned=$(( planned_scenarios * planned_arms * runs ))
+  echo "planned $planned runs into $dir ($planned_scenarios scenarios x $planned_arms arms x $runs runs)"
+  echo "label      : $label"
+  echo "harness    : $harness"
+  echo "arms       : $arms"
+  echo "pin        : $plugin_tree  ($plugin_note)"
+  # The exact invocations the run will make, one per scenario and arm: the
+  # tree the campaign froze, which is the path for a directory and the
+  # frozen commit for a ref — the same tree the run below installs.
+  while IFS= read -r sc; do
+    while IFS= read -r an; do
+      plan_cmd="bin/behavior --harness $(printf '%q' "$harness") --scenario $(printf '%q' "$sc") --arm $an"
+      if [ "$an" = red ]; then
+        abase="$(jq -r --arg a "$an" '.arms[] | select(.name == $a) | .base // empty' "$dir/campaign.json")"
+        plan_cmd="$plan_cmd --base $(printf '%q' "$abase")"
+      elif [ "$an" != none ]; then
+        plan_cmd="$plan_cmd --plugin $(printf '%q' "$plugin_tree")"
+      fi
+      [ -n "$tier" ] && plan_cmd="$plan_cmd --tier $(printf '%q' "$tier")"
+      plan_cmd="$plan_cmd --record $(printf '%q' "$dir")"
+      [ -n "$harnessdir_override" ] && plan_cmd="$plan_cmd --harness-dir $(printf '%q' "$harnessdir_override")"
+      [ -n "$scenariodir_override" ] && plan_cmd="$plan_cmd --scenario-dir $(printf '%q' "$scenariodir_override")"
+      echo "command    : $plan_cmd"
+    done < <(jq -r '.arms[].name' "$dir/campaign.json")
+  done < <(jq -r '.scenarios[]' "$dir/campaign.json")
   exit 0
 fi
 
@@ -308,11 +400,13 @@ if [ "$cmd" = "run" ]; then
   dir="$(_record_dir "$label")" || exit 2
   harness="$(jq -r '.harness' "$dir/campaign.json")"
   plugin_ref="$(jq -r '.plugin_ref' "$dir/campaign.json")"
+  plugin_commit="$(jq -r '.plugin_commit' "$dir/campaign.json")"
   runs_n="$(jq -r '.runs' "$dir/campaign.json")"
   tier_c="$(jq -r '.tier // empty' "$dir/campaign.json")"
   hdir_c="$(jq -r '.harness_dir // empty' "$dir/campaign.json")"
   sdir_c="$(jq -r '.scenario_dir // empty' "$dir/campaign.json")"
-  planned=0; done_n=0
+  planned=0
+  before="$(find "$dir/runs" -name '*.json' 2>/dev/null | wc -l | tr -d ' ')"
   while read -r sc; do
     while read -r an; do
       abase="$(jq -r --arg a "$an" '.arms[] | select(.name == $a) | .base // empty' "$dir/campaign.json")"
@@ -321,15 +415,34 @@ if [ "$cmd" = "run" ]; then
         args=(--harness "$harness" --scenario "$sc" --arm "$an" --record "$dir")
         if [ "$an" = red ]; then args+=(--base "$abase");
         elif [ "$an" = none ]; then :;
-        else args+=(--plugin "$plugin_ref"); fi
+        elif [ -d "$plugin_ref" ]; then
+          # A directory is the operator's own working tree and is used as it
+          # is: the campaign plans that path and the run installs it.
+          args+=(--plugin "$plugin_ref");
+        else
+          # The FROZEN commit, not the ref: a campaign never re-resolves a
+          # ref at run time, so a tag that moved after the campaign was
+          # prepared cannot become the pin of the run.
+          args+=(--plugin "$plugin_commit");
+        fi
         [ -n "$tier_c" ] && args+=(--tier "$tier_c")
         [ -n "$hdir_c" ] && args+=(--harness-dir "$hdir_c")
         [ -n "$sdir_c" ] && args+=(--scenario-dir "$sdir_c")
         "$lab_root/bin/behavior" "${args[@]}" >/dev/null 2>&1
-        done_n=$((done_n + 1))
       done
     done < <(jq -r '.arms[].name' "$dir/campaign.json")
   done < <(jq -r '.scenarios[]' "$dir/campaign.json")
+  # A completion is a completion: count the records THIS run wrote, not
+  # the invocations and not the records an earlier attempt left. A run
+  # that resolved no pin, or refused its arguments, measured nothing, and
+  # saying it completed would be a claim the record does not support.
+  after="$(find "$dir/runs" -name '*.json' 2>/dev/null | wc -l | tr -d ' ')"
+  done_n=$((after - before))
+  # What this attempt achieved, so the report's pending gate can tell a
+  # missing observation from a record an earlier attempt left behind.
+  jq --argjson n "$done_n" --arg at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+    '.last_run = {records: $n, at: $at}' "$dir/campaign.json" > "$dir/.campaign.json.new" \
+    && mv "$dir/.campaign.json.new" "$dir/campaign.json"
   echo "completed $done_n/$planned runs into $dir"
   exit 0
 fi
@@ -342,7 +455,15 @@ while [ "$#" -gt 0 ]; do
 done
 dir="$(_record_dir "$label")" || exit 2
 planned="$(jq -r '(.scenarios | length) * (.arms | length) * .runs' "$dir/campaign.json")"
-have="$(find "$dir/runs" -name '*.json' | wc -l)"
+# The pending gate counts the records the LAST attempt wrote: a record an
+# earlier attempt left behind must never stand in for an observation this
+# campaign did not make.
+last_run="$(jq -r '.last_run.records // empty' "$dir/campaign.json" 2>/dev/null)"
+if [ -n "$last_run" ]; then
+  have="$last_run"
+else
+  have="$(find "$dir/runs" -name '*.json' | wc -l)"
+fi
 if [ "$have" -lt "$planned" ]; then
   echo "report refused: $have/$planned runs complete" >&2; exit 2
 fi
@@ -351,12 +472,23 @@ plugin_commit="$(jq -r '.plugin_commit' "$dir/campaign.json")"
 harness="$(jq -r '.harness' "$dir/campaign.json")"
 lab_commit="$(jq -r '.lab_commit' "$dir/campaign.json")"
 created="$(jq -r '.created' "$dir/campaign.json")"
+# The commit the runs actually measured. A directory plugin is the
+# operator's own working tree, so it can have moved since the campaign
+# was prepared: the frozen commit and the measured one are then different
+# trees, and the record says which was measured. Only the records that
+# measured a plugin count — the green arm's — so a red arm's base commit
+# is never presented as a plugin commit.
+measured="$(find "$dir/runs" -name '*-green-*.json' -exec jq -r '.plugin_commit // empty' {} + 2>/dev/null \
+  | sort -u | paste -sd, -)"
 {
   echo "# Campaign: $label"
   echo
   echo "## Commit"
   echo
   echo "- plugin: $plugin_ref ($plugin_commit)"
+  if [ -n "$measured" ] && [ "$measured" != "$plugin_commit" ]; then
+    echo "- plugin commit measured: $measured"
+  fi
   echo "- harness: $harness"
   echo "- created: $created"
   echo "- lab: $lab_commit"

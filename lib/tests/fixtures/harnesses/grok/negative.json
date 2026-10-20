@@ -1,0 +1,7 @@
+[
+{"type":"message_start","message":{"id":"msg_grok_2","type":"message","role":"assistant","model":"grok-4","content":[],"stop_reason":null}},
+{"type":"content_block_start","index":0,"content_block":{"type":"text","text":""}},
+{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"no skill here"}},
+{"type":"content_block_stop","index":0},
+{"type":"message_stop"}
+]
