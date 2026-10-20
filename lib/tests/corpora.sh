@@ -112,6 +112,8 @@ pin_tree_for_checks() { # $1 label  $2 what was not checked
   return 0
 }
 
+# --- end of the upstream tree block ---
+
 check_rc=0
 check_out=""
 

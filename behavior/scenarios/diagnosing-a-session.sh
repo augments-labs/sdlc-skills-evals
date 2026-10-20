@@ -83,10 +83,27 @@ scenario_assert() {
   if [ -z "$cites" ]; then
     fail "every finding cites the record — no path:line citation was written"
   else
-    local record_abs declared
+    local record_abs declared declared_resolved
     record_abs="$(cd "$(dirname "$transcript")" && pwd)/$(basename "$transcript")"
-    declared="$(printf '%s\n' "$body" | grep -m1 -E '^-[[:space:]]*\*\*Transcript:\*\*' \
-      | sed -E 's/^-[[:space:]]*\*\*Transcript:\*\*[[:space:]]*//; s/[[:space:]]*\(.*$//' | tr -d '`')"
+    # The upstream report template writes the field as `- Transcript: {{path}}
+    # ({{lines}} lines at {{time}})`; the bold form is accepted too.
+    declared="$(printf '%s\n' "$body" | grep -m1 -E '^-[[:space:]]*(\*\*)?Transcript(\*\*)?:' \
+      | sed -E 's/^-[[:space:]]*(\*\*)?Transcript(\*\*)?:[[:space:]]*//; s/[[:space:]]*\(.*$//' | tr -d '`')"
+    # The report DECLARES the path its citations are against. That declared
+    # path has to BE the record: a report that declares another file and then
+    # cites it has certified its own citation path, and the citations would be
+    # checked against a file that is not the session. The absolute form the
+    # pinned trace format asks for and the relative form both resolve to the
+    # record; anything else fails here.
+    case "$declared" in
+      /*) declared_resolved="$declared" ;;
+      *)  declared_resolved="$d/$declared" ;;
+    esac
+    if [ "$declared_resolved" != "$record_abs" ]; then
+      fail "the report declares the transcript its citations are against — it names '$declared', which is not the record"
+    else
+      pass "the report declares the transcript its citations are against"
+    fi
     local bad=""
     while IFS= read -r c; do
       [ -n "$c" ] || continue
@@ -96,7 +113,7 @@ scenario_assert() {
         /*) resolved="$cpath" ;;
         *)  resolved="$d/$cpath" ;;
       esac
-      if [ "$resolved" != "$record_abs" ] && [ "$resolved" != "$declared" ]; then
+      if [ "$resolved" != "$record_abs" ]; then
         bad="$bad $c(not-the-record)"
         continue
       fi

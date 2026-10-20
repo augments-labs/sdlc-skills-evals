@@ -229,6 +229,8 @@ pin_tree_for_checks() { # $1 label  $2 what was not checked
   return 0
 }
 
+# --- end of the upstream tree block ---
+
 
 # The locator an observed regression must carry: a specific record under the
 # lab's record root. A file that merely exists is not evidence — `README.md`
@@ -270,7 +272,7 @@ for scen in "${scenarios[@]}"; do
     # EVERY clause line is checked, not only the first: a quote the pin does
     # not hold, a file that is not there, and a clause attributed to the wrong
     # file all have to be caught.
-    clause_bad="" clause_n=0 clause_skipped=0
+    clause_bad="" clause_n=0 clause_skipped=0 cskill=""
     while IFS= read -r clause; do
       [ -n "$clause" ] || continue
       clause_n=$((clause_n + 1))
@@ -302,7 +304,14 @@ for scen in "${scenarios[@]}"; do
       bad "$name is a prospective probe and claims no observed-regression evidence"
       continue
     fi
-    ok "$name declares a prospective contract probe and every clause it quotes holds ($clause_n clauses)"
+    ok "$name declares a prospective contract probe on $cskill"
+    # The clause COMPARISON is a line of its own, printed only when the
+    # comparison ran. Under a skip there is no green clause line: a green line
+    # has to mean a check ran and passed. The suite reports the skip once, at
+    # the top, naming the count and what was not checked.
+    if [ -n "$PIN_TREE" ]; then
+      ok "$name — every clause it quotes holds ($clause_n clauses)"
+    fi
   else
     evidence="$(grep -m1 -E '^# Evidence: .+' "$scen" || true)"
     if [ -z "$evidence" ]; then
@@ -412,9 +421,20 @@ for scen in "${scenarios[@]}"; do
   fi
 
   # --- the conformant artifacts ------------------------------------------------
-  for prepare in "$FIX_DIR/$name/success.prepare.sh" "$FIX_DIR/$name"/success-alt*.prepare.sh; do
-    [ -f "$prepare" ] || continue
-    label="$(basename "$prepare" .prepare.sh)"
+  #
+  # The base case is the SUCCESS ARTIFACT ITSELF: the tree, plus the optional
+  # prepare script that materializes what has to be computed. Every scenario is
+  # checked, whether or not it has a prepare script — a prepare script is an
+  # optional way of BUILDING one fixture, not the trigger for checking it.
+  #
+  # A scenario may carry further conformant artifacts, `success-alt*.prepare.sh`,
+  # for the cases where more than one answer is right.
+  conformant_labels="success"
+  for p in "$FIX_DIR/$name"/success-alt*.prepare.sh; do
+    [ -f "$p" ] || continue
+    conformant_labels="$conformant_labels $(basename "$p" .prepare.sh)"
+  done
+  for label in $conformant_labels; do
     d="$work/$name-$label"
     if ! build_workdir "$scen" "$d"; then
       bad "$name $label — the fixture did not build"
@@ -424,10 +444,9 @@ for scen in "${scenarios[@]}"; do
     stream_file="$work/$name-$label.stream"
     : > "$stream_file"
     [ -f "$FIX_DIR/$name/success.stream" ] && cp "$FIX_DIR/$name/success.stream" "$stream_file"
-    if [ "$prepare" != "$FIX_DIR/$name/success.prepare.sh" ] && [ -f "$FIX_DIR/$name/success.prepare.sh" ]; then
-      run_prepare "$FIX_DIR/$name/success.prepare.sh" "$d" "$stream_file"
-    fi
-    run_prepare "$prepare" "$d" "$stream_file"
+    # The base prepare materializes what has to be computed; an alt builds on it.
+    [ -f "$FIX_DIR/$name/success.prepare.sh" ] && run_prepare "$FIX_DIR/$name/success.prepare.sh" "$d" "$stream_file"
+    [ "$label" = success ] || run_prepare "$FIX_DIR/$name/$label.prepare.sh" "$d" "$stream_file"
     out="$(run_assert "$scen" "$d" "$stream_file")"
     rc=$?
     checks="$(printf '%s\n' "$out" | sed -n 's/^CHECKS_RUN=//p' | tail -1)"
@@ -588,8 +607,8 @@ done
 # The two gates that read the pinned tree must resolve it the same way, or
 # one of them answers a question about a different tree than the other. The
 # block is written out identically in both files; this compares them.
-tree_block() { # $1 file
-  sed -n '/^# --- the upstream tree the pin-relative checks read/,/^}/p' "$1"
+tree_block() { # $1 file — the WHOLE block, from its marker to its end marker
+  sed -n '/^# --- the upstream tree the pin-relative checks read/,/^# --- end of the upstream tree block ---$/p' "$1"
 }
 if [ "$(tree_block "$here/lib/tests/scenario-contracts.sh")" = \
      "$(tree_block "$here/lib/tests/corpora.sh")" ]; then
