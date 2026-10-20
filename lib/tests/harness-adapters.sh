@@ -668,6 +668,74 @@ EOS
     fi
   fi
 
+  # --- devin's resume is a resume, not a fresh session ------------------------
+  # The contract: a continue resumes from the session the prior stream
+  # records, never a fresh session. Devin speaks ACP, so the resume is an
+  # ACP session/load (or session/resume) for the recorded id — and the
+  # fake's own record of what it was asked for is the proof. A continue that
+  # quietly opened a new session would be scored as a resume, so the record
+  # is read, not the adapter's word.
+  if [ "$h" = "devin" ]; then
+    local prior_sid acp_log acp_before turn_log
+    prior_sid="$(jq -r 'select(.id? == 2) | .result.sessionId // empty' "$stream" 2>/dev/null | head -1)"
+    acp_log="$harness_home/.fake-harness.log"
+    # Only the records the CONTINUE made count: the runs before it asked
+    # for their own sessions, and a grep over the whole log would match
+    # them.
+    acp_before="$(wc -l < "$acp_log" 2>/dev/null || echo 0)"
+    if [ -n "$prior_sid" ] && adapter_continue_behavioral "$wd" "next" "$work/next.jsonl" "$stream" \
+        >/dev/null 2>"$work/resume.err"; then
+      ok "devin continues a session it can identify ($prior_sid)"
+    else
+      bad "devin continues a session it can identify ($prior_sid) (see $work/resume.err)"
+    fi
+    turn_log="$work/acp-turn.log"
+    tail -n "+$((acp_before + 1))" "$acp_log" > "$turn_log" 2>/dev/null || : > "$turn_log"
+    if grep -q '^acp devin .*"method":"session/new"' "$turn_log" 2>/dev/null; then
+      bad "devin opens no fresh session for a continue (it sent session/new)"
+    else
+      ok "devin opens no fresh session for a continue"
+    fi
+    if grep -q "^acp devin .*\"method\":\"session/load\".*$prior_sid" "$turn_log" 2>/dev/null ||
+       grep -q "^acp devin .*\"method\":\"session/resume\".*$prior_sid" "$turn_log" 2>/dev/null; then
+      ok "devin loads the session the prior stream recorded"
+    else
+      bad "devin loads the session the prior stream recorded ($prior_sid)"
+    fi
+    if grep -q "^acp devin .*\"method\":\"session/prompt\".*$prior_sid" "$turn_log" 2>/dev/null; then
+      ok "devin prompts the session the prior stream recorded"
+    else
+      bad "devin prompts the session the prior stream recorded ($prior_sid)"
+    fi
+    # An agent that advertises no resume capability cannot resume: the
+    # continue must be refused, not answered by a fresh session.
+    printf 'none\n' > "$bin/acp-caps"
+    if adapter_continue_behavioral "$wd" "next" "$work/next2.jsonl" "$stream" \
+        >/dev/null 2>"$work/resume2.err"; then
+      bad "devin refuses a continue its ACP server cannot resume"
+    else
+      ok "devin refuses a continue its ACP server cannot resume"
+    fi
+    # The other way ACP v1 offers to resume: the agent advertises
+    # sessionCapabilities.resume instead of loadSession.
+    printf 'resume\n' > "$bin/acp-caps"
+    acp_before="$(wc -l < "$acp_log" 2>/dev/null || echo 0)"
+    if adapter_continue_behavioral "$wd" "next" "$work/next3.jsonl" "$stream" \
+        >/dev/null 2>"$work/resume3.err"; then
+      ok "devin resumes through session/resume where the agent advertises it"
+    else
+      bad "devin resumes through session/resume where the agent advertises it (see $work/resume3.err)"
+    fi
+    tail -n "+$((acp_before + 1))" "$acp_log" > "$turn_log" 2>/dev/null || : > "$turn_log"
+    if grep -q "^acp devin .*\"method\":\"session/resume\".*$prior_sid" "$turn_log" 2>/dev/null &&
+       ! grep -q '^acp devin .*"method":"session/new"' "$turn_log" 2>/dev/null; then
+      ok "devin resumes the recorded session through session/resume"
+    else
+      bad "devin resumes the recorded session through session/resume"
+    fi
+    rm -f "$bin/acp-caps"
+  fi
+
   # --- the tier path ---------------------------------------------------------
   if [ "$(expect "$h" tier)" = "yes" ]; then
     if [ "$(adapter_model small 2>/dev/null)" = "haiku" ] &&

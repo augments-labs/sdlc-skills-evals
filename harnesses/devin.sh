@@ -23,6 +23,17 @@
 #     ToolCall, UsageUpdate). The adapter drives it as an ACP client:
 #     `initialize`, `session/new`, `session/prompt`, and it answers the
 #     agent's `session/request_permission` requests.
+#   - A CONTINUE resumes the session the prior stream recorded, through the
+#     ACP v1 resume methods: `session/load` (LoadSessionRequest — sessionId,
+#     cwd, mcpServers), which the agent advertises as
+#     `agentCapabilities.loadSession`, or `session/resume`
+#     (ResumeSessionRequest), which it advertises as
+#     `agentCapabilities.sessionCapabilities.resume`. Both are in the v1
+#     schema and both are in the 3000.11.3 binary. The agent's own
+#     `initialize` answer says which it can do, and an agent that advertises
+#     neither cannot resume — so the continue is refused rather than
+#     answered by a fresh session. (ACP v1 schema:
+#     <https://agentclientprotocol.com/protocol/schema>, read 2026-10-20.)
 #   - The parser is exercised against LABELLED SYNTHETIC fixtures under
 #     lib/tests/fixtures/harnesses/devin/. No devin ACP session has been
 #     observed on this machine, so every capability below is documentation
@@ -251,9 +262,9 @@ _devin_acp_wait() { # $1 stream  $2 id  $3 fd  $4 read-only?|all  $5 pid
   return 1
 }
 
-_devin_acp_run() { # $1 workdir  $2 prompt  $3 stream  $4 read-only?|all  $5 cli permission mode
-  local wd="$1" prompt="$2" stream="$3" mode="$4"
-  local fifo pid waited=0 limit sid
+_devin_acp_run() { # $1 workdir  $2 prompt  $3 stream  $4 read-only?|all  $5 cli permission mode  $6 session id to resume ("" = a new session)
+  local wd="$1" prompt="$2" stream="$3" mode="$4" resume="${6:-}"
+  local fifo pid waited=0 limit sid method
   fifo="$(mktemp -u "$harness_home/tmp/devin-acp.XXXXXX")" || return 1
   mkfifo "$fifo" || return 1
   # The parent holds the fifo open READ-WRITE, so neither the open below nor
@@ -271,11 +282,35 @@ _devin_acp_run() { # $1 workdir  $2 prompt  $3 stream  $4 read-only?|all  $5 cli
   printf '%s\n' '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":1,"clientCapabilities":{"fs":{"readTextFile":false,"writeTextFile":false}}}}' >&3
   _devin_acp_wait "$stream" 1 3 "$mode" "$pid" || { exec 3>&-; kill "$pid" 2>/dev/null; rm -f "$fifo"; return 1; }
 
-  printf '%s\n' "$(jq -nc --arg cwd "$wd" \
-    '{jsonrpc:"2.0",id:2,method:"session/new",params:{cwd:$cwd,mcpServers:[]}}')" >&3
-  _devin_acp_wait "$stream" 2 3 "$mode" "$pid" || { exec 3>&-; kill "$pid" 2>/dev/null; rm -f "$fifo"; return 1; }
-  sid="$(jq -r 'select(.id? == 2) | .result.sessionId // empty' "$stream" 2>/dev/null | head -1)"
-  [ -n "$sid" ] || { exec 3>&-; kill "$pid" 2>/dev/null; rm -f "$fifo"; return 1; }
+  if [ -n "$resume" ]; then
+    # A RESUME, not a new session. ACP v1 has two ways to resume one:
+    # `session/load`, which the agent advertises as
+    # `agentCapabilities.loadSession`, and `session/resume`, which it
+    # advertises as `agentCapabilities.sessionCapabilities.resume`. The
+    # agent's OWN answer says which it can do; an agent that advertises
+    # neither cannot resume, so the continue is refused here rather than
+    # answered by a fresh session.
+    if [ "$(jq -r 'select(.id? == 1) | .result.agentCapabilities.loadSession // false' \
+            "$stream" 2>/dev/null | head -1)" = "true" ]; then
+      method="session/load"
+    elif [ -n "$(jq -r 'select(.id? == 1) | .result.agentCapabilities.sessionCapabilities.resume // empty' \
+            "$stream" 2>/dev/null | head -1)" ]; then
+      method="session/resume"
+    else
+      echo "devin's ACP server advertises no session resume capability (agentCapabilities.loadSession and sessionCapabilities.resume are both absent) — the continue is refused rather than answered by a fresh session" >&2
+      exec 3>&-; kill "$pid" 2>/dev/null; rm -f "$fifo"; return 2
+    fi
+    sid="$resume"
+    printf '%s\n' "$(jq -nc --arg sid "$sid" --arg cwd "$wd" --arg m "$method" \
+      '{jsonrpc:"2.0",id:2,method:$m,params:{sessionId:$sid,cwd:$cwd,mcpServers:[]}}')" >&3
+    _devin_acp_wait "$stream" 2 3 "$mode" "$pid" || { exec 3>&-; kill "$pid" 2>/dev/null; rm -f "$fifo"; return 1; }
+  else
+    printf '%s\n' "$(jq -nc --arg cwd "$wd" \
+      '{jsonrpc:"2.0",id:2,method:"session/new",params:{cwd:$cwd,mcpServers:[]}}')" >&3
+    _devin_acp_wait "$stream" 2 3 "$mode" "$pid" || { exec 3>&-; kill "$pid" 2>/dev/null; rm -f "$fifo"; return 1; }
+    sid="$(jq -r 'select(.id? == 2) | .result.sessionId // empty' "$stream" 2>/dev/null | head -1)"
+    [ -n "$sid" ] || { exec 3>&-; kill "$pid" 2>/dev/null; rm -f "$fifo"; return 1; }
+  fi
 
   printf '%s\n' "$(jq -nc --arg sid "$sid" --arg p "$prompt" \
     '{jsonrpc:"2.0",id:3,method:"session/prompt",params:{sessionId:$sid,prompt:[{type:"text",text:$p}]}}')" >&3
@@ -316,13 +351,18 @@ adapter_run_behavioral() { # $1 workdir  $2 opening file  $3 stream
 # Continue the same behavioural session. The session id comes from the prior
 # stream's own `session/new` answer; an absent id is an adapter error, not a
 # fresh-session substitute.
+#
+# The id is handed back to the agent as an ACP resume — `session/load`, or
+# `session/resume` where the agent advertises that instead — and the same id
+# is prompted. A server that advertises neither cannot resume, and the
+# continue is refused rather than answered by a fresh session.
 adapter_continue_behavioral() { # $1 workdir  $2 prompt  $3 new stream  $4 prior stream
   local wd="$1" prompt="$2" out="$3" prior="$4" session_id
   session_id="$(jq -r 'select(.id? == 2) | .result.sessionId // empty' \
     "$prior" 2>/dev/null | head -1)"
   [ -n "$session_id" ] || { echo "Devin stream contains no resumable session id" >&2; return 2; }
   devin_env
-  ( cd "$wd" && _devin_acp_run "$wd" "$prompt" "$out" all accept-edits ) \
+  ( cd "$wd" && _devin_acp_run "$wd" "$prompt" "$out" all accept-edits "$session_id" ) \
     < /dev/null > /dev/null 2>>"$errlog"
 }
 

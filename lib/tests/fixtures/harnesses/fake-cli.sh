@@ -79,19 +79,52 @@ case "$self" in
     if [ "${1:-}" = "plugins" ] && [ "${2:-}" = "install" ]; then exit 0; fi
     case " $* " in
       *" acp "*)
-    # A minimal ACP server: answer initialize, open a session, run the
-    # prompt. The agent's own notifications are the recorded stream.
+    # A minimal ACP server: answer initialize, open a session, load or
+    # resume one, and run the prompt. The agent's own notifications are
+    # the recorded stream.
+    #
+    # Every request it receives is recorded, so a test can see WHICH session
+    # the client asked for: a client that resumes must ask for the session
+    # the prior stream recorded, not open a new one.
+    #
+    # Each session/new gets its OWN id, so a continue that quietly opened a
+    # fresh session is visible as a second, different id.
+    #
+    # The capability advertised comes from a file beside this script:
+    # `load` (the default) advertises session/load, `resume` advertises
+    # session/resume, and `none` advertises neither — an agent that cannot
+    # resume, which a continue must refuse rather than fake.
+    caps="$(cat "$(dirname "$0")/acp-caps" 2>/dev/null || echo load)"
     while IFS= read -r line; do
-      case "$line" in
-        *'"method":"initialize"'*)
-          printf '{"jsonrpc":"2.0","id":1,"result":{"protocolVersion":1,"agentCapabilities":{"loadSession":false},"authMethods":[]}}\n'
+      [ -n "$line" ] || continue
+      [ -n "$_log" ] && printf 'acp %s %s\n' "$self" "$line" >> "$_log" 2>/dev/null
+      method="$(printf '%s' "$line" | jq -r '.method // empty' 2>/dev/null)"
+      rid="$(printf '%s' "$line" | jq -r '.id // empty' 2>/dev/null)"
+      case "$method" in
+        initialize)
+          case "$caps" in
+            none)
+              printf '{"jsonrpc":"2.0","id":%s,"result":{"protocolVersion":1,"agentCapabilities":{"loadSession":false},"authMethods":[]}}\n' "$rid";;
+            resume)
+              printf '{"jsonrpc":"2.0","id":%s,"result":{"protocolVersion":1,"agentCapabilities":{"loadSession":false,"sessionCapabilities":{"resume":{}}},"authMethods":[]}}\n' "$rid";;
+            *)
+              printf '{"jsonrpc":"2.0","id":%s,"result":{"protocolVersion":1,"agentCapabilities":{"loadSession":true},"authMethods":[]}}\n' "$rid";;
+          esac
           ;;
-        *'"method":"session/new"'*)
-          printf '{"jsonrpc":"2.0","id":2,"result":{"sessionId":"sess-fake-acp-1"}}\n'
+        session/new)
+          n=1
+          [ -n "$_state" ] && n=$(( $(cat "$_state/devin-sessions" 2>/dev/null || echo 0) + 1 ))
+          [ -n "$_state" ] && mkdir -p "$_state" 2>/dev/null
+          [ -n "$_state" ] && printf '%s\n' "$n" > "$_state/devin-sessions"
+          printf '{"jsonrpc":"2.0","id":%s,"result":{"sessionId":"sess-fake-acp-%s"}}\n' "$rid" "$n"
           ;;
-        *'"method":"session/prompt"'*)
-          printf '{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"sess-fake-acp-1","update":{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"ok"}}}}\n'
-          printf '{"jsonrpc":"2.0","id":3,"result":{"stopReason":"end_turn"}}\n'
+        session/load|session/resume)
+          printf '{"jsonrpc":"2.0","id":%s,"result":{"modes":null}}\n' "$rid"
+          ;;
+        session/prompt)
+          sid="$(printf '%s' "$line" | jq -r '.params.sessionId // empty' 2>/dev/null)"
+          printf '{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"%s","update":{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"ok"}}}}\n' "$sid"
+          printf '{"jsonrpc":"2.0","id":%s,"result":{"stopReason":"end_turn"}}\n' "$rid"
           ;;
       esac
     done
