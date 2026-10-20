@@ -1,13 +1,283 @@
 #!/usr/bin/env bash
 # bin/check — the static gate entry point. No live runs, no network, no keys.
 # Later tasks fill in the real sections (E-4 scenarios, E-5 query sets, E-6
-# evals shape, E-7 inventory, E-14 docs/code rule).
+# evals shape, V3-INVENTORY pinned scope, E-14 docs/code rule).
 set -uo pipefail
 root="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$root" || exit 1
 
 echo "check: skeleton — static entry point"
 echo "check: .gitignore honors plans, raw runs, workspaces, secrets"
+
+# V3-INVENTORY: the pinned upstream scope.
+#
+# The pin (repository, commit, package version) lives here so a rewritten
+# commit or a mutable version tag fails the gate. The membership — which
+# skills, which harnesses — is checked against an explicitly supplied plugin
+# tree and is never fetched, so the default gate stays offline.
+#
+# The roots below are the gate's seams, and each has more than one reader.
+# INVENTORY_PATH is the committed inventory. DOCS_ROOT is the guides root
+# the no-exec-bit rule scans and the directory the coverage record is read
+# from, so a caller that moves it moves both. DESCRIPTIONS_ROOT is the
+# query-set root the shape check and the coverage scan both read.
+INV_URL="https://github.com/augments-labs/sdlc-skills"
+INV_COMMIT="638040d407eae2834414968478792be99b3ff0cf"
+INV_VERSION="11.0.0"
+inv_path="${INVENTORY_PATH:-config/upstream-inventory.json}"
+docs_root="${DOCS_ROOT:-docs}"
+desc_root="${DESCRIPTIONS_ROOT:-descriptions}"
+check_plugin=""
+inv_only=0
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --plugin) check_plugin="${2:-}"; shift 2 2>/dev/null || shift ;;
+    --inventory) inv_only=1; shift ;;
+    *) break ;;
+  esac
+done
+
+_list_lines() { # $1 list — one line per member, and no line at all for an
+  # empty list: an empty list and a list holding an empty member are
+  # different things, and the second must not be made invisible
+  [ -n "$1" ] || return 0
+  printf '%s\n' "$1"
+}
+
+_inventory_drift() { # $1 label, $2 inventory list, $3 tree list — 0 when they agree
+  local label="$1" inv_list="$2" tree_list="$3" missing stale
+  missing="$(comm -13 <(_list_lines "$inv_list" | sort) <(_list_lines "$tree_list" | sort))"
+  stale="$(comm -23 <(_list_lines "$inv_list" | sort) <(_list_lines "$tree_list" | sort))"
+  if [ -z "$missing" ] && [ -z "$stale" ]; then
+    return 0
+  fi
+  echo "check: FAIL the inventory does not match the supplied tree ($label):"
+  if [ -n "$missing" ]; then
+    echo "  in the supplied tree, absent from the inventory:"
+    printf '%s\n' "$missing" | sed 's/^/    /'
+  fi
+  if [ -n "$stale" ]; then
+    echo "  in the inventory, absent from the supplied tree:"
+    printf '%s\n' "$stale" | sed 's/^/    /'
+  fi
+  return 1
+}
+
+_check_inventory() { # the committed inventory, and its drift against a tree
+  local inv="$inv_path" sk h tree_skills tree_harnesses
+  local eval_gaps="" desc_gaps="" adapter_gaps=""
+  local skills_list="" harnesses_list=""
+  if [ ! -f "$inv" ]; then
+    echo "check: FAIL no upstream inventory at $inv"
+    return 1
+  fi
+  if ! jq -e . "$inv" >/dev/null 2>&1; then
+    echo "check: FAIL $inv is not valid JSON"
+    return 1
+  fi
+  if ! jq -e --arg u "$INV_URL" --arg c "$INV_COMMIT" --arg v "$INV_VERSION" \
+      '(.upstream.url == $u) and (.upstream.commit == $c) and (.upstream.version == $v)' "$inv" >/dev/null; then
+    echo "check: FAIL $inv does not pin $INV_COMMIT ($INV_VERSION)"
+    return 1
+  fi
+  if ! jq -e '(.skills | type == "array") and (.skills | length > 0)' "$inv" >/dev/null; then
+    echo "check: FAIL $inv needs a non-empty skills array"
+    return 1
+  fi
+  if ! jq -e 'all(.skills[]; type == "string" and test("^[a-z0-9][a-z0-9-]*/[a-z0-9][a-z0-9-]*$"))' "$inv" >/dev/null; then
+    echo "check: FAIL skill rows must be canonical paths (<phase>/<skill>)"
+    return 1
+  fi
+  if ! jq -e '(.skills | length) == (.skills | unique | length)' "$inv" >/dev/null; then
+    echo "check: FAIL skill rows must be unique"
+    return 1
+  fi
+  if ! jq -e '.skills == (.skills | sort)' "$inv" >/dev/null; then
+    echo "check: FAIL skill rows must be in canonical (sorted) order"
+    return 1
+  fi
+  if ! jq -e '(.harnesses | type == "array") and (.harnesses | length > 0)' "$inv" >/dev/null; then
+    echo "check: FAIL $inv needs a non-empty harnesses array"
+    return 1
+  fi
+  if ! jq -e 'all(.harnesses[]; type == "string" and test("^[a-z][a-z0-9-]*$"))' "$inv" >/dev/null; then
+    echo "check: FAIL harness rows must be plain names"
+    return 1
+  fi
+  if ! jq -e '(.harnesses | length) == (.harnesses | unique | length)' "$inv" >/dev/null; then
+    echo "check: FAIL harness rows must be unique"
+    return 1
+  fi
+  if ! jq -e '.harnesses == (.harnesses | sort)' "$inv" >/dev/null; then
+    echo "check: FAIL harness rows must be in canonical (sorted) order"
+    return 1
+  fi
+  # The member lists are read once, here, and a read that fails fails the
+  # gate: a list that reads empty because the read failed is not an empty
+  # list, and a counter that reads zero because nothing was scanned is a
+  # measurement that never happened.
+  if ! skills_list="$(jq -r '.skills[]' "$inv")"; then
+    echo "check: FAIL cannot read the skill list from $inv"
+    return 1
+  fi
+  if ! harnesses_list="$(jq -r '.harnesses[]' "$inv")"; then
+    echo "check: FAIL cannot read the harness list from $inv"
+    return 1
+  fi
+  if [ -n "$check_plugin" ]; then
+    if [ ! -d "$check_plugin/skills" ] || [ ! -d "$check_plugin/tests/harnesses" ]; then
+      echo "check: FAIL $check_plugin has no skills/ or tests/harnesses/ directory (not a plugin tree)"
+      return 1
+    fi
+    # the comparison is by name: the tree's own commit and its contents are
+    # not established by it. Say so before the comparison, where it is read
+    # on the failure path as well as on the success path.
+    echo "check: inventory membership compared by name against the supplied tree $check_plugin; the tree's commit and its contents were not verified"
+    # Every skill under skills/ and every file under tests/harnesses/ is
+    # compared, whatever its depth, except a file named README.md: the
+    # upstream tree carries one beside its harnesses and it is not a
+    # harness. Apart from that exclusion a member of a supplied tree is
+    # never invisible to the gate. The packaged mirror lives under
+    # plugins/, outside these roots, so it is never collected. The harness
+    # set is a set of names, so a repeated basename is one member. A name
+    # that strips to nothing is a member, and is shown as one.
+    tree_skills="$(cd "$check_plugin" && find skills -name SKILL.md | sed 's|^skills/||; s|/SKILL.md$||' | sed 's|^$|(an empty name)|' | sort)" \
+      || { echo "check: FAIL cannot read the tree at $check_plugin"; return 1; }
+    tree_harnesses="$(cd "$check_plugin" && find tests/harnesses -type f ! -name 'README.md' | sed 's|.*/||; s|\.sh$||' | sed 's|^$|(an empty name)|' | sort -u)" \
+      || { echo "check: FAIL cannot read the tree at $check_plugin"; return 1; }
+    _inventory_drift "skills" "$skills_list" "$tree_skills" || return 1
+    _inventory_drift "harnesses" "$harnesses_list" "$tree_harnesses" || return 1
+  else
+    # membership is knowable only against a tree: say so, so a reader of the
+    # log cannot mistake this for "the inventory matches upstream"
+    echo "check: inventory membership not checked (no --plugin tree); the pin, canonical form, uniqueness and order were"
+  fi
+  # Coverage gaps are a FAILURE, not a report: the successor plan closes the
+  # skill gaps in V3-CORPORA and the adapter gaps in V3-HARNESSES, and the
+  # last definition has landed. The lists are printed first, so a reader sees
+  # what is missing before the gate stops.
+  local eval_n=0 desc_n=0 adapter_n=0
+  while IFS= read -r sk; do
+    if [ ! -f "behavior/evals/$sk/evals.json" ]; then
+      eval_gaps="$eval_gaps $sk"; eval_n=$((eval_n + 1))
+    fi
+    if [ ! -f "$desc_root/$sk.json" ]; then
+      desc_gaps="$desc_gaps $sk"; desc_n=$((desc_n + 1))
+    fi
+  done <<<"$skills_list"
+  while IFS= read -r h; do
+    if [ ! -f "harnesses/$h.sh" ]; then
+      adapter_gaps="$adapter_gaps $h"; adapter_n=$((adapter_n + 1))
+    fi
+  done <<<"$harnesses_list"
+  echo "check: coverage checked: $eval_n skills without an eval definition, $desc_n without a description set, $adapter_n without a lab adapter (V3-CORPORA closes the skills, V3-HARNESSES the adapters)"
+  for sk in $eval_gaps; do echo "check: gap: no evals.json for $sk"; done
+  for sk in $desc_gaps; do echo "check: gap: no description set for $sk"; done
+  for h in $adapter_gaps; do echo "check: gap: no lab adapter for $h"; done
+  if [ "$eval_n" -ne 0 ] || [ "$desc_n" -ne 0 ] || [ "$adapter_n" -ne 0 ]; then
+    echo "check: FAIL the coverage list is not closed: $eval_n skills without an eval definition, $desc_n without a description set, $adapter_n without a lab adapter"
+    return 1
+  fi
+  echo "check: inventory ok"
+  return 0
+}
+
+_check_coverage_record() { # every old task is mapped to a scope verdict
+  local doc="$docs_root/upstream-coverage.md" id reason
+  if [ ! -f "$doc" ]; then
+    echo "check: FAIL no coverage record at $doc"
+    return 1
+  fi
+  for id in E-0 E-1 E-2 E-3 E-4 E-5 E-6 E-7 E-8 E-9 E-10 E-11 E-12 E-13 E-14; do
+    # The mapping is read from the record's task table, and that table is
+    # found by identity, not by shape. A table is a run of consecutive
+    # lines that start with "|"; its first line is the header and the lines
+    # after it are its rows, so a table ends at the first line that is not
+    # a table row. A table could supply a verdict when its header names a
+    # Verdict column, or when one of its rows holds an E-n id in the first
+    # column. The record must hold exactly one such table: none is a
+    # record with no task table, more than one is ambiguous, and both fail
+    # loudly rather than resolving to a table the gate cannot identify.
+    # Inside that table the id is matched in the first column only and the
+    # verdict is read from the column the header names, so a row must
+    # have the header's column count.
+    if ! reason="$(awk -v id="$id" '
+      function trim(s) { gsub(/^[[:space:]]+|[[:space:]]+$/, "", s); return s }
+      function cells(line,   n) {
+        n = split(line, C, "|")
+        cfirst = 1; clast = n
+        if (C[1] == "") cfirst = 2
+        if (C[n] == "") clast = n - 1
+        return clast - cfirst + 1
+      }
+      { line[NR] = $0 }
+      END {
+        nt = 0; i = 1
+        while (i <= NR) {
+          if (line[i] !~ /^\|/) { i++; continue }
+          s = i
+          while (i <= NR && line[i] ~ /^\|/) i++
+          nt++; tstart[nt] = s; tend[nt] = i - 1
+        }
+        ns = 0
+        for (t = 1; t <= nt; t++) {
+          cells(line[tstart[t]])
+          hcols[t] = clast - cfirst + 1
+          tvcol[t] = 0
+          for (j = cfirst; j <= clast; j++) {
+            if (trim(C[j]) == "Verdict") { tvcol[t] = j; break }
+          }
+          holds = 0
+          for (r = tstart[t] + 1; r <= tend[t]; r++) {
+            cells(line[r])
+            if (trim(C[cfirst]) ~ /^E-[0-9]+([[:space:]]|$)/) { holds = 1; break }
+          }
+          if (tvcol[t] > 0 || holds) { ns++; sup[ns] = t }
+        }
+        if (ns == 0) {
+          print "the coverage record has no task table: the gate expected the table whose rows hold an E-n task id, and no table in the record does"
+          exit 1
+        }
+        if (ns > 1) {
+          msg = "the coverage record has " ns " tables that could supply a verdict ("
+          for (k = 1; k <= ns; k++) {
+            msg = msg (k > 1 ? ", " : "") "line " tstart[sup[k]] " " line[tstart[sup[k]]]
+          }
+          print msg "): the task table is ambiguous, and the gate expected exactly one"
+          exit 1
+        }
+        t = sup[1]
+        if (tvcol[t] == 0) {
+          print "the task table at line " tstart[t] " (" line[tstart[t]] ") names no Verdict column, so no row of it can carry a verdict"
+          exit 1
+        }
+        for (r = tstart[t] + 1; r <= tend[t]; r++) {
+          cells(line[r])
+          if (clast - cfirst + 1 != hcols[t]) continue
+          if (trim(C[cfirst]) !~ ("^" id "([[:space:]]|$)")) continue
+          v = trim(C[tvcol[t]])
+          if (v == "preserved" || v == "extended" || v == "removed") exit 0
+        }
+        print "the coverage record does not map " id " to preserved, extended or removed: the task table at line " tstart[t] " (" line[tstart[t]] ") has no such row"
+        exit 1
+      }' "$doc")"; then
+      echo "check: FAIL $reason"
+      return 1
+    fi
+  done
+  echo "check: coverage record ok"
+  return 0
+}
+
+# --inventory runs the pinned-scope section: the inventory, its drift
+# against a supplied tree, and the coverage record. Its terminal line says
+# so, so a partial run is never read as a full-gate pass.
+if [ "$inv_only" -eq 1 ]; then
+  _check_inventory || exit 1
+  _check_coverage_record || exit 1
+  echo "check: OK (pinned scope only: inventory and coverage record)"
+  exit 0
+fi
 
 # E-3: harness launcher contract (headers, required functions, opencode parsing)
 bash lib/tests/harnesses.sh || { echo "check: FAIL harnesses"; exit 1; }
@@ -55,16 +325,24 @@ if [ -f behavior/suites/routing.txt ]; then
 fi
 
 # E-5: query-set shape — what the old README asked readers to check.
-# Root override for tests: DESCRIPTIONS_ROOT (default descriptions/).
-desc_root="${DESCRIPTIONS_ROOT:-descriptions}"
+# Root override: DESCRIPTIONS_ROOT (default descriptions/), declared with
+# the other roots above because the coverage scan reads this same root.
 _check_set() { # $1 file $2 holdout(0|1)
   local f="$1" hold="$2" total pos neg t v tpos vpos
   total="$(jq 'length' "$f")" || { echo "check: FAIL $f is not a JSON array"; return 1; }
   pos="$(jq '[.[] | select(.should_trigger == true)] | length' "$f")"
   neg="$(jq '[.[] | select(.should_trigger == false)] | length' "$f")"
   if [ "$hold" -eq 0 ]; then
+    # At least ten positives and ten near misses is at least twenty queries:
+    # the two counts are what the corpus is made of, and a set that cannot
+    # decide anything is not worth the money it costs to run.
     [ "$pos" -ge 10 ] || { echo "check: FAIL $f needs >= 10 positives (has $pos)"; return 1; }
     [ "$neg" -ge 10 ] || { echo "check: FAIL $f needs >= 10 negatives (has $neg)"; return 1; }
+    # the holdout role belongs to the holdout file, which is written after
+    # selection. A main set carrying a holdout entry leaks the untouched
+    # role into the split that is tuned on.
+    jq -e 'all(.[]; .split != "holdout")' "$f" >/dev/null \
+      || { echo "check: FAIL $f carries a holdout entry: the holdout role belongs to the holdout file, written after selection"; return 1; }
   else
     [ "$total" -ge 5 ] && [ "$total" -le 10 ] \
       || { echo "check: FAIL holdout $f holds 5-10 fresh queries (has $total)"; return 1; }
@@ -106,11 +384,392 @@ while IFS= read -r hf; do
 done < <(find "$desc_root/holdout" -name '*.json' -type f 2>/dev/null | sort)
 echo "check: descriptions ok"
 
+# V3-CORPORA: the corpora themselves.
+#
+# The shape check above settles whether one query set is well formed. This
+# settles the corpus as a whole:
+#
+#   - every corpus asset names a skill the inventory holds (a leftover for a
+#     skill upstream no longer has is drift, not coverage);
+#   - every output-eval definition is well formed, and carries its fixture
+#     tree;
+#   - every path an eval prompt names is in that eval's own fixture tree, so
+#     a case is answerable from what the run is handed;
+#   - no prompt names a project that does not exist.
+#
+# A static check says the corpus is READY. It says nothing about whether a
+# description fires or an output is good: that is measured by a live run.
+_check_corpora() { # the corpora, against the committed inventory
+  local skills_list sk rel f base id tok last ext top n
+  skills_list="$(jq -r '.skills[]' "$inv_path")" \
+    || { echo "check: FAIL cannot read the skill list from $inv_path"; return 1; }
+
+  # A corpus asset for a skill the inventory does not hold.
+  while IFS= read -r f; do
+    rel="${f#"$desc_root"/}"
+    case "$rel" in
+      holdout/*) rel="${rel#holdout/}" ;;
+    esac
+    rel="${rel%.json}"
+    printf '%s\n' "$skills_list" | grep -qxF "$rel" && continue
+    echo "check: FAIL a corpus asset names a skill the inventory does not hold: $rel ($f)"
+    return 1
+  done < <(find "$desc_root" -name '*.json' -type f | sort)
+  while IFS= read -r f; do
+    rel="$(dirname "${f#behavior/evals/}")"
+    printf '%s\n' "$skills_list" | grep -qxF "$rel" && continue
+    echo "check: FAIL a corpus asset names a skill the inventory does not hold: $rel ($f)"
+    return 1
+  done < <(find behavior/evals -name 'evals.json' -type f | sort)
+
+  # Every negative names a route. A route written as one word names a skill,
+  # and that skill must be one the inventory holds; a route written as a
+  # phrase ("inline explanation") names the neighbouring ACTIVITY, which is
+  # the field's own wording and is not a skill to look up.
+  local skill_names
+  skill_names="$(printf '%s\n' "$skills_list" | sed 's|.*/||')"
+  while IFS= read -r f; do
+    while IFS= read -r id; do
+      [ -n "$id" ] || continue
+      [ "$id" = "none" ] && continue
+      case "$id" in
+        *' '*) continue ;;
+      esac
+      printf '%s\n' "$skill_names" | grep -qxF "$id" && continue
+      echo "check: FAIL $f names a route that is not a skill: $id"
+      return 1
+    done < <(jq -r '.[] | select(.should_trigger == false) | .expect // empty' "$f")
+  done < <(find "$desc_root" -name '*.json' -type f | sort)
+
+  # Every output eval: well formed, with its fixture tree.
+  while IFS= read -r sk; do
+    f="behavior/evals/$sk/evals.json"
+    base="behavior/evals/$sk"
+    # A skill with no definition at all is the coverage list's business, and
+    # it is reported there with the skill's name; this check reads the
+    # definitions that exist.
+    [ -f "$f" ] || continue
+    jq -e --arg s "${sk##*/}" '.skill_name == $s' "$f" >/dev/null \
+      || { echo "check: FAIL $f names a skill that is not its own: ${sk##*/}"; return 1; }
+    jq -e '(.evals | type == "array") and ((.evals | length) >= 2) and ((.evals | length) <= 3)' "$f" >/dev/null \
+      || { echo "check: FAIL $f holds 2-3 output cases"; return 1; }
+    jq -e 'all(.evals[];
+              (.id | type == "string" and length > 0)
+              and (.prompt | type == "string" and length > 0)
+              and (.expected_output | type == "string" and length > 0)
+              and (.assertions | type == "array"))' "$f" >/dev/null \
+      || { echo "check: FAIL $f needs an id, a prompt, an expected output and an assertions array in every case"; return 1; }
+    jq -e '([.evals[].id] | length) == ([.evals[].id] | unique | length)' "$f" >/dev/null \
+      || { echo "check: FAIL $f repeats a case id"; return 1; }
+    # An unobserved case carries no assertion, and a case that carries an
+    # assertion says it was observed. The rule is two-directional: a case
+    # that claims a result it did not observe is rejected either way.
+    #
+    #   a case carries an assertion -> the definition must record that it was
+    #                                observed, and a definition that records
+    #                                nothing is rejected: the gate cannot know
+    #                                where the assertion came from, and a
+    #                                fabricated one would be graded against a
+    #                                real run.
+    #   pending_first_run: true   -> no case may carry an assertion.
+    if jq -e '[.evals[] | select((.assertions | length) > 0)] | length > 0' "$f" >/dev/null; then
+      if ! jq -e 'has("pending_first_run") and (.pending_first_run | type == "boolean")' "$f" >/dev/null; then
+        echo "check: FAIL $f carries an assertion but records no observation state: a case that claims a result it did not observe is not accepted"
+        return 1
+      fi
+    fi
+    if ! jq -e 'has("pending_first_run") and (.pending_first_run | type == "boolean")' "$f" >/dev/null; then
+      echo "check: FAIL $f records no observation state: a definition says whether its cases have been observed"
+      return 1
+    fi
+    if [ "$(jq -r '.pending_first_run' "$f")" = "true" ]; then
+      jq -e 'all(.evals[]; (.assertions | length) == 0)' "$f" >/dev/null \
+        || { echo "check: FAIL $f is pending its first run and must carry empty assertions"; return 1; }
+    fi
+    # No prompt names a project that does not exist. The tilde is written
+    # inside the pattern rather than as a path, so nothing expands it.
+    if jq -r '.evals[].prompt' "$f" | grep -qE '[^A-Za-z0-9_]~/|/home/|/Users/'; then
+      echo "check: FAIL $f names a project outside the run workdir; the fixture tree is the project"
+      return 1
+    fi
+    [ -d "$base/files" ] \
+      || { echo "check: FAIL $base has no files/ tree: an output case needs the project it names"; return 1; }
+    # Every path a prompt names is in that tree.
+    while IFS= read -r tok; do
+      [ -n "$tok" ] || continue
+      last="${tok##*/}"
+      ext="${last##*.}"
+      case "$last" in
+        *.*) case "$ext" in [A-Za-z]*) ;; *) last=""; ext="";; esac ;;
+        *) last=""; ext="" ;;
+      esac
+      if [ -z "$last" ]; then
+        top="${tok%%/*}"
+        [ -e "$base/files/$top" ] || continue
+      fi
+      [ -e "$base/files/$tok" ] && continue
+      echo "check: FAIL $f names a file its fixture tree does not hold: $tok"
+      return 1
+    done < <(_corpus_prompt_paths "$f")
+  done <<<"$skills_list"
+
+  # --- the frozen split assignment (E-2) ------------------------------------
+  #
+  # "Preserve unchanged splits" is a guarantee only when something checks it.
+  # The record holds the per-entry split of every retained set, and each set
+  # is compared against it here: an entry that moves between `train` and
+  # `validation` fails the gate.
+  local state frozen_splits selections sk_run
+  state="$(_corpus_state)" || { echo "check: FAIL the coverage record holds no corpus state block"; return 1; }
+  if ! printf '%s' "$state" | jq -e 'has("frozen_splits") and has("selections")' >/dev/null 2>&1; then
+    echo "check: FAIL the coverage record's corpus state block holds no frozen_splits and selections"
+    return 1
+  fi
+  frozen_splits="$(printf '%s' "$state" | jq -c '.frozen_splits')"
+  selections="$(printf '%s' "$state" | jq -c '.selections')"
+
+  # every skill is either frozen or named as new, and never both: a set that
+  # drops out of the freeze silently stops being checked.
+  while IFS= read -r sk_run; do
+    in_frozen="$(printf '%s' "$frozen_splits" | jq -r --arg s "$sk_run" 'has($s)')"
+    in_new="$(printf '%s' "$state" | jq -r --arg s "$sk_run" '(.new_sets // []) | index($s) != null')"
+    if [ "$in_frozen" = "true" ] && [ "$in_new" = "true" ]; then
+      echo "check: FAIL $sk_run is both frozen and new in the coverage record's corpus state"
+      return 1
+    fi
+    if [ "$in_frozen" = "false" ] && [ "$in_new" = "false" ]; then
+      echo "check: FAIL $sk_run is neither frozen nor named as new in the coverage record's corpus state"
+      return 1
+    fi
+  done <<<"$skills_list"
+
+  while IFS= read -r sk_run; do
+    want="$(printf '%s' "$frozen_splits" | jq -r --arg s "$sk_run" '.[$s] // empty')"
+    [ -n "$want" ] || continue
+    # a set with no file is the coverage list's business, and it is reported
+    # there with the skill's name
+    [ -f "$desc_root/$sk_run.json" ] || continue
+    got="$(jq -r '[.[] | if .split == "train" then "T" else "V" end] | join("")' "$desc_root/$sk_run.json")"
+    if [ "$got" != "$want" ]; then
+      echo "check: FAIL $desc_root/$sk_run.json does not hold the frozen split assignment (frozen $want, corpus $got)"
+      return 1
+    fi
+  done <<<"$skills_list"
+
+  # --- a holdout needs a recorded selection (E-6) ---------------------------
+  #
+  # A holdout file is written after a description is selected and retired
+  # after its one run. One that is simply placed in the corpus is a falsely
+  # untouched test set, so it is accepted only when the selection it follows
+  # is named in the record.
+  while IFS= read -r f; do
+    rel="${f#"$desc_root"/}"
+    rel="${rel#holdout/}"
+    rel="${rel%.json}"
+    if ! printf '%s' "$selections" | jq -e --arg s "$rel" 'has($s)' >/dev/null; then
+      echo "check: FAIL holdout $f names no recorded selection: a holdout is written after a selection and retired after its run, not placed"
+      return 1
+    fi
+  done < <(find "$desc_root/holdout" -name '*.json' -type f 2>/dev/null | sort)
+
+  echo "check: corpora ok"
+  return 0
+}
+
+# The path-like tokens a description query names, one per line, with the rule
+# that decides what counts as a path: a token that ends in a file extension,
+# or one that names a directory the staged tree has at its top. Every root is
+# covered — a query that names `skills/…` names a path like any other — and a
+# slash-separated list in prose names no file.
+_corpus_query_paths() { # $1 descriptions root, $2 the staged tree
+  local descs="$1" staged="$2" tok last ext top
+  while IFS= read -r tok; do
+    [ -n "$tok" ] || continue
+    last="${tok##*/}"
+    ext="${last##*.}"
+    if [ "$ext" != "$last" ]; then
+      case "$ext" in [A-Za-z]*) printf '%s\n' "$tok"; continue ;; esac
+    fi
+    top="${tok%%/*}"
+    [ -e "$staged/$top" ] && printf '%s\n' "$tok"
+  done < <(
+    find "$descs" -name '*.json' -type f ! -path '*/holdout/*' | sort \
+      | while IFS= read -r f; do jq -r '.[].query' "$f"; done \
+      | tr ' \t' '\n\n' | tr -d "\'" \
+      | awk '{ gsub(/[`",;:!?()\[\]{}<>]/, ""); sub(/\.$/, ""); print }' \
+      | grep -E '^[A-Za-z0-9_.@-]+(/[A-Za-z0-9_.@-]+)+$' \
+      | sort -u
+  )
+}
+
+# A plan's version, the way the upstream plan-version.sh computes it: the
+# index with every task checkbox and state label normalized, then every task
+# file in index order.
+_corpus_plan_version() { # $1 plan directory
+  local dir="$1" states file
+  states='todo|in progress|done|done with concerns|blocked|needs context|cancelled|superseded'
+  {
+    sed -E 's/^- \[[ xX]\] (.*)`('"$states"')`[[:space:]]*$/- [ ] \1`todo`/' "$dir/00-index.md"
+    while IFS= read -r file; do
+      printf '\n=== %s\n' "$file"
+      cat "$dir/$file" 2>/dev/null
+    done < <(sed -n 's/^.*`\([^`]*\.md\)`.*`\(todo\|in progress\|done\|done with concerns\|blocked\|needs context\|cancelled\|superseded\)`$/\1/p' \
+      "$dir/00-index.md")
+  } | tr -d '\r' | git hash-object --stdin | cut -c1-7
+}
+
+# The machine-readable block the coverage record holds: the frozen split
+# assignment and the selections that have happened.
+_corpus_state() { # the JSON block, or nothing
+  local doc="$docs_root/upstream-coverage.md"
+  [ -f "$doc" ] || return 1
+  sed -n '/<!-- corpus-state:begin -->/,/<!-- corpus-state:end -->/p' "$doc" \
+    | sed -n '/^```json$/,/^```$/p' | sed '1d;$d'
+}
+
+# The path-like tokens an output eval's prompts name, one per line.
+_corpus_prompt_paths() { # $1 evals.json
+  jq -r '.evals[]?.prompt // empty' "$1" 2>/dev/null \
+    | tr ' \t' '\n\n' \
+    | tr -d "\'" \
+    | awk '{ gsub(/[`",;:!?()\[\]{}<>]/, ""); sub(/\.$/, ""); print }' \
+    | grep -E '^[A-Za-z0-9_.@-]+(/[A-Za-z0-9_.@-]+)+$' \
+    | sort -u
+}
+
+# The tree the descriptions runner seeds, checked against what the corpus
+# names. The gate builds it the same way the runner does, so a fixture the
+# corpus names and the repository does not hold is a gate failure and not a
+# surprise at run time — which is the failure a commit once shipped.
+_check_staged_tree() { # the staged tree, against the corpus and the plan rule
+  local stage p name tf computed bound
+  stage="$(mktemp -d)"
+  # shellcheck source=/dev/null
+  . "$root/fixtures/fixtures.sh"
+  if ! fixture_node_api "$stage" || ! fixture_activation_paths "$stage"; then
+    rm -rf "$stage"
+    echo "check: FAIL the fixture tree could not be staged"
+    return 1
+  fi
+
+  # Every path a query names is in the tree the runner seeds.
+  while IFS= read -r tok; do
+    [ -n "$tok" ] || continue
+    [ -e "$stage/$tok" ] && continue
+    echo "check: FAIL the staged tree does not hold $tok, which a query names"
+    rm -rf "$stage"
+    return 1
+  done < <(_corpus_query_paths "$desc_root" "$stage")
+
+  # Every staged plan is a plan: an index, a ledger, and the task files its
+  # index names. A plan missing one of them is a stub, and a query that
+  # presupposes it would be answered by nothing.
+  for p in "$stage"/.sdlc-skills/plans/*/; do
+    [ -d "$p" ] || continue
+    name="$(basename "$p")"
+    if [ ! -f "$p/00-index.md" ]; then
+      echo "check: FAIL the staged plan $name carries no index"
+      rm -rf "$stage"; return 1
+    fi
+    if [ ! -f "$p/00-index.ledger.md" ]; then
+      echo "check: FAIL the staged plan $name carries no ledger"
+      rm -rf "$stage"; return 1
+    fi
+    while IFS= read -r tf; do
+      [ -n "$tf" ] || continue
+      if [ ! -f "$p/$tf" ]; then
+        echo "check: FAIL the staged plan $name names a task file it does not hold: $tf"
+        rm -rf "$stage"; return 1
+      fi
+    done < <(sed -n 's/^.*`\([^`]*\.md\)`.*`\(todo\|in progress\|done\|done with concerns\|blocked\|needs context\|cancelled\|superseded\)`$/\1/p' \
+      "$p/00-index.md")
+    # The approval binds the version the plan's own content computes. A ledger
+    # that binds any other version would refuse a run that is correct.
+    bound="$(sed -n 's/^| \([0-9a-f]\{7\}\) |  | .*| approved |.*/\1/p' "$p/00-index.ledger.md" | head -1)"
+    if [ -z "$bound" ]; then
+      echo "check: FAIL the staged plan $name carries no approval"
+      rm -rf "$stage"; return 1
+    fi
+    computed="$(_corpus_plan_version "$p")"
+    if [ "$bound" != "$computed" ]; then
+      echo "check: FAIL the staged plan $name binds $bound and its content computes $computed"
+      rm -rf "$stage"; return 1
+    fi
+  done
+
+  rm -rf "$stage"
+  return 0
+}
+
+# The corpus audit's own numbers. The audit is the maintainer's per-skill
+# coverage record, so a row whose numbers no longer recompute from the
+# corpus is a false claim in the record — and nothing else keeps it true.
+_check_audit() { # every row recomputes, and no row is name-only
+  local doc="$docs_root/upstream-coverage.md" skill source pos neg cases boundary staged nfiles real_cases
+  [ -f "$doc" ] || { echo "check: FAIL no coverage record at $doc"; return 1; }
+  local found=0
+  while IFS='|' read -r _ skill source pos neg cases staged _; do
+    skill="$(printf '%s' "$skill" | tr -d ' `')"
+    [ -n "$skill" ] || continue
+    case "$skill" in */*) ;; *) continue ;; esac
+    found=$((found + 1))
+    source="$(printf '%s' "$source" | tr -d ' `')"
+    pos="$(printf '%s' "$pos" | tr -d ' `')"
+    neg="$(printf '%s' "$neg" | tr -d ' `')"
+    cases="$(printf '%s' "$cases" | tr -d '`' | sed 's/^ *//; s/ *$//')"
+    staged="$(printf '%s' "$staged" | tr -d '`')"
+    boundary="$(printf '%s' "$cases" | sed -n 's/.*— *\([^ ]*\)$/\1/p')"
+    real_cases="$(printf '%s' "$cases" | sed -n 's/^\([0-9]*\).*/\1/p')"
+    nfiles="$(printf '%s' "$staged" | sed -n 's/.*(\([0-9]*\) files:.*/\1/p')"
+    if [ "$source" != "skills/$skill/SKILL.md" ]; then
+      echo "check: FAIL the corpus audit's row for $skill does not name its upstream body ($source)"
+      return 1
+    fi
+    # A row whose corpus is missing is the coverage list's business, and it
+    # is reported there with the skill's name.
+    [ -f "$desc_root/$skill.json" ] || continue
+    [ -f "behavior/evals/$skill/evals.json" ] || continue
+    if [ "$pos" != "$(jq '[.[] | select(.should_trigger == true)] | length' "$desc_root/$skill.json")" ]; then
+      echo "check: FAIL the corpus audit's row for $skill states $pos positives and the set holds another number"
+      return 1
+    fi
+    if [ "$neg" != "$(jq '[.[] | select(.should_trigger == false)] | length' "$desc_root/$skill.json")" ]; then
+      echo "check: FAIL the corpus audit's row for $skill states $neg near misses and the set holds another number"
+      return 1
+    fi
+    if [ "$real_cases" != "$(jq '.evals | length' "behavior/evals/$skill/evals.json")" ]; then
+      echo "check: FAIL the corpus audit's row for $skill states $real_cases output cases and the definition holds another number"
+      return 1
+    fi
+    if ! jq -e --arg b "$boundary" 'any(.evals[]; .id == $b)' "behavior/evals/$skill/evals.json" >/dev/null; then
+      echo "check: FAIL the corpus audit's row for $skill names no output case as its boundary: $boundary"
+      return 1
+    fi
+    if [ -n "$nfiles" ]; then
+      local real_files
+      real_files="$(find "behavior/evals/$skill/files" -type f | wc -l | tr -d ' ')"
+      if [ "$nfiles" != "$real_files" ]; then
+        echo "check: FAIL the corpus audit's row for $skill states $nfiles staged files and the tree holds $real_files"
+        return 1
+      fi
+    fi
+  done < <(awk '/^## The corpus audit/ { a = 1 } /^##/ && !/^## The corpus audit/ { a = 0 }
+                  a && /^\| `?[a-z-]+\/[a-z0-9-]+`? \|/ { print }' "$doc")
+  if [ "$found" -eq 0 ]; then
+    echo "check: FAIL the coverage record holds no corpus audit rows"
+    return 1
+  fi
+  return 0
+}
+
+_check_corpora || exit 1
+_check_staged_tree || exit 1
+_check_audit || exit 1
+
 # E-14: docs/ and results/ hold records and guidance, never runtime code.
 # Enforced as no-exec-bit + no-shebang: a non-executable, shebang-less
 # script file would pass, so treat this as the realistic-vectors proxy it
 # is and keep code out of both trees by review, not just by gate.
-docs_root="${DOCS_ROOT:-docs}"
 if find "$docs_root" results -type f -perm -111 2>/dev/null | grep -q .; then
   echo "check: FAIL executable under docs/ or results/ (records and guidance only)"
   find "$docs_root" results -type f -perm -111 2>/dev/null
@@ -122,22 +781,9 @@ if grep -rl '^#!' "$docs_root" 2>/dev/null | grep -q .; then
 fi
 echo "check: docs ok"
 
-# E-7: evals inventory — every skill on the pinned plugin has an evals.json.
-# Scoped by --plugin <tree> (the tree to compare against); without it the
-# section is skipped with a note, so CI without a plugin checkout stays green.
-check_plugin=""
-[ "${1:-}" = "--plugin" ] && { check_plugin="${2:-}"; }
-if [ -n "$check_plugin" ]; then
-  while IFS= read -r sk; do
-    # implementation/subagent-driven-development is owned by E-12's
-    # evaluator (it authors the file); every other skill is E-7's.
-    [ "$sk" = "implementation/subagent-driven-development" ] && continue
-    [ -f "behavior/evals/$sk/evals.json" ] \
-      || { echo "check: FAIL missing evals for $sk"; exit 1; }
-  done < <(find "$check_plugin/skills" -name SKILL.md | sed 's|.*/skills/||; s|/SKILL.md||' | sort)
-  echo "check: evals inventory ok"
-else
-  echo "check: evals inventory skipped (no --plugin tree)"
-fi
+# V3-INVENTORY: the pinned scope is checked last, so the report of a broken
+# inventory follows the rest of the gate's findings.
+_check_inventory || exit 1
+_check_coverage_record || exit 1
 
 echo "check: OK"

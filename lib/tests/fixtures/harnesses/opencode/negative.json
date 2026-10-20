@@ -1,0 +1,4 @@
+[
+{"type":"step_start","timestamp":1,"sessionID":"ses_test","part":{"id":"p1","messageID":"m1","sessionID":"ses_test","type":"step-start"}},
+{"type":"text","timestamp":2,"sessionID":"ses_test","part":{"id":"p2","messageID":"m1","sessionID":"ses_test","type":"text","text":"nothing to load"}}
+]

@@ -1,0 +1,6 @@
+[
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"loading"}]},"session_id":"sess-cursor-1","timestamp_ms":1},
+{"type":"tool_call","subtype":"started","call_id":"call_1","tool_call":{"toolCallId":"call_1","toolName":"read","argsJson":"{\"path\":\"/tmp/lab-home/.cursor/plugins/local/sdlc-skills/skills/using-sdlc-skills/SKILL.md\"}"},"model_call_id":"mc-1","session_id":"sess-cursor-1","timestamp_ms":2},
+{"type":"tool_call","subtype":"completed","call_id":"call_1","tool_call":{"toolCallId":"call_1","toolName":"read","argsJson":"{\"path\":\"/tmp/lab-home/.cursor/plugins/local/sdlc-skills/skills/using-sdlc-skills/SKILL.md\"}"},"model_call_id":"mc-1","session_id":"sess-cursor-1","timestamp_ms":3},
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"loaded"}]},"session_id":"sess-cursor-1","timestamp_ms":4}
+]

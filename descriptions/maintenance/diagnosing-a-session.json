@@ -1,0 +1,112 @@
+[
+  {
+    "split": "train",
+    "should_trigger": true,
+    "query": "Yesterday's session rewrote the charge path and I do not know why it also touched the tax lookup. Reconstruct what that run actually did."
+  },
+  {
+    "split": "train",
+    "should_trigger": true,
+    "query": "Why did the agent skip the verification step in that run? I want to know from the record, not from memory."
+  },
+  {
+    "split": "train",
+    "should_trigger": true,
+    "query": "There is a session in .agent/sessions/2026-10-14-charge-flow.ndjson — go through it and tell me what it changed and why."
+  },
+  {
+    "split": "train",
+    "should_trigger": true,
+    "query": "The agent took an action nobody asked for in the last run. Find the point in the transcript where it decided that."
+  },
+  {
+    "split": "train",
+    "should_trigger": true,
+    "query": "What happened earlier in that session before it committed? I was not watching."
+  },
+  {
+    "split": "train",
+    "should_trigger": true,
+    "query": "The run produced a diff nobody can explain. Read the session's transcript and reconstruct its steps."
+  },
+  {
+    "split": "validation",
+    "should_trigger": true,
+    "query": "I think the agent lost track of the task halfway through. Show me from the record where it went off."
+  },
+  {
+    "split": "validation",
+    "should_trigger": true,
+    "query": "Which skills did that session actually invoke, and in what order? Answer from the transcript."
+  },
+  {
+    "split": "validation",
+    "should_trigger": true,
+    "query": "The session's output looks wrong and the run is the thing under question, not the code. Diagnose the session."
+  },
+  {
+    "split": "validation",
+    "should_trigger": true,
+    "query": "Can you inspect that agent run and tell me which gate it ran and what the gate actually returned?"
+  },
+  {
+    "split": "train",
+    "should_trigger": false,
+    "query": "Tenants with two API keys get logged out at random. Find the cause before proposing any fix.",
+    "expect": "debugging"
+  },
+  {
+    "split": "train",
+    "should_trigger": false,
+    "query": "Checkout is declining payments for every tenant right now. Stop the bleeding first.",
+    "expect": "containing-an-incident"
+  },
+  {
+    "split": "train",
+    "should_trigger": false,
+    "query": "The 0.4.0 outage is contained and the cause is known. Why did our safeguards miss it?",
+    "expect": "post-mortem"
+  },
+  {
+    "split": "train",
+    "should_trigger": false,
+    "query": "The security-audits skill is not triggering reliably. Help me rewrite its description.",
+    "expect": "writing-skills"
+  },
+  {
+    "split": "train",
+    "should_trigger": false,
+    "query": "What does a JSONL transcript file look like in general? I am writing a parser for something else.",
+    "expect": "none"
+  },
+  {
+    "split": "train",
+    "should_trigger": false,
+    "query": "I am out of context and have to stop. Write up where things stand so the next session can continue.",
+    "expect": "handoff"
+  },
+  {
+    "split": "validation",
+    "should_trigger": false,
+    "query": "Nothing is broken — I just want confirmation the fix is genuinely done and passing.",
+    "expect": "verification-before-completion"
+  },
+  {
+    "split": "validation",
+    "should_trigger": false,
+    "query": "The change is complete and green. Get it independently reviewed before it merges.",
+    "expect": "requesting-code-review"
+  },
+  {
+    "split": "validation",
+    "should_trigger": false,
+    "query": "Read-only pass over src/scheduler/ — which abstractions are carrying their weight? Change nothing.",
+    "expect": "complexity-audit"
+  },
+  {
+    "split": "validation",
+    "should_trigger": false,
+    "query": "The new upload endpoint takes attacker-controlled filenames. Assess what an attacker can make it do.",
+    "expect": "security-audits"
+  }
+]

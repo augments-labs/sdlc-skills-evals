@@ -10,7 +10,7 @@
     },
     {
       "id": "first-release",
-      "prompt": "We have never released checkout-api before and there is no checklist, no rollback story, and no monitoring beyond 'customers will tell us'. Is 0.1.0 safe to deploy Friday afternoon?",
+      "prompt": "We have never released this service before and there is no checklist, no rollback story, and no monitoring beyond 'customers will tell us'. Is 0.1.0 safe to deploy Friday afternoon?",
       "expected_output": "A no-go (or conditional go) grounded in the missing safety nets — rollback, observability, timing — with the concrete prerequisites that would change the answer, rather than optimism about the code.",
       "assertions": []
     }

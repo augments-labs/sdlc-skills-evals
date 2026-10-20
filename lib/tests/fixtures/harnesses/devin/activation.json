@@ -1,0 +1,8 @@
+[
+{"jsonrpc":"2.0","id":1,"result":{"protocolVersion":1,"agentCapabilities":{"loadSession":false,"promptCapabilities":{"image":false,"audio":false,"embeddedContext":true}},"authMethods":[]}},
+{"jsonrpc":"2.0","id":2,"result":{"sessionId":"sess-devin-1"}},
+{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"sess-devin-1","update":{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"loading"}}}},
+{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"sess-devin-1","update":{"sessionUpdate":"tool_call","toolCallId":"tc-1","title":"Skill","kind":"other","status":"pending","rawInput":{"skill":"sdlc-skills:using-sdlc-skills"}}}},
+{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"sess-devin-1","update":{"sessionUpdate":"usage_update","input_tokens":70,"output_tokens":11,"total_tokens":81}}},
+{"jsonrpc":"2.0","id":3,"result":{"stopReason":"end_turn"}}
+]

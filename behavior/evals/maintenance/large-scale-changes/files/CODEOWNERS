@@ -1,0 +1,5 @@
+# Owners, last matching pattern wins.
+*                       @platform/billing
+packages/api/           @platform/billing
+packages/web/           @platform/frontend
+packages/worker/        @platform/billing

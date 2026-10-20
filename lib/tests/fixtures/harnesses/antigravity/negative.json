@@ -1,0 +1,6 @@
+[
+{"event":"init","conversation_id":"conv-antigravity-2","init":{"cwd":"/tmp/lab-fixture","tools":["view_file"],"permission_mode":"request-review"}},
+{"event":"step_update","step_update":{"conversation_id":"conv-antigravity-2","step_index":1,"state":"DONE","step_type":"tool_call","tool_name":"view_file","path":"/tmp/lab-fixture/src/app.ts"}},
+{"event":"step_update","step_update":{"conversation_id":"conv-antigravity-2","step_index":2,"state":"DONE","step_type":"agent_response","text_delta":"no skill here"}},
+{"event":"result","result":{"conversation_id":"conv-antigravity-2","status":"SUCCESS","response":"no skill here","num_turns":1}}
+]

@@ -9,53 +9,33 @@
 # spends the run reading. These give it enough to be wrong in an interesting way,
 # and nothing more.
 
+# The tracked corpus root: the material the seeded trees are built from.
+#
+# It is a committed root of its own, and not the project's own `.sdlc-skills/`
+# directory: the repository ignores that one, so a fixture placed there would
+# be present in the working tree and absent from the commit — which is exactly
+# the failure this root exists to end. A plan fixture is a REPRESENTATION of a
+# plan, staged where a plan lives; it is not the lab's own plan.
+fixture_corpus_root() {
+  local src="${BASH_SOURCE[0]}"
+  ( cd "$(dirname "$src")/corpus" && pwd )
+}
+
+
 # A tiny HTTP API with a real test suite and a DELIBERATELY BROKEN `npm test`
 # (`node --test test/` treats the dir as a module path on modern Node). A skill
 # that claims something is verified has to notice its gate does not run.
+#
+# The material comes from the tracked corpus root, so the tree a run is given
+# is the tree the repository holds: nothing here is written by a script whose
+# output the repository does not carry.
 fixture_node_api() {
-  local d="$1"; mkdir -p "$d/src" "$d/test"
-  cat > "$d/package.json" <<'EOF'
-{ "name": "billing-api", "version": "0.3.0", "scripts": { "test": "node --test test/" } }
-EOF
-  cat > "$d/src/server.js" <<'EOF'
-const routes = new Map();
-function route(method, path, handler) { routes.set(`${method} ${path}`, handler); }
-async function handle(req) {
-  const handler = routes.get(`${req.method} ${req.path}`);
-  if (!handler) return { status: 404, body: { error: 'not_found' } };
-  return handler(req);
-}
-module.exports = { route, handle, routes };
-EOF
-  cat > "$d/src/apikeys.js" <<'EOF'
-// Each API key belongs to a tenant and carries a plan tier:
-// 'free' | 'pro' | 'enterprise'.
-const keys = new Map();
-function register(key, tenantId, tier) { keys.set(key, { tenantId, tier }); }
-function resolve(authHeader) {
-  if (!authHeader?.startsWith('Bearer ')) return null;
-  return keys.get(authHeader.slice(7)) ?? null;
-}
-module.exports = { register, resolve, keys };
-EOF
-  cat > "$d/test/server.test.js" <<'EOF'
-const { test } = require('node:test');
-const assert = require('node:assert');
-const { route, handle } = require('../src/server');
-test('unknown route returns 404', async () => {
-  assert.strictEqual((await handle({ method: 'GET', path: '/nope' })).status, 404);
-});
-test('registered route is dispatched', async () => {
-  route('GET', '/ping', () => ({ status: 200, body: { ok: true } }));
-  assert.deepStrictEqual((await handle({ method: 'GET', path: '/ping' })).body, { ok: true });
-});
-EOF
-  cat > "$d/README.md" <<'EOF'
-# billing-api
-
-Minimal HTTP API for tenant billing. Routes are registered with `route()` and
-dispatched by `handle()`. Tests run with `npm test` (node:test).
-EOF
+  local d="$1" root
+  root="$(fixture_corpus_root)"
+  mkdir -p "$d/src" "$d/test"
+  cp "$root/project/package.json" "$root/project/README.md" "$d/"
+  cp "$root/project/src/server.js" "$root/project/src/apikeys.js" "$d/src/"
+  cp "$root/project/test/server.test.js" "$d/test/"
 }
 
 # The paths activation queries NAME, and nothing more. Separate from the two
@@ -84,51 +64,60 @@ EOF
 # area, refactor-architecture grounding a proposal in the current structure. A
 # query that only DESIGNS something ("model the entities for the permissions
 # system") presupposes nothing and needs no fixture.
+#
+# The path half is not a review question any more: `lib/tests/corpora.sh`
+# extracts every path a query names and checks it against the tree this
+# function stages, so a query naming a path nothing stages is a red cell
+# rather than a silently mis-scored run.
 fixture_activation_paths() {
-  local d="$1"
-  mkdir -p "$d"/src/{scheduler,legacy,billing,api,orders,sync,import,auth,queue,utils,config} \
-           "$d"/docs/{design,product,plans/search-rewrite}
+  local d="$1" root
+  root="$(fixture_corpus_root)"
+  mkdir -p "$d/.sdlc-skills/plans" "$d/.agent/sessions" "$d/docs/tickets"
 
-  # Coherent with billing-api: tenants on plan tiers, billed on a schedule.
-  echo 'module.exports = { run: (job) => job.handler(); };'                   > "$d/src/scheduler/index.js"
-  echo 'module.exports = { legacyInvoice: (t) => ({ tenant: t, lines: [] }) };' > "$d/src/legacy/invoice.js"
-  echo 'module.exports = { chargeTenant: (t, cents) => ({ t, cents }) };'     > "$d/src/billing/charge.js"
-  echo 'module.exports = { mount: (app) => app };'                            > "$d/src/api/index.js"
-  echo 'export const Summary = ({ order }) => order.id;'                      > "$d/src/orders/summary.tsx"
-  echo 'module.exports = { pull: async () => [] };'                           > "$d/src/sync/pull.js"
-  echo 'module.exports = { importCsv: async (rows) => rows.length };'         > "$d/src/import/csv.js"
-  echo 'export const session = { userId: null };'                             > "$d/src/auth/session.ts"
-  echo 'module.exports = { consume: async (msg) => msg };'                    > "$d/src/queue/consumer.js"
-  echo 'export const cents = (n: number) => Math.round(n * 100);'             > "$d/src/utils/money.ts"
-  echo 'export const poolSize = 10;'                                          > "$d/src/config/database.ts"
-  echo 'export { poolSize } from "./database";'                               > "$d/src/config/index.ts"
+  # the project the queries name
+  for f in src/scheduler/index.js src/legacy/invoice.js src/billing/charge.js \
+           src/api/index.js src/orders/summary.tsx src/sync/pull.js \
+           src/import/csv.js src/auth/session.ts src/queue/consumer.js \
+           src/utils/money.ts src/config/database.ts src/config/index.ts \
+           src/checkout.js api/auth.py api/worker.js config/session.rb \
+           docs/design/notifications.md docs/product/goals.md docs/invites.md; do
+    mkdir -p "$d/$(dirname "$f")"
+    cp "$root/project/$f" "$d/$f"
+  done
 
-  printf '# Notifications design\n\nEmail and webhook delivery for billing events.\n' \
-    > "$d/docs/design/notifications.md"
-  printf '# Product goals\n\nTenants can self-serve billing without support.\n' \
-    > "$d/docs/product/goals.md"
-  printf '# Invites\n\nTenant admins invite teammates by email.\n' \
-    > "$d/docs/invites.md"
+  # the ticket, as the tracker holds it: working-from-a-ticket reads it and
+  # writes a capture beside it, so the query that hands over INV-142 needs the
+  # source text to be there.
+  cp "$root/project/docs/tickets/INV-142.md" "$d/docs/tickets/INV-142.md"
 
-  # executing-plans needs a plan DIRECTORY, not a file: its procedure verifies a
-  # claimed approval, a version, and an entry state before running anything, so
-  # the stub carries those fields rather than asserting they passed.
-  printf '# Search rewrite\n\nApproval: pending\nVersion: 1\nMode: sequential\n\n- [ ] 01 index schema\n- [ ] 02 query path\n' \
-    > "$d/docs/plans/search-rewrite/index.md"
+  # a session record, workspace-local, for the skill that reconstructs what a
+  # run actually did. It is the only witness of a past run, so a diagnosis has
+  # something to read, and the report cites its lines.
+  cp "$root/project/.agent/sessions/2026-10-14-charge-flow.ndjson" \
+     "$d/.agent/sessions/2026-10-14-charge-flow.ndjson"
 
-  # writing-plans writes plans to `.sdlc-skills/plans/`, so queries that name a
-  # plan by its real convention land here rather than under docs/. They are
-  # separate directories because the queries are: "continue billing-v2", "start
-  # multi-tenancy", and "reporting is approved" are three different openings, and
-  # collapsing them onto one path would make them duplicates of each other.
-  mkdir -p "$d"/.sdlc-skills/plans/{multi-tenancy,billing-v2,reporting}
-  printf '# Multi-tenancy\n\nApproval: pending\nVersion: 1\nMode: sequential\n\n- [ ] 01 tenant column\n- [ ] 02 row filters\n' \
-    > "$d/.sdlc-skills/plans/multi-tenancy/index.md"
-  printf '# Billing v2\n\nApproval: pending\nVersion: 2\nMode: sequential\n\n- [x] 01 price table\n- [ ] 02 proration\n' \
-    > "$d/.sdlc-skills/plans/billing-v2/index.md"
-  printf '# Reporting\n\nApproval: pending\nVersion: 1\nMode: sequential\n\n- [ ] 01 rollup job\n- [ ] 02 export\n' \
-    > "$d/.sdlc-skills/plans/reporting/index.md"
+  # the plans. A plan is a directory in the current convention, and its
+  # identity is a version computed over its content — never a label it
+  # declares about itself — so the approval row in each ledger binds the
+  # version the plan really has.
+  for p in "$root"/plans/*/; do
+    name="$(basename "$p")"
+    mkdir -p "$d/.sdlc-skills/plans/$name"
+    cp "$p"* "$d/.sdlc-skills/plans/$name/"
+  done
+
+  # a delegated plan's run ledger, which lives under the evidence directory
+  # named after the plan directory.
+  if [ -d "$root/evidence" ]; then
+    for e in "$root"/evidence/*/; do
+      name="$(basename "$e")"
+      mkdir -p "$d/.sdlc-skills/evidence/$name"
+      cp "$e"* "$d/.sdlc-skills/evidence/$name/"
+    done
+  fi
 }
+
+
 
 # The same API plus a REAL bug with a non-obvious cause: the session cache is
 # keyed by tenant, not by key, so a second key for one tenant evicts the first.
