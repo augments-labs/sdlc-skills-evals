@@ -294,6 +294,16 @@ if [ "${1:-}" = "--update-manifests" ]; then
   echo "check: manifests regenerated"
   exit 0
 fi
+# The scratch file the comparison reads is per RUN, never a fixed shared path.
+# The old path was `/tmp/check-manifest-$n.json`: predictable, shared by every
+# tree on the machine, so two concurrent gate runs overwrote each other's
+# scratch and one of them read the other's bytes and called a clean tree
+# stale. A per-run scratch directory cannot collide, and the trap removes it
+# on every exit path — including the failure path, which used to leak the
+# scratch file into /tmp.
+manifest_scratch="$(mktemp -d "${TMPDIR:-/tmp}/check-manifest.XXXXXX")" \
+  || { echo "check: FAIL cannot create the manifest scratch directory"; exit 1; }
+trap 'rm -rf "$manifest_scratch"' EXIT
 for f in behavior/scenarios/*.sh; do
   n="$(basename "$f" .sh)"
   for fn in scenario_opening scenario_setup scenario_assert; do
@@ -301,10 +311,9 @@ for f in behavior/scenarios/*.sh; do
   done
   [ -f "behavior/checks-manifest/$n.json" ] || { echo "check: FAIL no manifest for $n"; exit 1; }
   sed 's/#.*//' "$f" | grep -oE '\b(pass|fail|assert_contains|assert_not_contains|assert_file)[[:space:]]' \
-    | sed 's/[[:space:]]*$//' | sort -u | jq -R . | jq -s . > "/tmp/check-manifest-$n.json"
-  cmp -s "/tmp/check-manifest-$n.json" "behavior/checks-manifest/$n.json" \
+    | sed 's/[[:space:]]*$//' | sort -u | jq -R . | jq -s . > "$manifest_scratch/$n.json"
+  cmp -s "$manifest_scratch/$n.json" "behavior/checks-manifest/$n.json" \
     || { echo "check: FAIL stale manifest for $n (run bin/check --update-manifests)"; exit 1; }
-  rm -f "/tmp/check-manifest-$n.json"
   grep -qxF "$n" behavior/suites/all.txt 2>/dev/null \
     || { echo "check: FAIL $n not listed in behavior/suites/all.txt"; exit 1; }
 done
