@@ -1,4 +1,11 @@
 #!/usr/bin/env bash
+
+# Provenance: prospective contract probe
+# Clause: skills/analysis/writing-specs/SKILL.md — "If the form is an executable gate, write it as a proposed file beside the"
+# Note: the run this scenario grew out of was not recorded under results/,
+# so it is this scenario's history and not its evidence; the probe stands on
+# the clause above.
+
 # Behavioural scenario: writing-specs.
 #
 # One file: the fixture, the opening, and the assertions. Sourced by any
@@ -72,7 +79,8 @@ scenario_assert() {
 
   # The criterion must be able to go RED, through the project's own command.
   # A suite that passes, errors on import, or sits `todo` is not a gate — each
-  # of those was a real observed failure, not a hypothetical.
+  # of those was a real observed failure somewhere, not a hypothetical, and the
+  # lab holds no recorded run of it, so it is not this scenario's evidence.
   if [ -n "$new_tests" ]; then
     out="$(npm test 2>&1)"; rc=$?
     if [ "$rc" -eq 0 ]; then

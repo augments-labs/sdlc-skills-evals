@@ -1,0 +1,1 @@
+{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Skill","input":{"skill":"using-sdlc-skills"}},{"type":"tool_use","name":"Skill","input":{"skill":"test-driven-development"}},{"type":"tool_use","name":"Skill","input":{"skill":"yagni"}},{"type":"tool_use","name":"Edit","input":{"file_path":"src/session.js"}}]}}

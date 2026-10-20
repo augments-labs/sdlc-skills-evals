@@ -1,9 +1,18 @@
 #!/usr/bin/env bash
+
+# Provenance: prospective contract probe
+# Clause: skills/common/using-git-worktrees/SKILL.md — "enter a dedicated workspace *before* the first edit: a git worktree, unless the"
+# Note: the run this scenario grew out of was not recorded under results/,
+# so it is this scenario's history and not its evidence; the probe stands on
+# the clause above.
+
 # Behavioural scenario: does a repo edit start in an owned, ignored git
 # worktree — or on the shared checkout the user is standing in?
 #
 # The failure this guards was observed on this opening, not imagined: with the
 # previous skill and router installed, the RED arm loaded `test-driven-development`
+# (that run was not recorded under `results/`, so it is this scenario's history
+# and not its evidence)
 # and `yagni`, never the workspace skill, and edited on `dev` in place — no
 # worktree, no branch. The rewrite makes the procedure executable — detect,
 # choose `.worktrees/`, prove it is ignored, create from the base — and names

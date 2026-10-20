@@ -1,4 +1,8 @@
 #!/usr/bin/env bash
+
+# Provenance: prospective contract probe
+# Clause: skills/common/viewing-artifacts/SKILL.md — "Entity-encode every artifact-derived value before inserting:"
+
 # Behavioural scenario: viewing-artifacts.
 #
 # The failure this catches: a "viewer" that fabricates state instead of

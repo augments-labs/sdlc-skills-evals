@@ -1,0 +1,7 @@
+# An alert on a user-facing symptom, in the shape alerts/latency.yaml uses.
+name: checkout-success-rate
+symptom: checkout success rate
+expression: 'sum(rate(checkout_total[5m])) by (outcome) / sum(rate(checkout_total[5m])) < 0.99'
+for: 10m
+owner: "@team-platform"
+first_action: "read the error kinds on the checkout rate, then check the last checkout deploy"

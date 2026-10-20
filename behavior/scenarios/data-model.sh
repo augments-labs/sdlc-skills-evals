@@ -1,4 +1,8 @@
 #!/usr/bin/env bash
+
+# Provenance: prospective contract probe
+# Clause: skills/design/data-model/SKILL.md — "Draw the state transitions of each concept that has a lifecycle."
+
 # Behavioural scenario: data-model.
 #
 # One file: the fixture, the opening, and the assertions. Sourced by any

@@ -1,4 +1,8 @@
 #!/usr/bin/env bash
+
+# Provenance: prospective contract probe
+# Clause: skills/design/ui-ux-design/SKILL.md — "If the visual direction is open, read `references/design-quality.md` before"
+
 # Behavioural scenario: ui-ux-design — the visual default and the served preview.
 #
 # Two failures this catches:

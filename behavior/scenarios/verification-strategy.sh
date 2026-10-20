@@ -1,4 +1,8 @@
 #!/usr/bin/env bash
+
+# Provenance: prospective contract probe
+# Clause: skills/testing/verification-strategy/SKILL.md — "Watch the whole cycle: green, then red on an introduced divergence, then"
+
 # Behavioural scenario: verification-strategy.
 #
 # The failure this catches: an agent that can *describe* a verification battery

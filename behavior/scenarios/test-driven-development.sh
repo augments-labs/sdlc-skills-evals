@@ -1,4 +1,8 @@
 #!/usr/bin/env bash
+
+# Provenance: prospective contract probe
+# Clause: skills/implementation/test-driven-development/SKILL.md — "Read the failure. Confirm it is the right one: the test was discovered,"
+
 # Behavioural scenario: test-driven-development.
 #
 # The failure this catches: code that ships with a test written AFTER it, which

@@ -1,4 +1,8 @@
 #!/usr/bin/env bash
+
+# Provenance: prospective contract probe
+# Clause: skills/common/yagni/SKILL.md — "Read every changed line against the Step 1 checklist."
+
 # Behavioural scenario: yagni.
 #
 # The failure this catches: an agent that reads "build the minimum" and writes

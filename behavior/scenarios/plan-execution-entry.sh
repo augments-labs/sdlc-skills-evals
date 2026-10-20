@@ -1,4 +1,8 @@
 #!/usr/bin/env bash
+
+# Provenance: prospective contract probe
+# Clause: skills/implementation/executing-plans/SKILL.md — "Record the approved plan directory by absolute path; read and mirror the"
+
 # Multi-turn regression for the design → plan → mode → implementation boundary.
 # The ordering verdict comes from structured actions, never assistant prose.
 

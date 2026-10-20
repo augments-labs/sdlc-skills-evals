@@ -1,4 +1,8 @@
 #!/usr/bin/env bash
+
+# Provenance: prospective contract probe
+# Clause: skills/maintenance/debugging/SKILL.md — "Turn the reproduction into the regression check."
+
 # Behavioural scenario: debugging.
 #
 # The failure this catches: guess-and-patch. The symptom ("users get logged out

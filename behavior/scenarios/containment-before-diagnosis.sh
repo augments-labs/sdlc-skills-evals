@@ -1,4 +1,8 @@
 #!/usr/bin/env bash
+
+# Provenance: prospective contract probe
+# Clause: skills/maintenance/containing-an-incident/SKILL.md — "Do not diagnose. Do not open product code."
+
 # Behavioural scenario: containment before diagnosis.
 #
 # The failure this catches: an agent handed a live, user-impacting incident goes

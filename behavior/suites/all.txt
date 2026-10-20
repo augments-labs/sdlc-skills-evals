@@ -1,12 +1,20 @@
+adding-observability
+changing-a-live-schema
 containment-before-diagnosis
 data-model
 debugging
+deprecating-an-api
+diagnosing-a-session
 done-boundary-routing
 hollow-floor-routing
 implementation-entry-routing
+large-scale-changes
 pending-decision-authority
 plan-execution-entry
 release-routing
+reviewing-a-pr
+reviewing-plans
+rollout-controls
 subagent-driven-development
 test-driven-development
 ui-ux-design
@@ -14,5 +22,6 @@ using-git-worktrees
 verification-before-completion
 verification-strategy
 viewing-artifacts
+working-from-a-ticket
 writing-specs
 yagni

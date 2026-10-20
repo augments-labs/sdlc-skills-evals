@@ -1,4 +1,8 @@
 #!/usr/bin/env bash
+
+# Provenance: prospective contract probe
+# Clause: skills/deployment/release-readiness/SKILL.md — "Recompute every identity immediately before any decision."
+
 # Release chain: does a stale green check stop a ship decision?
 # (covers release-readiness; the opening below never names the skill — see
 # docs/authoring.md, private-criteria rule.)

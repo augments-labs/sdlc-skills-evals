@@ -1,4 +1,8 @@
 #!/usr/bin/env bash
+
+# Provenance: prospective contract probe
+# Clause: skills/testing/verification-before-completion/SKILL.md — "Read the raw output, not the exit code, and record the run in its row;"
+
 # Behavioural scenario: verification-before-completion.
 #
 # The failure this catches: a static gate reports a real violation in the file

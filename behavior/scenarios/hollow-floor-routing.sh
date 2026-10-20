@@ -1,4 +1,11 @@
 #!/usr/bin/env bash
+
+# Provenance: prospective contract probe
+# Clause: skills/testing/verification-strategy/SKILL.md — "Watch the whole cycle: green, then red on an introduced divergence, then"
+# Note: the run this scenario grew out of was not recorded under results/,
+# so it is this scenario's history and not its evidence; the probe stands on
+# the clause above.
+
 # Does a hollow project gate survive ordinary bounded feature work unremarked?
 #
 # The fixture's `npm test` RUNS and is GREEN, and the suite asserts only that two

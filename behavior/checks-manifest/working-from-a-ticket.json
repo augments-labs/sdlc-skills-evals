@@ -1,0 +1,7 @@
+[
+  "assert_contains",
+  "assert_file",
+  "assert_not_contains",
+  "fail",
+  "pass"
+]
