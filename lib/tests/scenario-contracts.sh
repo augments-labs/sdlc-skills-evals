@@ -33,7 +33,9 @@ ok() { printf '  ok    %s\n' "$1"; }
 bad() { printf '  FAIL  %s\n' "$1"; fails=1; }
 
 work="$(mktemp -d)"
-trap 'rm -rf "$work"' EXIT
+# The ui-ux-design fixture leaves a preview startup record in /tmp, the way
+# a real run's governed preview does. The test removes the ones it created.
+trap 'rm -rf "$work"; rm -f /tmp/serve-preview.scenario-contracts-*.log' EXIT
 
 SCEN_DIR="behavior/scenarios"
 FIX_DIR="$here/lib/tests/fixtures/scenarios"
