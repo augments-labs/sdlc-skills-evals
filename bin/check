@@ -152,11 +152,10 @@ _check_inventory() { # the committed inventory, and its drift against a tree
     # log cannot mistake this for "the inventory matches upstream"
     echo "check: inventory membership not checked (no --plugin tree); the pin, canonical form, uniqueness and order were"
   fi
-  # Coverage gaps are reported, never failed: the successor plan closes the
-  # skill gaps in V3-CORPORA and the adapter gaps in V3-HARNESSES. The
-  # line is printed either way, so an empty result is an explicit zero and
-  # not the absence of a scan. The scan reads the descriptions root the
-  # shape check reads, so a caller that moves that root moves both.
+  # Coverage gaps are a FAILURE, not a report: the successor plan closes the
+  # skill gaps in V3-CORPORA and the adapter gaps in V3-HARNESSES, and the
+  # last definition has landed. The lists are printed first, so a reader sees
+  # what is missing before the gate stops.
   local eval_n=0 desc_n=0 adapter_n=0
   while IFS= read -r sk; do
     if [ ! -f "behavior/evals/$sk/evals.json" ]; then
@@ -175,6 +174,10 @@ _check_inventory() { # the committed inventory, and its drift against a tree
   for sk in $eval_gaps; do echo "check: gap: no evals.json for $sk"; done
   for sk in $desc_gaps; do echo "check: gap: no description set for $sk"; done
   for h in $adapter_gaps; do echo "check: gap: no lab adapter for $h"; done
+  if [ "$eval_n" -ne 0 ] || [ "$desc_n" -ne 0 ] || [ "$adapter_n" -ne 0 ]; then
+    echo "check: FAIL the coverage list is not closed: $eval_n skills without an eval definition, $desc_n without a description set, $adapter_n without a lab adapter"
+    return 1
+  fi
   echo "check: inventory ok"
   return 0
 }
@@ -332,6 +335,14 @@ _check_set() { # $1 file $2 holdout(0|1)
   if [ "$hold" -eq 0 ]; then
     [ "$pos" -ge 10 ] || { echo "check: FAIL $f needs >= 10 positives (has $pos)"; return 1; }
     [ "$neg" -ge 10 ] || { echo "check: FAIL $f needs >= 10 negatives (has $neg)"; return 1; }
+    # the corpus is at least twenty queries: a set that cannot decide
+    # anything is not worth the money it costs to run
+    [ "$total" -ge 20 ] || { echo "check: FAIL $f needs >= 20 queries (has $total)"; return 1; }
+    # the holdout role belongs to the holdout file, which is written after
+    # selection. A main set carrying a holdout entry leaks the untouched
+    # role into the split that is tuned on.
+    jq -e 'all(.[]; .split != "holdout")' "$f" >/dev/null \
+      || { echo "check: FAIL $f carries a holdout entry: the holdout role belongs to the holdout file, written after selection"; return 1; }
   else
     [ "$total" -ge 5 ] && [ "$total" -le 10 ] \
       || { echo "check: FAIL holdout $f holds 5-10 fresh queries (has $total)"; return 1; }
@@ -372,6 +383,131 @@ while IFS= read -r hf; do
   [ "$shared" -eq 0 ] || { echo "check: FAIL holdout $hf reuses queries from $main"; exit 1; }
 done < <(find "$desc_root/holdout" -name '*.json' -type f 2>/dev/null | sort)
 echo "check: descriptions ok"
+
+# V3-CORPORA: the corpora themselves.
+#
+# The shape check above settles whether one query set is well formed. This
+# settles the corpus as a whole:
+#
+#   - every corpus asset names a skill the inventory holds (a leftover for a
+#     skill upstream no longer has is drift, not coverage);
+#   - every output-eval definition is well formed, and carries its fixture
+#     tree;
+#   - every path an eval prompt names is in that eval's own fixture tree, so
+#     a case is answerable from what the run is handed;
+#   - no prompt names a project that does not exist.
+#
+# A static check says the corpus is READY. It says nothing about whether a
+# description fires or an output is good: that is measured by a live run.
+_check_corpora() { # the corpora, against the committed inventory
+  local skills_list sk rel f base id tok last ext top n
+  skills_list="$(jq -r '.skills[]' "$inv_path")" \
+    || { echo "check: FAIL cannot read the skill list from $inv_path"; return 1; }
+
+  # A corpus asset for a skill the inventory does not hold.
+  while IFS= read -r f; do
+    rel="${f#"$desc_root"/}"
+    case "$rel" in
+      holdout/*) rel="${rel#holdout/}" ;;
+    esac
+    rel="${rel%.json}"
+    printf '%s\n' "$skills_list" | grep -qxF "$rel" && continue
+    echo "check: FAIL a corpus asset names a skill the inventory does not hold: $rel ($f)"
+    return 1
+  done < <(find "$desc_root" -name '*.json' -type f | sort)
+  while IFS= read -r f; do
+    rel="$(dirname "${f#behavior/evals/}")"
+    printf '%s\n' "$skills_list" | grep -qxF "$rel" && continue
+    echo "check: FAIL a corpus asset names a skill the inventory does not hold: $rel ($f)"
+    return 1
+  done < <(find behavior/evals -name 'evals.json' -type f | sort)
+
+  # Every negative names a route. A route written as one word names a skill,
+  # and that skill must be one the inventory holds; a route written as a
+  # phrase ("inline explanation") names the neighbouring ACTIVITY, which is
+  # the field's own wording and is not a skill to look up.
+  local skill_names
+  skill_names="$(printf '%s\n' "$skills_list" | sed 's|.*/||')"
+  while IFS= read -r f; do
+    while IFS= read -r id; do
+      [ -n "$id" ] || continue
+      [ "$id" = "none" ] && continue
+      case "$id" in
+        *' '*) continue ;;
+      esac
+      printf '%s\n' "$skill_names" | grep -qxF "$id" && continue
+      echo "check: FAIL $f names a route that is not a skill: $id"
+      return 1
+    done < <(jq -r '.[] | select(.should_trigger == false) | .expect // empty' "$f")
+  done < <(find "$desc_root" -name '*.json' -type f | sort)
+
+  # Every output eval: well formed, with its fixture tree.
+  while IFS= read -r sk; do
+    f="behavior/evals/$sk/evals.json"
+    base="behavior/evals/$sk"
+    # A skill with no definition at all is the coverage list's business, and
+    # it is reported there with the skill's name; this check reads the
+    # definitions that exist.
+    [ -f "$f" ] || continue
+    jq -e --arg s "${sk##*/}" '.skill_name == $s' "$f" >/dev/null \
+      || { echo "check: FAIL $f names a skill that is not its own: ${sk##*/}"; return 1; }
+    jq -e '(.evals | type == "array") and ((.evals | length) >= 2) and ((.evals | length) <= 3)' "$f" >/dev/null \
+      || { echo "check: FAIL $f holds 2-3 output cases"; return 1; }
+    jq -e 'all(.evals[];
+              (.id | type == "string" and length > 0)
+              and (.prompt | type == "string" and length > 0)
+              and (.expected_output | type == "string" and length > 0)
+              and (.assertions | type == "array"))' "$f" >/dev/null \
+      || { echo "check: FAIL $f needs an id, a prompt, an expected output and an assertions array in every case"; return 1; }
+    jq -e '([.evals[].id] | length) == ([.evals[].id] | unique | length)' "$f" >/dev/null \
+      || { echo "check: FAIL $f repeats a case id"; return 1; }
+    # An unobserved case carries no assertion: assertions are written from a
+    # recorded run, and a case with none has not been observed.
+    if [ "$(jq -r '.pending_first_run // false' "$f")" = "true" ]; then
+      jq -e 'all(.evals[]; (.assertions | length) == 0)' "$f" >/dev/null \
+        || { echo "check: FAIL $f is pending its first run and must carry empty assertions"; return 1; }
+    fi
+    # No prompt names a project that does not exist. The tilde is written
+    # inside the pattern rather than as a path, so nothing expands it.
+    if jq -r '.evals[].prompt' "$f" | grep -qE '[^A-Za-z0-9_]~/|/home/|/Users/'; then
+      echo "check: FAIL $f names a project outside the run workdir; the fixture tree is the project"
+      return 1
+    fi
+    [ -d "$base/files" ] \
+      || { echo "check: FAIL $base has no files/ tree: an output case needs the project it names"; return 1; }
+    # Every path a prompt names is in that tree.
+    while IFS= read -r tok; do
+      [ -n "$tok" ] || continue
+      last="${tok##*/}"
+      ext="${last##*.}"
+      case "$last" in
+        *.*) case "$ext" in [A-Za-z]*) ;; *) last=""; ext="";; esac ;;
+        *) last=""; ext="" ;;
+      esac
+      if [ -z "$last" ]; then
+        top="${tok%%/*}"
+        [ -e "$base/files/$top" ] || continue
+      fi
+      [ -e "$base/files/$tok" ] && continue
+      echo "check: FAIL $f names a file its fixture tree does not hold: $tok"
+      return 1
+    done < <(_corpus_prompt_paths "$f")
+  done <<<"$skills_list"
+  echo "check: corpora ok"
+  return 0
+}
+
+# The path-like tokens an output eval's prompts name, one per line.
+_corpus_prompt_paths() { # $1 evals.json
+  jq -r '.evals[]?.prompt // empty' "$1" 2>/dev/null \
+    | tr ' \t' '\n\n' \
+    | tr -d "\'" \
+    | awk '{ gsub(/[`",;:!?()\[\]{}<>]/, ""); sub(/\.$/, ""); print }' \
+    | grep -E '^[A-Za-z0-9_.@-]+(/[A-Za-z0-9_.@-]+)+$' \
+    | sort -u
+}
+
+_check_corpora || exit 1
 
 # E-14: docs/ and results/ hold records and guidance, never runtime code.
 # Enforced as no-exec-bit + no-shebang: a non-executable, shebang-less
