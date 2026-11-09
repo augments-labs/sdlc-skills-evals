@@ -1,0 +1,7 @@
+[
+{"type":"step_start","timestamp":1,"sessionID":"ses_test","part":{"id":"p1","messageID":"m1","sessionID":"ses_test","type":"step-start"}},
+{"type":"text","timestamp":2,"sessionID":"ses_test","part":{"id":"p2","messageID":"m1","sessionID":"ses_test","type":"text","text":"looking at the plan"}},
+{"type":"tool","timestamp":3,"sessionID":"ses_test","part":{"id":"p3","messageID":"m1","sessionID":"ses_test","type":"tool","tool":"skill","callID":"c1","state":{"status":"completed","input":{"name":"using-git-worktrees"},"metadata":{"name":"using-git-worktrees"},"title":"load skill"}}},
+{"type":"tool","timestamp":4,"sessionID":"ses_test","part":{"id":"p4","messageID":"m1","sessionID":"ses_test","type":"tool","tool":"edit","callID":"c2","state":{"status":"completed","input":{"filePath":"src/x.ts","oldString":"a","newString":"b"},"title":"edit file"}}},
+{"type":"step_finish","timestamp":5,"sessionID":"ses_test","part":{"id":"p5","messageID":"m1","sessionID":"ses_test","type":"step-finish","reason":"stop","tokens":{"total":100,"input":80,"output":20,"reasoning":0,"cache":{"write":0,"read":10}},"cost":0}}
+]

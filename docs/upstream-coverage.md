@@ -113,19 +113,13 @@ is a documentation row, so the gate does not print it.
 
 The same nine skills: each needs a query set as well as an output eval.
 
-### Harnesses with no lab adapter (7)
+### Harnesses with no lab adapter (0)
 
-- `antigravity`
-- `cursor`
-- `devin`
-- `grok`
-- `hermes`
-- `muse`
-- `pi`
-
-The lab carries adapters for `claude-code`, `codex`, `kimi-code` and
-`opencode`. An adapter is a launcher and its contract test; whether the CLI
-runs on a given machine is a separate, later question.
+None. The lab carries an adapter for every harness the pinned upstream names:
+`antigravity`, `claude-code`, `codex`, `cursor`, `devin`, `grok`, `hermes`,
+`kimi-code`, `muse`, `opencode` and `pi`. An adapter is a launcher and its
+contract test; whether the CLI runs on a given machine is a separate, later
+question.
 
 ### Documented pin rows that still name the v10.2.1 tag (2)
 

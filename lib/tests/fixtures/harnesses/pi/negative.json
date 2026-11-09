@@ -1,0 +1,9 @@
+[
+{"type":"session","version":3,"id":"22222222-3333-4333-8444-555555555555","timestamp":"2026-10-19T00:00:00.000Z","cwd":"/tmp/lab-fixture"},
+{"type":"agent_start"},
+{"type":"tool_execution_start","toolCallId":"call_9","toolName":"read","args":{"path":"/tmp/lab-fixture/src/app.ts"}},
+{"type":"tool_execution_end","toolCallId":"call_9","toolName":"read","args":{"path":"/tmp/lab-fixture/src/app.ts"},"isError":false,"durationMs":4},
+{"type":"message_start","message":{"role":"assistant","content":[],"stopReason":"pending"}},
+{"type":"message_end","message":{"role":"assistant","content":[{"type":"text","text":"no skill needed"}],"stopReason":"stop"}},
+{"type":"agent_settled","aborted":false}
+]

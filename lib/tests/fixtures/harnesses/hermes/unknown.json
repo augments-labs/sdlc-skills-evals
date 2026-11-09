@@ -1,0 +1,4 @@
+[
+{"kind":"agent_step","index":1,"skill":"using-sdlc-skills","tool":{"name":"Skill","arguments":{"skill":"using-sdlc-skills"}}},
+{"kind":"agent_step","index":2,"skill":"using-sdlc-skills","tool":{"name":"Read","arguments":{"path":"/tmp/lab-home/skills/using-sdlc-skills/SKILL.md"}}}
+]

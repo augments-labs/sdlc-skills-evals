@@ -1,0 +1,6 @@
+[
+{"type":"system","subtype":"init","session_id":"sess-claude-1","tools":["Skill","Read","Glob","Grep"],"model":"claude-sonnet-4"},
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"toolu_1","name":"Skill","input":{"skill":"using-sdlc-skills"}}]},"session_id":"sess-claude-1"},
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"loaded"}]},"session_id":"sess-claude-1"},
+{"type":"result","subtype":"success","is_error":false,"duration_ms":4200,"num_turns":2,"result":"loaded","session_id":"sess-claude-1","usage":{"input_tokens":120,"output_tokens":30,"cache_creation_input_tokens":10,"cache_read_input_tokens":5}}
+]

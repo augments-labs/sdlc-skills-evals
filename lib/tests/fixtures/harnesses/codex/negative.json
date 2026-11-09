@@ -1,0 +1,5 @@
+[
+{"type":"thread.started","thread_id":"th-codex-2"},
+{"type":"item.completed","item":{"id":"item-1","type":"command_execution","command":"ls -la","exit_code":0}},
+{"type":"turn.completed"}
+]

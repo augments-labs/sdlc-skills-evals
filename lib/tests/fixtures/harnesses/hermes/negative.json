@@ -1,0 +1,5 @@
+[
+{"type":"system","subtype":"init","model":"hermes-model","session_id":"sess-hermes-2"},
+{"type":"text","text":"nothing to load"},
+{"type":"result","session_id":"sess-hermes-2","exit_code":0,"text":"nothing to load"}
+]

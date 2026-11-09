@@ -19,33 +19,137 @@
 # built-ins only; real config: 37 sdlc skills). Provisional until a recorded
 # run confirms them: adapter_ran (no dead-CLI shape observed) and the
 # session-continue path (sessionID key observed, resume unobserved).
+#
+# TWO GENERATIONS install the same plugin differently, so the major version
+# decides (the pinned upstream's tests/harnesses/opencode.sh, v11.0.0): 1.x
+# takes a plugin FILE under `plugin`; 2.x takes a plugin DIRECTORY under
+# `plugins` and resolves `<dir>/index.js` inside it, refusing a file path
+# outright. The install below writes the layout the CLI on this machine
+# actually reads.
+#
+# ISOLATION. Every invocation of the CLI runs under an environment this file
+# builds explicitly (opencode_env): the throwaway home, the XDG directories
+# inside it, a runtime directory and a dead session-bus socket inside it. The
+# version probe is an invocation too, and gets the same environment (see
+# _opencode_detect). The operator's environment is NOT inherited: it carries the operator's own
+# session bus, their SSH agent, their IDE tokens and their credential
+# helpers, and a launch that inherited them could read the operator's
+# stored credentials. The one exception is the operator's credential seed
+# ($LAB_CREDENTIAL_SEED/opencode/env), which the runner exports for a
+# harness whose auth is environmental: it is sourced INSIDE the child
+# process, so its values reach the CLI and never reach a command line, a
+# log or this shell.
 
 runnable=yes
-runnable_reason="opencode 1.x on PATH; auth is infrastructure-provided on this machine, no seed needed"
+runnable_reason="opencode on PATH; the recorded activation evidence is a 1.x stream, and the install covers the pinned upstream's 1.x and 2.x plugin layouts"
 permission_flags="--auto"
-capabilities="subagent-loads-skills=run nesting-depth=run tier-settable=documentation session-start-event=documentation post-compaction-event=documentation edit-path-partial=run"
+capabilities="subagent-loads-skills=yes(run) nesting-depth=yes(run) tier-settable=unknown(documentation) session-start-event=unknown(documentation) post-compaction-event=unknown(documentation) edit-path-partial=yes(run)"
 
 adapter_name='opencode'
 
-adapter_check() {
-  command -v opencode >/dev/null 2>&1 || { echo "no \`opencode\` CLI on PATH" >&2; return 3; }
+# THE LAUNCH ENVIRONMENT, built explicitly (see the header).
+opencode_env() { _opencode_env_for "$harness_home"; }
+
+# The same environment, around a given home. The launch uses the throwaway
+# home; the version probe uses the throwaway home too, so both are closed in
+# the same way (see _opencode_detect).
+_opencode_env_for() { # $1 the home the environment is built around
+  local home="$1"
+  OPENCODE_ENV=(
+    "PATH=$PATH"
+    "HOME=$home"
+    "XDG_CONFIG_HOME=$home/xdg"
+    "XDG_DATA_HOME=$home/xdg"
+    "XDG_CACHE_HOME=$home/.cache"
+    "XDG_RUNTIME_DIR=$home/.runtime"
+    "DBUS_SESSION_BUS_ADDRESS=unix:path=$home/.runtime/bus"
+    "TMPDIR=$home/tmp"
+  )
+  mkdir -p "$home/xdg" "$home/.cache" "$home/.runtime" "$home/tmp"
 }
 
-# OpenCode loads a plugin file directly: the isolated config home carries
-# only the plugin entry naming the pinned source. An empty source is the
-# NONE arm — isolated home, no plugin entry, so nothing can leak in.
+# Run the CLI under that environment, with the operator's credential seed
+# sourced inside the child when there is one.
+opencode_exec() { # $@ the CLI and its arguments
+  local seed="${LAB_CREDENTIAL_SEED:-}/$adapter_name/env"
+  if [ -f "$seed" ]; then
+    timeout "$timeout_s" env -i "${OPENCODE_ENV[@]}" \
+      sh -c 'set -a; . "$1"; set +a; shift; exec "$@"' _ "$seed" "$@"
+  else
+    timeout "$timeout_s" env -i "${OPENCODE_ENV[@]}" "$@"
+  fi
+}
+
+# `opencode --version` prints e.g. `opencode v2.0.13`; keep only the number.
+#
+# The probe is a CLI invocation, so it runs under the SAME closed environment
+# a launch gets: the throwaway home, the XDG directories inside it, a runtime
+# directory and a dead session-bus socket inside it. A throwaway HOME alone
+# closes nothing for a D-Bus client: with neither a runtime directory nor a
+# bus address of its own, it falls back to the passwd entry's runtime
+# directory — the operator's own session bus, and the route to the operator's
+# stored credentials.
+#
+# The probe's home is the throwaway home when there is one — an install has
+# built it by then, and the probe's own record is then visible in it — and a
+# home of its own before that (adapter_check runs first). It is never the
+# operator's home.
+_opencode_detect() { # $1 the home the probe runs in ("" = a home of its own)
+  local probe_home own=0
+  if [ -n "${1:-}" ]; then
+    probe_home="$1"
+  else
+    probe_home="$(mktemp -d)" || return 1
+    own=1
+  fi
+  _opencode_env_for "$probe_home"
+  opencode_version="$(env -i "${OPENCODE_ENV[@]}" \
+    opencode --version 2>/dev/null | head -1 | tr -cd '0-9.')"
+  [ "$own" -eq 1 ] && rm -rf "$probe_home"
+  opencode_major="${opencode_version%%.*}"
+}
+
+adapter_check() {
+  command -v opencode >/dev/null 2>&1 || { echo "no \`opencode\` CLI on PATH" >&2; return 3; }
+  _opencode_detect "${harness_home:-}"
+  case "$opencode_major" in
+    1|2) ;;
+    *) echo "unrecognised \`opencode\` version: ${opencode_version:-none}" >&2; return 3;;
+  esac
+}
+
+
+# OpenCode loads a plugin from the checkout, so the checkout is the whole
+# install: the plugin resolves its skills from its own location. The isolated
+# config home carries only the plugin entry — no credentials. An empty source
+# is the NONE arm — isolated home, no plugin entry, so nothing can leak in.
 # Auth is infrastructure-provided here; where it is not, the runner exports
 # $LAB_CREDENTIAL_SEED/opencode/env before invoking (see harnesses/README).
 adapter_install() { # $1 plugin source ("" = NONE arm, load nothing)
   harness_home="$(mktemp -d)"
   mkdir -p "$harness_home/xdg/opencode" || return 3
+  # The layout depends on the major version: 1.x names a plugin FILE under
+  # `plugin`, 2.x names the plugin DIRECTORY under `plugins` and resolves
+  # `<dir>/index.js` inside it. The version is read at install time, never
+  # carried over from an earlier install. The probe runs in the throwaway
+  # home this install just built, so it is closed like every other
+  # invocation.
+  _opencode_detect "$harness_home"
+  case "$opencode_major" in
+    1|2) ;;
+    *) echo "unrecognised \`opencode\` version: ${opencode_version:-none}" >&2; return 3;;
+  esac
   # A step bound for the default build agent when the runner names one
   # (maxturns): opencode has no CLI turns flag, so the isolated config
   # carries it. Past the bound the agent answers text-only and exits —
   # a miss, not a hang. Without maxturns the wall clock is the only bound.
   local plug_cfg steps_cfg
   if [ -n "${1:-}" ]; then
-    plug_cfg="$(jq -n --arg p "$1/.opencode/plugins/sdlc-skills.js" '[$p]')"
+    if [ "$opencode_major" = "1" ]; then
+      plug_cfg="$(jq -n --arg p "$1/.opencode/plugins/sdlc-skills.js" '[$p]')"
+    else
+      plug_cfg="$(jq -n --arg p "$1" '[$p]')"
+    fi
   else
     plug_cfg="null"
   fi
@@ -54,9 +158,11 @@ adapter_install() { # $1 plugin source ("" = NONE arm, load nothing)
   else
     steps_cfg="null"
   fi
-  jq -n --argjson plugin "$plug_cfg" --argjson agent "$steps_cfg" \
+  local plugin_key="plugin"
+  [ "$opencode_major" = "1" ] || plugin_key="plugins"
+  jq -n --arg key "$plugin_key" --argjson plugin "$plug_cfg" --argjson agent "$steps_cfg" \
     '{"$schema":"https://opencode.ai/config.json"}
-     + (if $plugin == null then {} else {plugin:$plugin} end)
+     + (if $plugin == null then {} else {($key):$plugin} end)
      + (if $agent == null then {} else {agent:$agent} end)' \
     > "$harness_home/xdg/opencode/opencode.json" || return 3
   plugin_dir="$1"
@@ -110,10 +216,8 @@ adapter_usage() { # $1 stream file
 # disposable fixture and HOME/XDG are the throwaway run home.
 adapter_run_activation() { # $1 workdir  $2 prompt  $3 stream  $4... extra flags
   local wd="$1" prompt="$2" stream="$3"; shift 3
-  ( exec timeout "$timeout_s" env -i PATH="$PATH" HOME="$harness_home" \
-      XDG_CONFIG_HOME="$harness_home/xdg" XDG_DATA_HOME="$harness_home/xdg" \
-      TMPDIR="${TMPDIR:-/tmp}" \
-      opencode run --format json --auto --dir "$wd" "$@" "$prompt" ) \
+  opencode_env
+  ( opencode_exec opencode run --format json --auto --dir "$wd" "$@" "$prompt" ) \
     < /dev/null > "$stream" 2>>"$errlog"
 }
 
@@ -121,10 +225,8 @@ adapter_run_activation() { # $1 workdir  $2 prompt  $3 stream  $4... extra flags
 # the run happens in a disposable fixture copy under TMPDIR, never in a
 # real checkout, under the throwaway run home.
 adapter_run_behavioral() { # $1 workdir  $2 opening file  $3 stream
-  ( exec timeout "$timeout_s" env -i PATH="$PATH" HOME="$harness_home" \
-      XDG_CONFIG_HOME="$harness_home/xdg" XDG_DATA_HOME="$harness_home/xdg" \
-      TMPDIR="${TMPDIR:-/tmp}" \
-      opencode run --format json --auto --dir "$1" "$(cat "$2")" ) \
+  opencode_env
+  ( opencode_exec opencode run --format json --auto --dir "$1" "$(cat "$2")" ) \
     < /dev/null > "$3" 2>>"$errlog"
 }
 
@@ -136,9 +238,7 @@ adapter_continue_behavioral() { # $1 workdir  $2 prompt  $3 new stream  $4 prior
   session_id="$(jq -r '.. | objects | .sessionID? // .session_id? // empty' "$prior" 2>/dev/null \
     | grep -v '^null$' | head -1)"
   [ -n "$session_id" ] || { echo "opencode stream contains no resumable session id" >&2; return 2; }
-  ( exec timeout "$timeout_s" env -i PATH="$PATH" HOME="$harness_home" \
-      XDG_CONFIG_HOME="$harness_home/xdg" XDG_DATA_HOME="$harness_home/xdg" \
-      TMPDIR="${TMPDIR:-/tmp}" \
-      opencode run --format json --auto --dir "$wd" -s "$session_id" "$prompt" ) \
+  opencode_env
+  ( opencode_exec opencode run --format json --auto --dir "$wd" -s "$session_id" "$prompt" ) \
     < /dev/null > "$out" 2>>"$errlog"
 }

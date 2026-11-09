@@ -1,0 +1,5 @@
+[
+{"type":"system","subtype":"init","session_id":"sess-claude-2"},
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"nothing to load"}]},"session_id":"sess-claude-2"},
+{"type":"result","subtype":"success","session_id":"sess-claude-2"}
+]

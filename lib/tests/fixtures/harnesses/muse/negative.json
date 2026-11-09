@@ -1,0 +1,4 @@
+[
+{"schema_version":1,"id":"r-1","stream":{"kind":"session","id":"sess-muse-2"},"sequence":1,"recorded_at":1,"record_type":"status","durability":"ephemeral","causation_id":"c-1","payload_type":"run.output.delta","payload_schema_version":1,"payload":{"kind":"run_output_delta","text":"I did not load sdlc-skills:using-sdlc-skills"}},
+{"schema_version":1,"id":"r-2","stream":{"kind":"session","id":"sess-muse-2"},"sequence":2,"recorded_at":2,"record_type":"event","durability":"durable","causation_id":"c-1","payload_type":"run.terminal.completed","payload_schema_version":1,"payload":{"kind":"run_terminal","terminal":"completed","text":"done"}}
+]

@@ -1,12 +1,16 @@
 #!/usr/bin/env bash
-# Offline test: the opencode adapter parses the observed stream shapes.
-# The fixture mirrors a real `opencode run --format json` envelope (one
-# JSON object per line, sessionID beside every event) with part shapes
+# Offline test: the opencode adapter parses the observed stream shapes and
+# installs the plugin the way the CLI on the machine actually reads it.
+#
+# The stream fixture mirrors a real `opencode run --format json` envelope
+# (one JSON object per line, sessionID beside every event) with part shapes
 # observed in the session store (skill input.name, edit/write filePath,
-# step-finish tokens). No live run.
+# step-finish tokens). It lives with the other labelled fixtures, under
+# lib/tests/fixtures/harnesses/opencode/. No live run.
 set -uo pipefail
 here="$(cd "$(dirname "$0")" && pwd)"
 lab="$here/../.."
+fix="$here/fixtures/harnesses/opencode"
 # shellcheck source=../../harnesses/opencode.sh
 source "$lab/harnesses/opencode.sh"
 
@@ -14,16 +18,10 @@ fails=0
 ok() { printf '  ok    %s\n' "$1"; }
 bad() { printf '  FAIL  %s\n' "$1"; fails=1; }
 
-fix="$(mktemp -d)"
-trap 'rm -rf "$fix"' EXIT
-stream="$fix/stream.jsonl"
-cat > "$stream" <<'EOF'
-{"type":"step_start","timestamp":1,"sessionID":"ses_test","part":{"id":"p1","messageID":"m1","sessionID":"ses_test","type":"step-start"}}
-{"type":"text","timestamp":2,"sessionID":"ses_test","part":{"id":"p2","messageID":"m1","sessionID":"ses_test","type":"text","text":"looking at the plan"}}
-{"type":"tool","timestamp":3,"sessionID":"ses_test","part":{"id":"p3","messageID":"m1","sessionID":"ses_test","type":"tool","tool":"skill","callID":"c1","state":{"status":"completed","input":{"name":"using-git-worktrees"},"metadata":{"name":"using-git-worktrees"},"title":"load skill"}}}
-{"type":"tool","timestamp":4,"sessionID":"ses_test","part":{"id":"p4","messageID":"m1","sessionID":"ses_test","type":"tool","tool":"edit","callID":"c2","state":{"status":"completed","input":{"filePath":"src/x.ts","oldString":"a","newString":"b"},"title":"edit file"}}}
-{"type":"step_finish","timestamp":5,"sessionID":"ses_test","part":{"id":"p5","messageID":"m1","sessionID":"ses_test","type":"step-finish","reason":"stop","tokens":{"total":100,"input":80,"output":20,"reasoning":0,"cache":{"write":0,"read":10}},"cost":0}}
-EOF
+work="$(mktemp -d)"
+trap 'rm -rf "$work"' EXIT
+stream="$work/stream.jsonl"
+jq -c '.[]' "$fix/activation.json" > "$stream"
 
 [ "$(adapter_chain "$stream")" = "using-git-worktrees" ] \
   && ok "chain reports the invoked skill" || bad "chain reports the invoked skill (got $(adapter_chain "$stream"))"
@@ -38,7 +36,7 @@ adapter_ran "$stream" \
 
 # a long session emits one step-finish per step: usage takes the last
 # cumulative total, never a concatenation of every step
-multi="$fix/multi.jsonl"
+multi="$work/multi.jsonl"
 cp "$stream" "$multi"
 cat >> "$multi" <<'EOF'
 {"type":"step_finish","timestamp":6,"sessionID":"ses_test","part":{"id":"p6","messageID":"m1","sessionID":"ses_test","type":"step-finish","reason":"stop","tokens":{"total":250,"input":200,"output":50,"reasoning":0,"cache":{"write":0,"read":25}},"cost":0}}
@@ -47,36 +45,91 @@ EOF
   && ok "usage takes the last step total" || bad "usage takes the last step total (got $(adapter_usage "$multi"))"
 
 # empty and error-shaped streams stay silent, never phantom
-empty="$fix/empty.jsonl"
+empty="$work/empty.jsonl"
 : > "$empty"
 [ -z "$(adapter_chain "$empty")" ] && ok "empty stream has no chain" || bad "empty stream has no chain"
 adapter_ran "$empty" && bad "empty stream did not run" || ok "empty stream did not run"
 [ -z "$(adapter_usage "$empty" 2>/dev/null)" ] && ok "empty stream has no usage" || bad "empty stream has no usage"
-printf '{"type":"error","timestamp":6,"error":{"message":"auth failed"}}\n' > "$fix/err.jsonl"
-adapter_ran "$fix/err.jsonl" && bad "error stream did not run" || ok "error stream did not run"
+printf '{"type":"error","timestamp":6,"error":{"message":"auth failed"}}\n' > "$work/err.jsonl"
+adapter_ran "$work/err.jsonl" && bad "error stream did not run" || ok "error stream did not run"
 
 # session continuation reads the stream's own session id
 [ "$(jq -r '.. | objects | .sessionID? // empty' "$stream" | head -1)" = "ses_test" ] \
   && ok "session id readable from stream" || bad "session id readable from stream"
 
-# install writes an isolated config naming the pinned plugin (offline)
-plug="$fix/plugin-src"
-mkdir -p "$plug"
+# --- the install --------------------------------------------------------------
+# Two generations install the same plugin differently, so the major version
+# decides (the pinned upstream's tests/harnesses/opencode.sh, v11.0.0): 1.x
+# takes a plugin FILE under `plugin`; 2.x takes a plugin DIRECTORY under
+# `plugins` and resolves `<dir>/index.js` inside it.
+#
+# The version comes from the CLI's own `--version`, so the fake CLI below
+# is what answers it: the real opencode is not on this test's PATH. The
+# answer is read from a file BESIDE the fake, not from the environment:
+# the adapter reads the version under a cleared environment — a version
+# probe must not reach the operator's session bus either — so a variable
+# would not survive to the CLI.
+fakebin="$work/bin"; mkdir -p "$fakebin"
+cat > "$fakebin/opencode" <<'EOF'
+#!/usr/bin/env bash
+case "${1:-}" in
+  --version|-v)
+    v="$(cat "$(dirname "$0")/version" 2>/dev/null || echo 1.9.0)"
+    printf 'opencode v%s\n' "$v";;
+esac
+exit 0
+EOF
+chmod +x "$fakebin/opencode"
+PATH="$fakebin:$PATH"; export PATH
+fake_version() { printf '%s\n' "$1" > "$fakebin/version"; }
+
+plug="$work/plugin-src"
+mkdir -p "$plug/.opencode/plugins"
+printf 'export default {}\n' > "$plug/.opencode/plugins/sdlc-skills.js"
+printf 'export default {}\n' > "$plug/index.js"
+
+fake_version 1.9.0
 maxturns=6 adapter_install "$plug"
 # Set by adapter_install (sourced above).
 # shellcheck disable=SC2154
 cfg="$harness_home/xdg/opencode/opencode.json"
 jq -e --arg p "$plug/.opencode/plugins/sdlc-skills.js" \
   '.plugin[0] == $p and .agent.build.steps == 6' "$cfg" >/dev/null \
-  && ok "install pins plugin and step bound" || bad "install pins plugin and step bound"
+  && ok "1.x install names the plugin file and the step bound" || bad "1.x install names the plugin file and the step bound"
+jq -e 'has("plugins") | not' "$cfg" >/dev/null \
+  && ok "1.x install writes no plugins key" || bad "1.x install writes no plugins key"
+rm -rf "$harness_home"
+
+fake_version 2.0.32
+maxturns=6 adapter_install "$plug"
+cfg="$harness_home/xdg/opencode/opencode.json"
+jq -e --arg p "$plug" \
+  '.plugins[0] == $p and .agent.build.steps == 6' "$cfg" >/dev/null \
+  && ok "2.x install names the plugin directory and the step bound" || bad "2.x install names the plugin directory and the step bound"
+jq -e 'has("plugin") | not' "$cfg" >/dev/null \
+  && ok "2.x install writes no plugin key" || bad "2.x install writes no plugin key"
+rm -rf "$harness_home"
+
+# a version the adapter does not know is refused, not guessed at
+fake_version 9.9.9
+if adapter_install "$plug" >/dev/null 2>&1; then
+  bad "an unrecognised opencode version is refused"
+else
+  ok "an unrecognised opencode version is refused"
+fi
+
+fake_version 1.9.0
+adapter_install "$plug" >/dev/null 2>&1
 saved_turns="${maxturns:-}"
 unset maxturns
 adapter_install "$plug" 2>/dev/null
-jq -e 'has("agent") | not' "$harness_home/xdg/opencode/opencode.json" >/dev/null \
+cfg="$harness_home/xdg/opencode/opencode.json"
+jq -e 'has("agent") | not' "$cfg" >/dev/null \
   && ok "install omits steps without maxturns" || bad "install omits steps without maxturns"
 maxturns="$saved_turns"
 adapter_install "" 2>/dev/null
-jq -e 'has("plugin") | not' "$harness_home/xdg/opencode/opencode.json" >/dev/null \
+cfg="$harness_home/xdg/opencode/opencode.json"
+jq -e '(has("plugin") | not) and (has("plugins") | not)' "$cfg" >/dev/null \
   && ok "none arm installs no plugin" || bad "none arm installs no plugin"
 rm -rf "$harness_home"
 

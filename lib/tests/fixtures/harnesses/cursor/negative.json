@@ -1,0 +1,5 @@
+[
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"reading a file"}]},"session_id":"sess-cursor-2","timestamp_ms":1},
+{"type":"tool_call","subtype":"completed","call_id":"call_9","tool_call":{"toolCallId":"call_9","toolName":"read","argsJson":"{\"path\":\"/tmp/lab-fixture/src/app.ts\"}"},"model_call_id":"mc-9","session_id":"sess-cursor-2","timestamp_ms":2},
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"no skill here"}]},"session_id":"sess-cursor-2","timestamp_ms":3}
+]
