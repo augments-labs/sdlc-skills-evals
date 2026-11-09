@@ -19,7 +19,8 @@
 # a Summary table and a Per-Eval Breakdown. No live calls.
 #
 # An arm whose grading.json is missing or unreadable, or whose timing.json
-# is unreadable, is an indeterminate row with that reason: both files are
+# is unreadable (not an object, or a non-number duration_ms/total_tokens),
+# is an indeterminate row with that reason: both files are
 # still written, the count is printed, and the exit is 2.
 
 set -uo pipefail
@@ -58,7 +59,8 @@ runs="$(for e in "$iter"/*/; do
     elif ! g="$(jq -ce '.summary | objects' "$d/grading.json" 2>/dev/null)"; then
       g='{}'; bad="grading.json unreadable"
     fi
-    if [ -f "$d/timing.json" ] && ! t="$(jq -ce 'objects' "$d/timing.json" 2>/dev/null)"; then
+    if [ -f "$d/timing.json" ] && ! t="$(jq -ce 'objects
+        | select(all(.duration_ms, .total_tokens; . == null or type == "number"))' "$d/timing.json" 2>/dev/null)"; then
       t='null'; bad="${bad:+$bad; }timing.json unreadable"
     fi
     [ -z "$bad" ] || g="$(jq -nc --arg r "$bad" '{outcome: "indeterminate", reason: $r}')"

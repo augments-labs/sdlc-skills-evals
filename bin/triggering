@@ -132,7 +132,7 @@ while [ "$#" -gt 0 ]; do
     *) echo "unknown argument: $1" >&2; exit 2;;
   esac
 done
-[ -n "$harness" ] || { echo "needs --harness opencode|claude-code|codex|kimi-code" >&2; exit 2; }
+[ -n "$harness" ] || { echo "needs --harness NAME" >&2; exit 2; }
 [ -n "$skill" ] || [ -n "$all" ] || { echo "needs --skill NAME or --all" >&2; exit 2; }
 command -v jq >/dev/null 2>&1 || { echo "needs \`jq\`" >&2; exit 3; }
 case "$split" in all|train|validation|holdout) ;; *) echo "--split all|train|validation|holdout" >&2; exit 2;; esac

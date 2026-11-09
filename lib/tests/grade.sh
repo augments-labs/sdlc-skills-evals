@@ -79,6 +79,20 @@ mk_case "$work/gcseed" "[check:git-count 3] three changed" "[check:git-count 4] 
 jq -e '[.assertion_results[].passed] == [true, false]' "$work/gcseed/grading.json" >/dev/null 2>&1 \
   && ok "the outputs/.git fallback counts against the seed commit, a spaced path once, a delete too" \
   || bad "the outputs/.git fallback counts against the seed commit, a spaced path once, a delete too ($(jq -c '[.assertion_results[].evidence]' "$work/gcseed/grading.json" 2>/dev/null))"
+# No change list (none recorded, no git tree, or a tree whose seed is gone)
+# is not zero changes: git-count waits for review, never passes or fails.
+mk_case "$work/gcnone" "[check:git-count 0] nothing changed" "[check:git-count 1] one changed"
+mk_case "$work/gcnoseed" "[check:git-count 0] nothing changed" "[check:git-count 1] one changed"
+( cd "$work/gcnoseed/outputs" && git init -q . )
+miss=""
+for c in gcnone gcnoseed; do
+  "$here/bin/grade" "$work/$c" >/dev/null 2>&1
+  jq -e '[.assertion_results[].passed] == ["needs_review", "needs_review"]
+    and all(.assertion_results[]; .evidence | test("change list unavailable"))' \
+    "$work/$c/grading.json" >/dev/null 2>&1 || miss="$miss $c:$(jq -c '[.assertion_results[] | [.passed, .evidence]]' "$work/$c/grading.json" 2>/dev/null)"
+done
+[ -z "$miss" ] && ok "git-count without a change list waits for review, never counts zero" \
+  || bad "git-count without a change list waits for review, never counts zero ($miss)"
 
 # --- a check that could not run fails; an unknown verb waits for review -----
 mk_case "$work/badre" "[check:file-contains test.txt (unclosed] greets" \
@@ -107,6 +121,24 @@ jq -e '.summary.outcome == "indeterminate" and .summary.pass_rate == null
   and (.summary.reason | test("run_status.json unreadable"))' "$work/badstatus/grading.json" >/dev/null 2>&1 \
   && ok "an unreadable run_status.json grades indeterminate" \
   || bad "an unreadable run_status.json grades indeterminate ($(jq -c .summary "$work/badstatus/grading.json" 2>/dev/null))"
+# A status file that parses but names no outcome the lab writes (zero bytes,
+# null, {}, an unknown outcome) says nothing about the arm either.
+miss=""
+for s in empty null obj unknown; do
+  cp -r "$here/lib/tests/fixtures/grade-run" "$work/st-$s"
+  case "$s" in
+    empty) : > "$work/st-$s/run_status.json" ;;
+    null) printf 'null\n' > "$work/st-$s/run_status.json" ;;
+    obj) printf '{}\n' > "$work/st-$s/run_status.json" ;;
+    unknown) printf '{"outcome": "maybe"}\n' > "$work/st-$s/run_status.json" ;;
+  esac
+  "$here/bin/grade" "$work/st-$s" >/dev/null 2>&1
+  jq -e '.summary.outcome == "indeterminate" and .summary.pass_rate == null
+    and (.summary.reason | test("run_status.json unreadable"))' "$work/st-$s/grading.json" >/dev/null 2>&1 \
+    || miss="$miss $s"
+done
+[ -z "$miss" ] && ok "a zero-byte, null, empty, or unknown-outcome run_status.json grades indeterminate" \
+  || bad "a zero-byte, null, empty, or unknown-outcome run_status.json grades indeterminate (scored:$miss)"
 
 # --- the rubric grader, through the fake harness only ------------------------
 fake_h="$here/lib/tests/fake-cli"

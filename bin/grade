@@ -23,7 +23,9 @@
 #   git-count <min>              (files added, modified, or deleted vs the
 #                                 seed commit: git-changed.txt when the run
 #                                 recorded one, else outputs/.git against its
-#                                 first commit)
+#                                 first commit; with neither, or when git
+#                                 cannot compute it, the check waits for
+#                                 review — no list is not zero changes)
 #
 # --harness H grades the prose assertions with a skill-free session on that
 # harness (the rubric grader). It is a live call against your own harness
@@ -83,10 +85,11 @@ status_file="$run_dir/run_status.json"
 n_assert="$(jq '.assertions | length' "$case_file")"
 
 # --- an arm that measured nothing is not scored ------------------------------
-# A run_status.json that exists but cannot be read says nothing about the arm.
+# A run_status.json that exists but cannot be read, or names no outcome
+# bin/evaluate writes (ok, indeterminate), says nothing about the arm.
 status_reason=""
 if [ -f "$status_file" ]; then
-  if ! status_outcome="$(jq -r '.outcome // empty' "$status_file" 2>/dev/null)"; then
+  if ! status_outcome="$(jq -er '.outcome | select(. == "ok" or . == "indeterminate")' "$status_file" 2>/dev/null)"; then
     status_reason="run_status.json unreadable"
   elif [ "$status_outcome" = indeterminate ]; then
     status_reason="$(jq -r '.reason // "indeterminate"' "$status_file")"
@@ -178,7 +181,8 @@ for i in $(seq 0 $((n_assert - 1)) 2>/dev/null || true); do
             verdict="failed"; evidence="$cnt changed files (< $args)"
           fi
         else
-          verdict="failed"; evidence="no git-changed.txt and no git tree in outputs/"
+          verdict="needs_review"
+          evidence="change list unavailable: no git-changed.txt, and no git tree with a seed commit in outputs/ — outputs/ (human review)"
         fi
         ;;
       *)

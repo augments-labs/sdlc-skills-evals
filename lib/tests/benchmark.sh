@@ -114,6 +114,18 @@ bb="$work4/bad/benchmark.json"
   && ok "an unreadable arm record is an indeterminate row, warned, exit 2" \
   || bad "an unreadable arm record is an indeterminate row, warned, exit 2 (rc $rc; $(jq -c '[.runs[] | [.eval_id, .configuration, .outcome, .reason]]' "$bb" 2>/dev/null))"
 
+# a timing.json that parses but carries a non-number is an indeterminate row,
+# never a row silently dropped from runs[] and the means
+cp -r "$here/lib/tests/fixtures/bench-iter" "$work4/typed"
+printf '{"total_tokens":1000,"duration_ms":"abc"}\n' > "$work4/typed/eval-a/with_skill/timing.json"
+"$here/bin/benchmark" "$work4/typed" >/dev/null 2>&1; rc=$?
+[ "$rc" -eq 2 ] && jq -e '(.runs | length) == 4
+  and ([.runs[] | select(.eval_id == "eval-a" and .configuration == "with_skill")][0]
+       | .outcome == "indeterminate" and .pass_rate == null and (.reason | test("timing.json unreadable")))' \
+  "$work4/typed/benchmark.json" >/dev/null 2>&1 \
+  && ok "a type-invalid timing.json is an indeterminate row, not a dropped one" \
+  || bad "a type-invalid timing.json is an indeterminate row, not a dropped one (rc $rc; $(jq -c '[.runs[] | [.eval_id, .configuration, .outcome, .reason]]' "$work4/typed/benchmark.json" 2>/dev/null))"
+
 # one iteration compares one pair
 cp -r "$here/lib/tests/fixtures/bench-iter" "$work4/two"
 cp -r "$work4/two/eval-b/without_skill" "$work4/two/eval-b/old_skill"

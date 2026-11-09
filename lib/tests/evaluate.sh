@@ -386,6 +386,38 @@ ca="$work/changes/ws/c5/iteration-1/changes/with_skill"
   && ok "a files/<dir> entry stages the directory once, not nested in itself" \
   || bad "a files/<dir> entry stages the directory once, not nested in itself ($(cd "$ca/outputs" 2>/dev/null && find src | tr '\n' ' '))"
 
+# --- an agent that replaces the repository: the seed is gone ---------------
+# The change list cannot be computed, so none is recorded and the operator is
+# told; git-count then waits for review instead of counting zero.
+levroot="$work/levals"
+mkdir -p "$levroot/probe/files"
+printf 'seed\n' > "$levroot/probe/files/seed.txt"
+cat > "$levroot/probe/evals.json" <<'JSON'
+{"skill_name": "probe", "evals": [{"id": "lost", "prompt": "Start over.",
+  "expected_output": "A fresh repository.", "files": ["files/seed.txt"],
+  "assertions": ["[check:git-count 0] nothing changed"]}]}
+JSON
+lhook="$work/lhook"
+cat > "$lhook" <<'HOOK'
+#!/usr/bin/env bash
+cd "$1" || exit 1
+rm -rf .git && git init -q . && printf 'n\n' > new.txt
+echo "done answer"
+HOOK
+chmod +x "$lhook"; mkdir -p "$work/lost"
+( export TMPDIR="$work/outer-tmp"
+  HOME="$outer_home" EVALS_ROOT="$levroot" WORKSPACES_ROOT="$work/lost/ws" TRIPWIRE_LOG="$own_trip" \
+  FAKE_BEHAVIORAL_HOOK="$lhook" FAKE_RECORD_DIR="$work/lost/rec" \
+    "$ev" --harness fake --harness-dir "$fake_h" --skill probe --timeout 20 \
+      --plugin "$with_plug" --campaign c6 >/dev/null 2>"$work/lost/err.txt" )
+la="$work/lost/ws/c6/iteration-1/lost/with_skill"
+[ -d "$la/outputs" ] && [ ! -e "$la/git-changed.txt" ] \
+  && grep -q 'lost/with_skill: change list unavailable' "$work/lost/err.txt" 2>/dev/null \
+  && jq -e '.assertion_results[0].passed == "needs_review"
+    and (.assertion_results[0].evidence | test("change list unavailable"))' "$la/grading.json" >/dev/null 2>&1 \
+  && ok "a lost seed records no change list, says so, and git-count waits for review" \
+  || bad "a lost seed records no change list, says so, and git-count waits for review (git-changed: '$(cat "$la/git-changed.txt" 2>/dev/null)'; $(jq -c '.assertion_results' "$la/grading.json" 2>/dev/null))"
+
 [ ! -s "$own_trip" ] && ok "no real agent CLI was called" || bad "no real agent CLI was called ($(cat "$own_trip"))"
 
 exit "$fails"

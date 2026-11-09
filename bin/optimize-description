@@ -32,7 +32,7 @@
 # so is every reviser call: at most K iterations x queries x runs scoring
 # calls plus K-1 reviser calls, and the query count differs per skill.
 #
-# Price it first:  --dry-run  prints the exact budget and calls nothing.
+# Price it first:  --dry-run  prints that upper bound and calls nothing.
 # ==============================================================================
 #
 # The pinned plugin is never written: a ref is extracted with `git archive`,

@@ -362,8 +362,14 @@ run_arm() { # $1 eval id $2 arm $3 plugin source ("" for none)
   rc=$?
   end="$(ms_now)"
 
-  # The change list first: response.txt is the lab's, not the agent's.
-  lab_changed_files "$workdir" "$seed" > "$arm_dir/git-changed.txt" 2>/dev/null
+  # The change list first: response.txt is the lab's, not the agent's. A list
+  # git could not compute (the agent replaced the repository, so the seed is
+  # gone) is not "nothing changed": none is recorded, and bin/grade's
+  # git-count waits for review.
+  if ! git_err="$(lab_changed_files "$workdir" "$seed" 2>&1 >"$arm_dir/git-changed.txt")"; then
+    rm -f "$arm_dir/git-changed.txt"
+    log "$id/$arm: change list unavailable: $(head -n 1 <<<"$git_err")"
+  fi
   mkdir -p "$arm_dir/outputs"
   cp -a "$workdir/." "$arm_dir/outputs/" && rm -rf "$arm_dir/outputs/.git" || return 1
   lab_extract_stream_text "$stream" "$harness" > "$arm_dir/outputs/response.txt" 2>/dev/null \

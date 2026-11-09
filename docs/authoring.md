@@ -34,7 +34,9 @@ gets built?
    - `[check:file-not-contains <path> <regex>]` (an absent file fails)
    - `[check:command-succeeds <cmd...>]` (full shell, CWD `outputs/`)
    - `[check:git-count <min>]` (files added, modified, or deleted vs the
-     seed commit, committed or not; a rename git detects counts once)
+     seed commit, committed or not; a rename git detects counts once; when
+     the list cannot be computed, as when the agent replaced the repository,
+     the check is `needs_review`, never a count of zero)
 
    An assertion without a `[check:` prefix is prose: `bin/grade` records it
    `needs_review` for you, or for the rubric grader under `--harness`. An
