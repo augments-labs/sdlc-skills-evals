@@ -84,4 +84,46 @@ jq -e '.run_summary.with_skill.pass_rate == null and .run_summary.without_skill.
   || bad "an arm with no scored run has a null mean, not an error"
 rm -rf "$work3"
 
+# a zero-assertion run reads as such in benchmark.md
+work4="$(mktemp -d)"
+cp -r "$here/lib/tests/fixtures/bench-iter" "$work4/iter"
+printf '{"assertion_results":[],"summary":{"outcome":"ok","passed":0,"failed":0,"needs_review":0,"total":0,"pass_rate":null}}\n' \
+  > "$work4/iter/eval-b/with_skill/grading.json"
+"$here/bin/benchmark" "$work4/iter" >/dev/null 2>&1
+grep -q '| eval-b | with_skill | ok | n/a (0 assertions) |' "$work4/iter/benchmark.md" 2>/dev/null \
+  && ok "benchmark.md marks a zero-assertion run n/a (0 assertions)" \
+  || bad "benchmark.md marks a zero-assertion run n/a (0 assertions)"
+
+# a grading.json missing or unreadable, or a timing.json unreadable, is an
+# indeterminate row with its reason, counted, and the exit says so
+cp -r "$here/lib/tests/fixtures/bench-iter" "$work4/bad"
+rm "$work4/bad/eval-a/with_skill/grading.json"
+printf '{"summary": ' > "$work4/bad/eval-b/with_skill/grading.json"
+printf '{"duration_ms": ' > "$work4/bad/eval-a/without_skill/timing.json"
+"$here/bin/benchmark" "$work4/bad" >"$work4/bad.out" 2>&1; rc=$?
+bb="$work4/bad/benchmark.json"
+[ "$rc" -eq 2 ] && jq -e '
+  ([.runs[] | select(.outcome == "indeterminate")] | length) == 3
+  and ([.runs[] | select(.eval_id == "eval-a" and .configuration == "with_skill")][0].reason | test("grading.json missing"))
+  and ([.runs[] | select(.eval_id == "eval-b" and .configuration == "with_skill")][0].reason | test("grading.json unreadable"))
+  and ([.runs[] | select(.eval_id == "eval-a" and .configuration == "without_skill")][0].reason | test("timing.json unreadable"))
+  and all(.runs[] | select(.outcome == "indeterminate"); .pass_rate == null)
+  and .run_summary.with_skill.indeterminate_count == 2
+  and .run_summary.without_skill.indeterminate_count == 1' "$bb" >/dev/null 2>&1 \
+  && grep -q 'indeterminate' "$work4/bad.out" && [ -s "$work4/bad/benchmark.md" ] \
+  && ok "an unreadable arm record is an indeterminate row, warned, exit 2" \
+  || bad "an unreadable arm record is an indeterminate row, warned, exit 2 (rc $rc; $(jq -c '[.runs[] | [.eval_id, .configuration, .outcome, .reason]]' "$bb" 2>/dev/null))"
+
+# one iteration compares one pair
+cp -r "$here/lib/tests/fixtures/bench-iter" "$work4/two"
+cp -r "$work4/two/eval-b/without_skill" "$work4/two/eval-b/old_skill"
+"$here/bin/benchmark" "$work4/two" >"$work4/two.out" 2>&1; rc=$?
+[ "$rc" -eq 2 ] && grep -q 'two second arms' "$work4/two.out" \
+  && ok "two different second arms exit 2" || bad "two different second arms exit 2 (rc $rc)"
+mkdir -p "$work4/none/eval-a/with_skill"
+"$here/bin/benchmark" "$work4/none" >"$work4/none.out" 2>&1; rc=$?
+[ "$rc" -eq 2 ] && grep -q 'no with_skill/second-arm pairs' "$work4/none.out" \
+  && ok "an iteration with no pair exits 2" || bad "an iteration with no pair exits 2 (rc $rc)"
+rm -rf "$work4"
+
 exit "$fails"

@@ -16,8 +16,9 @@
 #   <arm>/eval-case.json                    the case bin/grade reads
 #   <arm>/outputs/                          the workdir the agent left, without
 #                                           .git, plus response.txt (its answer)
-#   <arm>/git-changed.txt                   the files the agent changed, taken
-#                                           before outputs/ was written
+#   <arm>/git-changed.txt                   the files the agent changed against
+#                                           the seed commit (lab_changed_files),
+#                                           taken before outputs/ was written
 #   <arm>/timing.json                       {total_tokens, duration_ms}
 #   <arm>/run_status.json                   {outcome: ok|indeterminate, reason,
 #                                           exit_status, adapter_ran, skill_chain}
@@ -334,11 +335,14 @@ run_arm() { # $1 eval id $2 arm $3 plugin source ("" for none)
   pairs="$(stage_pairs "$case_json")" || return 1
   while IFS=$'\t' read -r s d; do
     [ -n "$s" ] || continue
-    mkdir -p "$workdir/$(dirname "$d")" && cp -a "$s" "$workdir/$d" || return 1
+    # A directory merges into its target, which files/ may already hold.
+    if [ -d "$s" ]; then mkdir -p "$workdir/$d" && cp -a "$s/." "$workdir/$d/" || return 1
+    else mkdir -p "$workdir/$(dirname "$d")" && cp -a "$s" "$workdir/$d" || return 1; fi
   done <<<"$pairs"
   ( cd "$workdir" && git init -q . && git add -A \
     && git -c user.name='sdlc-skills-evals' -c user.email='evals@example.invalid' \
          commit -q --allow-empty -m 'eval input' ) || return 1
+  seed="$(git -C "$workdir" rev-parse HEAD)" || return 1
   jq -r '.prompt' <<<"$case_json" > "$run_base/prompt.txt"
 
   stream="$arm_dir/stream.txt"; : > "$stream"
@@ -359,8 +363,7 @@ run_arm() { # $1 eval id $2 arm $3 plugin source ("" for none)
   end="$(ms_now)"
 
   # The change list first: response.txt is the lab's, not the agent's.
-  ( cd "$workdir" && { git diff --name-only HEAD; git status --porcelain -uall | awk '{print $2}'; } | sort -u ) \
-    > "$arm_dir/git-changed.txt" 2>/dev/null
+  lab_changed_files "$workdir" "$seed" > "$arm_dir/git-changed.txt" 2>/dev/null
   mkdir -p "$arm_dir/outputs"
   cp -a "$workdir/." "$arm_dir/outputs/" && rm -rf "$arm_dir/outputs/.git" || return 1
   lab_extract_stream_text "$stream" "$harness" > "$arm_dir/outputs/response.txt" 2>/dev/null \

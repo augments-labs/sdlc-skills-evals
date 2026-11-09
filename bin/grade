@@ -20,9 +20,10 @@
 #   file-contains <path> <regex>
 #   file-not-contains <path> <regex>   (an absent file fails: nothing was checked)
 #   command-succeeds <cmd...>   (full shell under `timeout`, CWD=outputs/)
-#   git-count <min>              (added-or-modified files vs the seed commit:
-#                                 git-changed.txt when the run recorded one,
-#                                 else outputs/.git)
+#   git-count <min>              (files added, modified, or deleted vs the
+#                                 seed commit: git-changed.txt when the run
+#                                 recorded one, else outputs/.git against its
+#                                 first commit)
 #
 # --harness H grades the prose assertions with a skill-free session on that
 # harness (the rubric grader). It is a live call against your own harness
@@ -31,7 +32,7 @@
 # missing, malformed, does not name the assertion, or comes from a session
 # that failed also leaves it needs_review.
 #
-# Trust note: eval files are lab-authored and reviewed like scenarios —
+# Trust note: eval files are lab-authored and reviewed like code —
 # command-succeeds authors assume a full shell. Never grade eval files
 # from untrusted input.
 
@@ -42,6 +43,8 @@ else
   lab_root="$(cd "$(dirname "$0")/.." && pwd)"
 fi
 harnessdir="$lab_root/harnesses"
+# shellcheck source=../lib/common.sh
+. "$lab_root/lib/common.sh"
 
 usage() {
   cat <<'EOF'
@@ -80,8 +83,17 @@ status_file="$run_dir/run_status.json"
 n_assert="$(jq '.assertions | length' "$case_file")"
 
 # --- an arm that measured nothing is not scored ------------------------------
-if [ -f "$status_file" ] && [ "$(jq -r '.outcome // empty' "$status_file" 2>/dev/null)" = indeterminate ]; then
-  jq -n --arg reason "$(jq -r '.reason // "indeterminate"' "$status_file")" --argjson total "$n_assert" \
+# A run_status.json that exists but cannot be read says nothing about the arm.
+status_reason=""
+if [ -f "$status_file" ]; then
+  if ! status_outcome="$(jq -r '.outcome // empty' "$status_file" 2>/dev/null)"; then
+    status_reason="run_status.json unreadable"
+  elif [ "$status_outcome" = indeterminate ]; then
+    status_reason="$(jq -r '.reason // "indeterminate"' "$status_file")"
+  fi
+fi
+if [ -n "$status_reason" ]; then
+  jq -n --arg reason "$status_reason" --argjson total "$n_assert" \
     '{assertion_results: [], summary: {outcome: "indeterminate", reason: $reason, passed: 0,
       failed: 0, needs_review: 0, total: $total, pass_rate: null}}' > "$run_dir/grading.json"
   exit 0
@@ -97,12 +109,15 @@ cleanup() {
 trap cleanup EXIT
 
 # The changed files of the run, one per line: the list bin/evaluate recorded
-# before outputs/ was written, else the outputs/ tree's own git history.
+# before outputs/ was written, else the outputs/ tree against its first
+# (seed) commit.
 changed_files() {
   if [ -f "$run_dir/git-changed.txt" ]; then
     cat "$run_dir/git-changed.txt"
   elif [ -d "$out_dir/.git" ]; then
-    (cd "$out_dir" && { git diff --name-only HEAD 2>/dev/null; git status --porcelain -uall 2>/dev/null | awk '{print $2}'; } | sort -u)
+    local seed
+    seed="$(git -C "$out_dir" rev-list --max-parents=0 HEAD 2>/dev/null | tail -n 1)"
+    [ -n "$seed" ] && lab_changed_files "$out_dir" "$seed" 2>/dev/null
   else
     return 1
   fi
@@ -125,23 +140,26 @@ for i in $(seq 0 $((n_assert - 1)) 2>/dev/null || true); do
         ;;
       file-contains|file-not-contains)
         fp="${args%% *}"; re="${args#* }"
+        grep_rc=0
         if [ "$fp" = "$args" ]; then
           verdict="failed"; evidence="malformed check (need: path regex): $args"
         elif [ ! -f "$out_dir/$fp" ]; then
           verdict="failed"; evidence="absent: $fp"
-        elif grep -qiE -- "$re" "$out_dir/$fp" 2>/dev/null; then
+        # grep exits 0 on a match, 1 on none, 2 when it could not run (an
+        # invalid regex): a check that did not run fails, saying why.
+        elif grep_err="$(grep -qiE -- "$re" "$out_dir/$fp" 2>&1)" || grep_rc=$?; [ "$grep_rc" -gt 1 ]; then
+          verdict="failed"; evidence="check could not run: invalid regex /$re/ (${grep_err:-grep exit $grep_rc})"
+        elif [ "$grep_rc" -eq 0 ]; then
           match="$(grep -iE -m1 -- "$re" "$out_dir/$fp" | head -c 120)"
           if [ "$verb" = file-contains ]; then
             verdict="passed"; evidence="matched /$re/ in $fp: $match"
           else
             verdict="failed"; evidence="found /$re/ in $fp: $match"
           fi
+        elif [ "$verb" = file-contains ]; then
+          verdict="failed"; evidence="no match for /$re/ in $fp"
         else
-          if [ "$verb" = file-contains ]; then
-            verdict="failed"; evidence="no match for /$re/ in $fp"
-          else
-            verdict="passed"; evidence="no match for /$re/ in $fp"
-          fi
+          verdict="passed"; evidence="no match for /$re/ in $fp"
         fi
         ;;
       command-succeeds)
@@ -234,8 +252,6 @@ if [ -n "$harness" ] && [ "${#prose_idx[@]}" -gt 0 ]; then
   _orig_home="${HOME:-}"
   _outer_tmpdir="${TMPDIR:-/tmp}"
   unset LAB_RUN_BASE
-  # shellcheck source=../lib/common.sh
-  . "$lab_root/lib/common.sh"
   # shellcheck source=../lib/home-env.sh
   . "$lab_root/lib/home-env.sh"
   # shellcheck source=../lib/stream-text.sh

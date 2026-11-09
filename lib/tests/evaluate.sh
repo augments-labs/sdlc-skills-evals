@@ -349,6 +349,43 @@ rg="$work/rubric/ws/c4/iteration-1/change-seed/with_skill/grading.json"
   && ok "the rubric adds one call per arm, as the dry run priced" \
   || bad "the rubric adds one call per arm, as the dry run priced"
 
+# --- what the agent changed, against the seed; a files/<dir> entry ---------
+# The agent commits one file, renames one through git, deletes one, and
+# edits a path with a space: every change counts against the seed commit,
+# a rename by its destination. "files/src" stages src/ once, not src/src.
+
+cevroot="$work/cevals"
+mkdir -p "$cevroot/probe/files/src"
+for f in old.txt gone.txt "my file.txt" src/a.txt; do printf 'seed of %s\n' "$f" > "$cevroot/probe/files/$f"; done
+cat > "$cevroot/probe/evals.json" <<'JSON'
+{"skill_name": "probe", "evals": [{"id": "changes", "prompt": "Change things.",
+  "expected_output": "Things changed.", "files": ["files/src"],
+  "assertions": ["[check:git-count 4] four files changed"]}]}
+JSON
+chook="$work/chook"
+cat > "$chook" <<'HOOK'
+#!/usr/bin/env bash
+cd "$1" || exit 1
+printf 'c\n' > committed.txt && git add committed.txt \
+  && git -c user.name=a -c user.email=a@example.invalid commit -q -m agent
+git mv old.txt renamed.txt && rm gone.txt && printf 'edit\n' >> "my file.txt"
+echo "done answer"
+HOOK
+chmod +x "$chook"
+( export TMPDIR="$work/outer-tmp"
+  HOME="$outer_home" EVALS_ROOT="$cevroot" WORKSPACES_ROOT="$work/changes/ws" TRIPWIRE_LOG="$own_trip" \
+  FAKE_BEHAVIORAL_HOOK="$chook" FAKE_RECORD_DIR="$work/changes/rec" \
+    "$ev" --harness fake --harness-dir "$fake_h" --skill probe --timeout 20 \
+      --plugin "$with_plug" --campaign c5 >/dev/null 2>&1 )
+ca="$work/changes/ws/c5/iteration-1/changes/with_skill"
+[ "$(cat "$ca/git-changed.txt" 2>/dev/null)" = "$(printf 'committed.txt\ngone.txt\nmy file.txt\nrenamed.txt')" ] \
+  && jq -e '.assertion_results[0].passed == true' "$ca/grading.json" >/dev/null 2>&1 \
+  && ok "git-changed.txt lists every change against the seed, a rename by its destination" \
+  || bad "git-changed.txt lists every change against the seed, a rename by its destination (got '$(cat "$ca/git-changed.txt" 2>/dev/null)')"
+[ -f "$ca/outputs/src/a.txt" ] && [ ! -e "$ca/outputs/src/src" ] \
+  && ok "a files/<dir> entry stages the directory once, not nested in itself" \
+  || bad "a files/<dir> entry stages the directory once, not nested in itself ($(cd "$ca/outputs" 2>/dev/null && find src | tr '\n' ' '))"
+
 [ ! -s "$own_trip" ] && ok "no real agent CLI was called" || bad "no real agent CLI was called ($(cat "$own_trip"))"
 
 exit "$fails"

@@ -70,6 +70,43 @@ mk_case "$work/gcgit" "[check:git-count 1] one changed" "[check:git-count 2] two
 "$here/bin/grade" "$work/gcgit" >/dev/null 2>&1
 jq -e '[.assertion_results[].passed] == [true, false]' "$work/gcgit/grading.json" >/dev/null 2>&1 \
   && ok "git-count still falls back to outputs/.git" || bad "git-count still falls back to outputs/.git"
+mk_case "$work/gcseed" "[check:git-count 3] three changed" "[check:git-count 4] four changed"
+( cd "$work/gcseed/outputs" && printf 'x\n' > "a b.txt" && git init -q . && git add -A \
+  && git -c user.name=t -c user.email=t@example.invalid commit -q -m seed \
+  && printf 'y\n' > done.txt && git add done.txt && git rm -q app.js \
+  && git -c user.name=t -c user.email=t@example.invalid commit -q -m agent && printf 'z\n' >> "a b.txt" )
+"$here/bin/grade" "$work/gcseed" >/dev/null 2>&1
+jq -e '[.assertion_results[].passed] == [true, false]' "$work/gcseed/grading.json" >/dev/null 2>&1 \
+  && ok "the outputs/.git fallback counts against the seed commit, a spaced path once, a delete too" \
+  || bad "the outputs/.git fallback counts against the seed commit, a spaced path once, a delete too ($(jq -c '[.assertion_results[].evidence]' "$work/gcseed/grading.json" 2>/dev/null))"
+
+# --- a check that could not run fails; an unknown verb waits for review -----
+mk_case "$work/badre" "[check:file-contains test.txt (unclosed] greets" \
+  "[check:file-not-contains test.txt (unclosed] no greeting"
+"$here/bin/grade" "$work/badre" >/dev/null 2>&1
+jq -e '[.assertion_results[].passed] == [false, false]
+  and all(.assertion_results[]; .evidence | test("check could not run: invalid regex"))' \
+  "$work/badre/grading.json" >/dev/null 2>&1 \
+  && ok "an invalid regex fails the check for either verb, saying so" \
+  || bad "an invalid regex fails the check for either verb, saying so ($(jq -c '[.assertion_results[] | [.passed, .evidence]]' "$work/badre/grading.json" 2>/dev/null))"
+mk_case "$work/verbs" "[check:command-succeeds test -f nope.js] nope.js present" \
+  "[check:frobnicate app.js] frobnicated"
+"$here/bin/grade" "$work/verbs" >/dev/null 2>&1
+jq -e '.assertion_results[0].passed == false and (.assertion_results[0].evidence | test("non-zero exit"))
+  and .assertion_results[1].passed == "needs_review"
+  and (.assertion_results[1].evidence | test("unknown check verb frobnicate"))' \
+  "$work/verbs/grading.json" >/dev/null 2>&1 \
+  && ok "a failing command fails, and an unknown verb waits for review" \
+  || bad "a failing command fails, and an unknown verb waits for review"
+
+# --- a run_status.json that exists but cannot be read is not a scored arm ----
+cp -r "$here/lib/tests/fixtures/grade-run" "$work/badstatus"
+printf '{"outcome": ' > "$work/badstatus/run_status.json"
+"$here/bin/grade" "$work/badstatus" >/dev/null 2>&1
+jq -e '.summary.outcome == "indeterminate" and .summary.pass_rate == null
+  and (.summary.reason | test("run_status.json unreadable"))' "$work/badstatus/grading.json" >/dev/null 2>&1 \
+  && ok "an unreadable run_status.json grades indeterminate" \
+  || bad "an unreadable run_status.json grades indeterminate ($(jq -c .summary "$work/badstatus/grading.json" 2>/dev/null))"
 
 # --- the rubric grader, through the fake harness only ------------------------
 fake_h="$here/lib/tests/fake-cli"
