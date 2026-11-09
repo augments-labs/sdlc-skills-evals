@@ -18,6 +18,7 @@ cd "$here" || exit 1
 fails=0
 ok() { printf '  ok    %s\n' "$1"; }
 bad() { printf '  FAIL  %s\n' "$1"; fails=1; }
+note() { printf '  note  %s\n' "$1"; }
 
 work="$(mktemp -d)"
 trap 'rm -rf "$work"' EXIT
@@ -112,6 +113,16 @@ done
 [ ! -s "$trip" ] && ok "no suite reached a real agent CLI (tripwire log empty)" \
   || bad "no suite reached a real agent CLI (tripwire log: $(head -3 "$trip" | tr '\n' ';'))"
 rm -f "$trip"
+
+# The two checks below read git state. Outside a git work tree (a git archive
+# extraction, which is already the committed state alone) there is nothing to
+# compare: say so instead of passing or failing them; the checkout run (CI,
+# a worktree) observes both.
+if ! git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+  note "the clean-tree and git archive checks are not observed here (not a git work tree)"
+  exit "$fails"
+fi
+
 [ "$(git status --porcelain 2>/dev/null)" = "$tree_before" ] \
   && ok "the suites leave the working tree as they found it" \
   || bad "the suites leave the working tree as they found it"
