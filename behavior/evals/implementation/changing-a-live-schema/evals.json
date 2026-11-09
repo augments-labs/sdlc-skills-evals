@@ -1,0 +1,24 @@
+{
+  "skill_name": "changing-a-live-schema",
+  "pending_first_run": true,
+  "evals": [
+    {
+      "id": "add-tenant-column",
+      "prompt": "We need a `tenant_id` column on every tenant-scoped table in src/db/schema.sql, and the live service reads that store while we deploy. Sequence the change so both code versions work.",
+      "expected_output": "Binds the inputs before acting — the settled data-model section or 'no data-model section' with its reason, the project's migration tool and the deploy step it runs at, how many code versions run against the store during a roll and the exact rollback target, the engine and version, and the size of the affected data with its write rate and whether replicas follow. It then sequences expand (additive, nullable or defaulted in a form the engine applies without rewriting the table), dual-write and tolerant reads, backfill, switch reads, stop old writes, contract — one deployable phase each with a stated gate to advance and a stated rollback — and makes the backfill batched over an indexed key, idempotent, resumable from a recorded cursor, throttled against replication lag, observable through remaining rows, rate and errors, verified by comparing the two shapes, and never one transaction over the table. It names the contract phase as the point of no return, puts it to the data owner as an accept-or-hold question with the recovery path and its recovery time, and records the answer as a ledger row.",
+      "assertions": []
+    },
+    {
+      "id": "index-on-a-live-table",
+      "prompt": "Add an index on the invoices table's tenant_id and created_at columns. It is a live store with real traffic.",
+      "expected_output": "Reads the engine's documentation for that exact index build on that exact version and records what it says, and where the engine offers a concurrent form it uses it, because the ordinary form blocks writes for the duration. It records the lock and rewrite evidence as unverified when there is no production-sized copy to measure it on — the word unverified in the evidence row and in the record's Not verified section, never a blank line and never an optimistic claim that it takes a second. The index build ships as its own phase, and the contract phase that would later drop a column names the rollback target before it is needed.",
+      "assertions": []
+    },
+    {
+      "id": "pre-release-store",
+      "prompt": "Add a `plan_tier` column to the orders table in src/db/schema.sql. We have not released to production yet — this database is development only.",
+      "expected_output": "Says the change is out of its scope: a store nothing live reads yet is skipped, and no expand/contract phasing, rollback target or point of no return is invented for it. It either treats the change as an ordinary migration or asks what the owner wants, and it says that the answer changes if development and production share the schema — and that if the owner has recorded accepted downtime for this change, that record is what decides it, not an assumption.",
+      "assertions": []
+    }
+  ]
+}

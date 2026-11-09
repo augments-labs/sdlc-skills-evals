@@ -1,0 +1,112 @@
+[
+  {
+    "split": "train",
+    "should_trigger": true,
+    "query": "PR 42 is waiting on your review. Have a look at what the contributor did."
+  },
+  {
+    "split": "train",
+    "should_trigger": true,
+    "query": "A teammate's pull request needs a review. Read it and tell me what you found."
+  },
+  {
+    "split": "train",
+    "should_trigger": true,
+    "query": "Review this PR from outside the team — it is an outside contribution and I want to know what it does."
+  },
+  {
+    "split": "train",
+    "should_trigger": true,
+    "query": "Someone opened a pull request against our billing service. Can you review it before it merges?"
+  },
+  {
+    "split": "train",
+    "should_trigger": true,
+    "query": "This pull request is assigned to you. Go through it and write up what you would tell the author."
+  },
+  {
+    "split": "train",
+    "should_trigger": true,
+    "query": "Look at PR #417 — the discount change from the platform team — and tell me whether it should go in."
+  },
+  {
+    "split": "validation",
+    "should_trigger": true,
+    "query": "An external contributor submitted a pull request. Review it: what does it do, what breaks, and should we accept it?"
+  },
+  {
+    "split": "validation",
+    "should_trigger": true,
+    "query": "We need a second reader on the importer's pull request. Review that one — it is not yours."
+  },
+  {
+    "split": "validation",
+    "should_trigger": true,
+    "query": "The team's pull request is up. Read the diff and the description and give me your assessment."
+  },
+  {
+    "split": "validation",
+    "should_trigger": true,
+    "query": "Review the open pull request for the tenant invite flow — written by somebody on the other team."
+  },
+  {
+    "split": "train",
+    "should_trigger": false,
+    "query": "My change is complete and the gates are green. Get it independently reviewed before I push it.",
+    "expect": "requesting-code-review"
+  },
+  {
+    "split": "train",
+    "should_trigger": false,
+    "query": "The reviewer left twelve comments on my PR. Work through them.",
+    "expect": "receiving-code-review"
+  },
+  {
+    "split": "train",
+    "should_trigger": false,
+    "query": "Everything's verified and reviewed. Merge it and delete the branch.",
+    "expect": "finishing-a-branch"
+  },
+  {
+    "split": "train",
+    "should_trigger": false,
+    "query": "The PR is merged and tagged. Before we cut 2.4.0 to npm, is this safe to promote?",
+    "expect": "release-readiness"
+  },
+  {
+    "split": "train",
+    "should_trigger": false,
+    "query": "The new endpoint takes attacker-controlled filenames. Assess what an attacker can make it do.",
+    "expect": "security-audits"
+  },
+  {
+    "split": "train",
+    "should_trigger": false,
+    "query": "How do I turn on dark mode in the GitHub web UI? Asking for myself, not about a pull request.",
+    "expect": "none"
+  },
+  {
+    "split": "validation",
+    "should_trigger": false,
+    "query": "Design the correctness battery this project should have — which checks catch which defects.",
+    "expect": "verification-strategy"
+  },
+  {
+    "split": "validation",
+    "should_trigger": false,
+    "query": "The security-audits skill is not triggering reliably. Help me rewrite its description.",
+    "expect": "writing-skills"
+  },
+  {
+    "split": "validation",
+    "should_trigger": false,
+    "query": "This plan is written and about to be presented. Get an independent look at it before approval.",
+    "expect": "reviewing-plans"
+  },
+  {
+    "split": "validation",
+    "should_trigger": false,
+    "query": "We are rewriting the totals path while it serves live traffic. How is behaviour preserved through the cutover?",
+    "expect": "migration-strategy"
+  }
+]

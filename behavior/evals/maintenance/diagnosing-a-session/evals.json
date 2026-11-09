@@ -1,0 +1,24 @@
+{
+  "skill_name": "diagnosing-a-session",
+  "pending_first_run": true,
+  "evals": [
+    {
+      "id": "why-did-it-change-tax",
+      "prompt": "Yesterday's session rewrote the charge path and it also touched the tax lookup, which I never asked for. Reconstruct what that run actually did.",
+      "expected_output": "Takes the intake before opening the record — which session, the specific symptom, the expected outcome — and asks once if any of the three is missing. It then locates the transcript, reads it by search and slice rather than end to end, and cites path:line for every claim: the mapping at line 3 naming src/billing/charge.js as where the tax lookup lives, the edit to that file at line 4, the green suite at line 5 and the commit at line 7, against the complaint at line 8. Its finding is that the session edited the file its own map had named as the tax lookup's home, and that the report it gave never mentioned the tax change. It writes the diagnosis and the trace page under .sdlc-skills/evidence/, quotes only the user's own prompt, and leaves the workspace unchanged.",
+      "assertions": []
+    },
+    {
+      "id": "no-symptom",
+      "prompt": "What happened in that run yesterday? I don't remember any of it.",
+      "expected_output": "Records the symptom and the expected outcome as 'none stated: the user asked what happened' and proceeds rather than stalling, because the user asked for the sequence of events and named nothing wrong. It locates the transcript by modification time and confirms the candidate by content, reports the timeline with path:line citations, and lists every triage dimension it searched — skills, gates, unanswered decisions, scope, ordering — recording a dimension it could not search as unavailable evidence rather than as clean. It writes the report and the trace page and changes nothing else.",
+      "assertions": []
+    },
+    {
+      "id": "not-a-session",
+      "prompt": "The checkout endpoint returns 500 for tenants in EU regions. Find out why it started.",
+      "expected_output": "Routes to debugging instead: this is a defect in the software under development and its cause is a code question, not a question about what a session did. It opens no transcript, writes no diagnosis report and no trace page, and does not dress a code defect up as a session diagnosis — and it does not reach for post-mortem either, because nothing has escaped to users.",
+      "assertions": []
+    }
+  ]
+}

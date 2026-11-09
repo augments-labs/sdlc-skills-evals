@@ -1,0 +1,112 @@
+[
+  {
+    "split": "train",
+    "should_trigger": true,
+    "query": "We want to remove `GET /v1/invoices`, and three other teams call it. Retire it without breaking them."
+  },
+  {
+    "split": "train",
+    "should_trigger": true,
+    "query": "The `chargeTenant` function is being renamed to `charge` and other repositories import it. Deprecate it first."
+  },
+  {
+    "split": "train",
+    "should_trigger": true,
+    "query": "Set a removal date for the `--legacy-auth` CLI flag and give its users a warning they will actually see."
+  },
+  {
+    "split": "train",
+    "should_trigger": true,
+    "query": "We are dropping the `plan_tier` response field. Other clients read it — deprecate it before we remove it."
+  },
+  {
+    "split": "train",
+    "should_trigger": true,
+    "query": "The `checkout_latency_ms` metric is being renamed and a dashboard reads the old name. Retire the old name properly."
+  },
+  {
+    "split": "train",
+    "should_trigger": true,
+    "query": "Deprecate the `invoice_event` message type — consumers cannot see a marker, so the producer has to warn them."
+  },
+  {
+    "split": "validation",
+    "should_trigger": true,
+    "query": "We want to sunset the old authentication library for everybody outside this repository. How do we retire it without breaking them?"
+  },
+  {
+    "split": "validation",
+    "should_trigger": true,
+    "query": "Remove `src/legacy/invoice.js` from the public API. Another service calls it."
+  },
+  {
+    "split": "validation",
+    "should_trigger": true,
+    "query": "The `tenant_admin` role is going away and two other teams' applications depend on it. Retire it with a date and a warning."
+  },
+  {
+    "split": "validation",
+    "should_trigger": true,
+    "query": "Deprecate `createSession(email, password)` in favour of `createSession(email)` — it is exported from our public package."
+  },
+  {
+    "split": "train",
+    "should_trigger": false,
+    "query": "We need a `tenant_id` column on every table and the live service reads that store. Phase the change.",
+    "expect": "changing-a-live-schema"
+  },
+  {
+    "split": "train",
+    "should_trigger": false,
+    "query": "Remove `src/legacy/invoice.js` — nothing in this repository calls it. Change the callers and the interface in one change, tested.",
+    "expect": "test-driven-development"
+  },
+  {
+    "split": "train",
+    "should_trigger": false,
+    "query": "Every small change to the billing module touches six files. Redesign the structure.",
+    "expect": "refactor-architecture"
+  },
+  {
+    "split": "train",
+    "should_trigger": false,
+    "query": "Postgres or DynamoDB for the new service? Record the decision with the options weighed.",
+    "expect": "architecture-decisions"
+  },
+  {
+    "split": "train",
+    "should_trigger": false,
+    "query": "What's the difference between a minor version bump and a patch release? Asking for a team glossary.",
+    "expect": "none"
+  },
+  {
+    "split": "train",
+    "should_trigger": false,
+    "query": "The new endpoint takes attacker-controlled filenames. Assess what an attacker can make it do.",
+    "expect": "security-audits"
+  },
+  {
+    "split": "validation",
+    "should_trigger": false,
+    "query": "We are converting the whole backend to Python 3 while it serves traffic. How do we prove nothing changed?",
+    "expect": "migration-strategy"
+  },
+  {
+    "split": "validation",
+    "should_trigger": false,
+    "query": "Before I call this done, run the checks and read their output on this exact state.",
+    "expect": "verification-before-completion"
+  },
+  {
+    "split": "validation",
+    "should_trigger": false,
+    "query": "Everything's verified and reviewed. Merge it and delete the branch.",
+    "expect": "finishing-a-branch"
+  },
+  {
+    "split": "validation",
+    "should_trigger": false,
+    "query": "The import job dies halfway with a constraint violation. Find the cause before anything else.",
+    "expect": "debugging"
+  }
+]

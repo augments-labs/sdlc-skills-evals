@@ -1,0 +1,112 @@
+[
+  {
+    "split": "train",
+    "should_trigger": true,
+    "query": "We cannot tell whether checkout is working for users. Add the logs, the metrics and the alert that answer it."
+  },
+  {
+    "split": "train",
+    "should_trigger": true,
+    "query": "Instrument the new invoice endpoint so operators can see its success rate and latency, through the facility we already use."
+  },
+  {
+    "split": "train",
+    "should_trigger": true,
+    "query": "Add monitoring to the import job — we need to know when it fails and how long it takes."
+  },
+  {
+    "split": "train",
+    "should_trigger": true,
+    "query": "There is no visibility on the payment retries. Add the signals and an alert on the user-facing symptom."
+  },
+  {
+    "split": "train",
+    "should_trigger": true,
+    "query": "How do I know whether the new tenant onboarding works? Add the telemetry and one alert somebody can act on."
+  },
+  {
+    "split": "train",
+    "should_trigger": true,
+    "query": "Add tracing across the queue hop so we can see where a request is lost."
+  },
+  {
+    "split": "validation",
+    "should_trigger": true,
+    "query": "We have no idea whether the proration change helps or hurts. Instrument it in the project's existing metrics facility."
+  },
+  {
+    "split": "validation",
+    "should_trigger": true,
+    "query": "Add a log line and a latency histogram for the export endpoint, and an alert if it degrades."
+  },
+  {
+    "split": "validation",
+    "should_trigger": true,
+    "query": "Instrument the API so its operators can tell whether it works for users and find out why when it does not."
+  },
+  {
+    "split": "validation",
+    "should_trigger": true,
+    "query": "We need an alert on the success rate of the refund flow, and the signals that say why it dropped."
+  },
+  {
+    "split": "train",
+    "should_trigger": false,
+    "query": "We need a feature flag for the new checkout path, defaulting off, plus the signals a canary rollout reads.",
+    "expect": "rollout-controls"
+  },
+  {
+    "split": "train",
+    "should_trigger": false,
+    "query": "The export produces an empty file about a third of the time. Find out why before changing anything.",
+    "expect": "debugging"
+  },
+  {
+    "split": "train",
+    "should_trigger": false,
+    "query": "Design the correctness battery this project should have — which checks catch which defects.",
+    "expect": "verification-strategy"
+  },
+  {
+    "split": "train",
+    "should_trigger": false,
+    "query": "The new upload endpoint takes attacker-controlled filenames. Assess what an attacker can make it do.",
+    "expect": "security-audits"
+  },
+  {
+    "split": "train",
+    "should_trigger": false,
+    "query": "It's merged and tagged. Before we cut 2.4.0 to npm, is this safe to promote?",
+    "expect": "release-readiness"
+  },
+  {
+    "split": "train",
+    "should_trigger": false,
+    "query": "What's the difference between a counter and a gauge in Prometheus? General question.",
+    "expect": "none"
+  },
+  {
+    "split": "validation",
+    "should_trigger": false,
+    "query": "The `checkout_latency_ms` metric is being renamed and a dashboard reads the old name. Retire the old name properly.",
+    "expect": "deprecating-an-api"
+  },
+  {
+    "split": "validation",
+    "should_trigger": false,
+    "query": "Checkout is declining payments for every tenant right now. Stop the bleeding first.",
+    "expect": "containing-an-incident"
+  },
+  {
+    "split": "validation",
+    "should_trigger": false,
+    "query": "The instrumentation change is complete and green. Get it independently reviewed before it merges.",
+    "expect": "requesting-code-review"
+  },
+  {
+    "split": "validation",
+    "should_trigger": false,
+    "query": "Before I say this is done, run the checks and read their output on this exact state.",
+    "expect": "verification-before-completion"
+  }
+]

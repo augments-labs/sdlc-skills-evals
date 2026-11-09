@@ -1,0 +1,24 @@
+{
+  "skill_name": "deprecating-an-api",
+  "pending_first_run": true,
+  "evals": [
+    {
+      "id": "endpoint-deprecation",
+      "prompt": "We're removing `GET /v1/invoices` and three other teams call it (see docs/api.md). Retire it without breaking them.",
+      "expected_output": "Records the interface, its owner and every caller a search finds, and says the search is a lower bound — other repositories, generated clients, reflection and dynamic dispatch, and old app versions that never update do not show in it. It adds a per-caller count before anything else if the old path has none, and sets the removal date from what that reports rather than from the search. It ships the replacement first, then marks the old path through the mechanism the protocol defines — the `Deprecation` and `Sunset` response headers with a `Link` rel=\"deprecation\" to the migration notes — not a changelog line alone, fires the runtime warning once per process rather than once per call, and asks the owner for the sunset date with the measured use and the known callers named. It removes nothing in this change.",
+      "assertions": []
+    },
+    {
+      "id": "cli-flag",
+      "prompt": "Set a removal date for the `--legacy-auth` CLI flag and make sure the people using it find out.",
+      "expected_output": "Ships the replacement first, then marks the flag with a warning on the error stream at the point the flag is read — the mechanism a CLI caller actually sees — once per process rather than once per call, and asks the owner for the sunset date using the project's deprecation policy where one exists, or with the measured use and the known callers named where it does not. It removes nothing in this change, and it says so: the removal ships separately, after the owner's decision, with a row in the ledger beside the record.",
+      "assertions": []
+    },
+    {
+      "id": "internal-only",
+      "prompt": "Nothing in this repo calls `src/legacy/invoice.js` any more. Delete it.",
+      "expected_output": "Says the deprecation does not own this case: every caller is in this repository and a search finds all of them, so the callers and the interface change together in one change under test-driven-development. It writes no deprecation record, no sunset date, no warning and no ledger row for an interface with no external caller, and it does not begin a removal that the one-change route already covers.",
+      "assertions": []
+    }
+  ]
+}

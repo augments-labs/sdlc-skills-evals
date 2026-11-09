@@ -21,7 +21,7 @@
    "query": "can you break the reporting feature into an executable plan? it's definitely multi-step and i want to review it before implementation"},
 
   {"split": "train", "should_trigger": false, "expect": "executing-plans",
-   "query": "The plan directory is at .sdlc-skills/plans/multi-tenancy/. Start working through it."},
+   "query": "The plan directory is at .sdlc-skills/plans/2026-10-05-multi-tenancy/. Start working through it."},
   {"split": "train", "should_trigger": false, "expect": "system-architecture",
    "query": "Requirements are approved but there's no design yet. What are the components and how do they talk?"},
   {"split": "train", "should_trigger": false, "expect": "scoping",

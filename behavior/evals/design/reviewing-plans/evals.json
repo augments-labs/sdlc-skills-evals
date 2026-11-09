@@ -1,0 +1,24 @@
+{
+  "skill_name": "reviewing-plans",
+  "pending_first_run": true,
+  "evals": [
+    {
+      "id": "high-risk-plan",
+      "prompt": "The plan in plans/2026-10-05-multi-tenancy/ is written and its route is high-risk — it changes a live store. Before I approve it, get an independent review.",
+      "expected_output": "Prints the plan's version with the upstream plan-version.sh rather than reading a version off the index, binds every approved input at the exact identity the index's Bound inputs names, binds a reviewer role that did not write the plan and the review boundary (read-only access, the authority the user already gave, a deadline, who cancels), and binds the report location .sdlc-skills/evidence/2026-10-05-multi-tenancy/00-index.review-70b3f24-1.md. It dispatches once through the real dispatch action and keeps the tool-issued receipt as the receipt, gives every finding one recorded decision (accepted, rejected, decision, or not a finding: uncited) in the report's header, and writes no approval row of its own. It never edits the plan and never approves it.",
+      "assertions": []
+    },
+    {
+      "id": "unwritten-plan",
+      "prompt": "Review the plan in plans/2026-10-20-multi-tenancy-draft/ before I approve it.",
+      "expected_output": "Says the plan has no printed version yet — its index and task files are not written, so the version script fails — names that error and stops. It dispatches no reviewer against a plan whose files do not exist, and it does not review the prose that is there as if it were the plan, nor write an approval, an edit or a finding.",
+      "assertions": []
+    },
+    {
+      "id": "review-of-a-code-change",
+      "prompt": "Get an independent review of the frozen diff on task/proration before it merges.",
+      "expected_output": "Declines in one line and says whose subject it is: a frozen code change is requesting-code-review's, not a plan's — this skill never edits the plan, approves it, or starts an executor, and it never reviews a code change. It hands the request to that skill rather than producing a plan review of a diff.",
+      "assertions": []
+    }
+  ]
+}

@@ -108,5 +108,35 @@
     "should_trigger": false,
     "expect": "verification-before-completion",
     "query": "Before any review, I want to know whether the gates actually passed on this exact revision."
+  },
+  {
+    "split": "train",
+    "should_trigger": false,
+    "expect": "reviewing-plans",
+    "query": "This plan is written and its route is high-risk. Get an independent reviewer to look at it before I approve it."
+  },
+  {
+    "split": "train",
+    "should_trigger": false,
+    "expect": "release-readiness",
+    "query": "It's merged to main and tagged. Before we cut 2.4.0 and publish it to npm, is this candidate safe to promote?"
+  },
+  {
+    "split": "train",
+    "should_trigger": false,
+    "expect": "handoff",
+    "query": "Context is nearly full and I have to step away. Write up where this candidate stands so the next session can pick it up."
+  },
+  {
+    "split": "validation",
+    "should_trigger": false,
+    "expect": "dispatching-parallel-agents",
+    "query": "Get three independent reviewers on this diff at once, one per angle, and dispatch them together."
+  },
+  {
+    "split": "validation",
+    "should_trigger": false,
+    "expect": "migration-strategy",
+    "query": "We're rewriting the totals path while it serves live traffic. How is behaviour preserved through the cutover and recovery?"
   }
 ]

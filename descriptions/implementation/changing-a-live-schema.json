@@ -1,0 +1,112 @@
+[
+  {
+    "split": "train",
+    "should_trigger": true,
+    "query": "We need a `tenant_id` column on every table, and the live service reads that store while we deploy. Phase it so both code versions work."
+  },
+  {
+    "split": "train",
+    "should_trigger": true,
+    "query": "Add an index to the invoices table on a live database — it blocks writes today. How do we ship it safely?"
+  },
+  {
+    "split": "train",
+    "should_trigger": true,
+    "query": "We want to rename the `amount_cents` column to `amount_minor`. The live service reads it. Phase the change."
+  },
+  {
+    "split": "train",
+    "should_trigger": true,
+    "query": "Backfill `tenant_id` on forty million rows of a store the running service reads. How do we do that without downtime?"
+  },
+  {
+    "split": "train",
+    "should_trigger": true,
+    "query": "Add a NOT NULL constraint to the orders table, but not at the cost of locking it. Sequence it for us."
+  },
+  {
+    "split": "train",
+    "should_trigger": true,
+    "query": "The stored invoice document shape is changing and the API serves live traffic. Do it in phases that both code versions can read."
+  },
+  {
+    "split": "validation",
+    "should_trigger": true,
+    "query": "We need to drop the legacy `coupon_code` column, but only once nothing reads it. Plan the expand and contract steps."
+  },
+  {
+    "split": "validation",
+    "should_trigger": true,
+    "query": "Add a `plan_tier` column with a default on a hot table — the deploy is rolling and the old code is still running."
+  },
+  {
+    "split": "validation",
+    "should_trigger": true,
+    "query": "Split the `orders` table into `orders` and `order_lines` while the service is live. Sequence it."
+  },
+  {
+    "split": "validation",
+    "should_trigger": true,
+    "query": "Retype the `created_at` column to a timestamp on a live store. Phases, rollback and the point of no return."
+  },
+  {
+    "split": "train",
+    "should_trigger": false,
+    "query": "We're rewriting the whole totals path from v1 to v2 while it serves live traffic. Plan how behaviour is preserved through cutover and recovery.",
+    "expect": "migration-strategy"
+  },
+  {
+    "split": "train",
+    "should_trigger": false,
+    "query": "Model the domain for the invite feature — what an invite is, its states, transitions and invariants.",
+    "expect": "data-model"
+  },
+  {
+    "split": "train",
+    "should_trigger": false,
+    "query": "The `GET /v1/invoices` endpoint is being retired and three other teams call it. Deprecate it with a removal date.",
+    "expect": "deprecating-an-api"
+  },
+  {
+    "split": "train",
+    "should_trigger": false,
+    "query": "The migration is merged and staged. Are we safe to cut traffic over tomorrow morning?",
+    "expect": "release-readiness"
+  },
+  {
+    "split": "train",
+    "should_trigger": false,
+    "query": "Add a `last_login_at` column to the users table and set it on a successful login.",
+    "expect": "test-driven-development"
+  },
+  {
+    "split": "train",
+    "should_trigger": false,
+    "query": "What's the difference between a view and a materialised view in Postgres? General question.",
+    "expect": "none"
+  },
+  {
+    "split": "validation",
+    "should_trigger": false,
+    "query": "Rename `chargeTenant` to `charge` across every package with a script, and split it into one PR per team.",
+    "expect": "large-scale-changes"
+  },
+  {
+    "split": "validation",
+    "should_trigger": false,
+    "query": "The last release dropped a column too early and took the service down. It is contained — why did our checks miss it?",
+    "expect": "post-mortem"
+  },
+  {
+    "split": "validation",
+    "should_trigger": false,
+    "query": "The backfill job died halfway with a constraint violation. Find out what went wrong.",
+    "expect": "debugging"
+  },
+  {
+    "split": "validation",
+    "should_trigger": false,
+    "query": "Requirements are approved. Design the target system — components, boundaries, data flow, failure and recovery.",
+    "expect": "system-architecture"
+  }
+]

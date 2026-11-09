@@ -1,0 +1,112 @@
+[
+  {
+    "split": "train",
+    "should_trigger": true,
+    "query": "Rename `chargeTenant` to `charge` across every package in the monorepo. One mechanical change — do it with a script and split it per owner."
+  },
+  {
+    "split": "train",
+    "should_trigger": true,
+    "query": "We need to bump the `lodash` dependency to version 4 in every workspace. Apply it mechanically and give me one PR per team."
+  },
+  {
+    "split": "train",
+    "should_trigger": true,
+    "query": "Migrate every call site of the old client to the new one. There are hundreds and they cannot be reviewed by hand."
+  },
+  {
+    "split": "train",
+    "should_trigger": true,
+    "query": "Turn on the new lint rule across the whole repository. It touches everything — script it and shard it per owner."
+  },
+  {
+    "split": "train",
+    "should_trigger": true,
+    "query": "Apply this rename to all four hundred components with a codemod, then split the result into one PR per team so each can be reviewed alone."
+  },
+  {
+    "split": "train",
+    "should_trigger": true,
+    "query": "Every package in the workspace still uses the old config key. Roll the new one out everywhere with a script."
+  },
+  {
+    "split": "validation",
+    "should_trigger": true,
+    "query": "Change the import path of the shared module across the whole codebase, mechanically, in shards we can merge in any order."
+  },
+  {
+    "split": "validation",
+    "should_trigger": true,
+    "query": "Update all two thousand test files to the new runner. Do it with a script and split it per owner."
+  },
+  {
+    "split": "validation",
+    "should_trigger": true,
+    "query": "The `checkout-v2` flag is named differently everywhere. Apply it mechanically across all packages, one shard per team."
+  },
+  {
+    "split": "validation",
+    "should_trigger": true,
+    "query": "Rename every field in the invoice payload across the monorepo. Script it and shard it so each owner can revert alone."
+  },
+  {
+    "split": "train",
+    "should_trigger": false,
+    "query": "Every small change to the billing module touches six files. Redesign the structure.",
+    "expect": "refactor-architecture"
+  },
+  {
+    "split": "train",
+    "should_trigger": false,
+    "query": "We are converting four hundred components to React while it serves traffic. How do we prove the behaviour was preserved?",
+    "expect": "migration-strategy"
+  },
+  {
+    "split": "train",
+    "should_trigger": false,
+    "query": "The `GET /v1/invoices` endpoint is being retired and three other teams call it. Deprecate it first.",
+    "expect": "deprecating-an-api"
+  },
+  {
+    "split": "train",
+    "should_trigger": false,
+    "query": "Add the `--dry-run` flag to the import command so it prints what it would do without writing.",
+    "expect": "test-driven-development"
+  },
+  {
+    "split": "train",
+    "should_trigger": false,
+    "query": "What's the difference between a codemod and a linter rule? General question.",
+    "expect": "none"
+  },
+  {
+    "split": "train",
+    "should_trigger": false,
+    "query": "While adding the verbose flag, also make the output format configurable and add a plugin system for later.",
+    "expect": "yagni"
+  },
+  {
+    "split": "validation",
+    "should_trigger": false,
+    "query": "The migration is a dozen steps across four services. Break it into a per-task plan before anyone edits a file.",
+    "expect": "reviewing-plans"
+  },
+  {
+    "split": "validation",
+    "should_trigger": false,
+    "query": "The feature branch is green and reviewed. Merge it and delete the branch.",
+    "expect": "finishing-a-branch"
+  },
+  {
+    "split": "validation",
+    "should_trigger": false,
+    "query": "Read-only pass over src/scheduler/ — which abstractions are carrying their weight? Change nothing.",
+    "expect": "complexity-audit"
+  },
+  {
+    "split": "validation",
+    "should_trigger": false,
+    "query": "The new build step pulls a different base image. Assess the exposure before it ships.",
+    "expect": "security-audits"
+  }
+]
