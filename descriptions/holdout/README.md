@@ -2,12 +2,13 @@
 
 Fresh queries, written only **after** a description is selected — never used
 to revise it. One file per skill that has one:
-`holdout/<phase>/<skill>.json`, same entry shape as the set proper, every
+`descriptions/holdout/<skill>.json`, same entry shape as the set proper, every
 entry carrying `"split": "holdout"`.
 
-Run once, as the honest generalization check:
+Price it, then run it once, as the honest generalization check:
 
 ```bash
+bin/triggering --harness opencode --skill yagni --split holdout --dry-run
 bin/triggering --harness opencode --skill yagni --split holdout
 ```
 
@@ -22,13 +23,13 @@ It is written by the person who owns the selection, at one moment, and not
 before: **after** a description has been selected for a skill, and **before**
 any further revision of that description.
 
-Nothing in this repository writes it, and no task in the successor plan
-generates it. A holdout written before the selection is not a holdout: the
+Nothing in this repository writes it, and neither `bin/optimize-description`
+nor any task generates it. A holdout written before the selection is not a holdout: the
 selection has already seen it, and the only honest number it can produce is
 a second validation number wearing a test's name. So the directory stays
 empty of query files until a real selection has happened on a real harness.
 
-What the corpus in `descriptions/<phase>/<skill>.json` is, and is not:
+What the corpus in `descriptions/<skill>.json` is, and is not:
 
 - it is the **train** split, which a revision is allowed to be measured
   against and revised against;

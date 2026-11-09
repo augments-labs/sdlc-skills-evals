@@ -543,6 +543,35 @@ if [ -f "$DOC" ]; then
   fi
 fi
 
+# --- R-09: the active docs carry the re-pin --------------------------------
+# The coverage record above counts the documented pin rows that still name
+# the old tag. Once the re-pin is everywhere, that count is zero and the
+# docs a contributor follows name no retired runner or scenario path. The
+# full active-doc audit is lib/tests/docs-alignment.sh; this is the
+# inventory's own half: the pin rows it counts, and the files R-09 names.
+
+r09_docs=(CLAUDE.md README.md SECURITY.md descriptions/README.md docs/authoring.md
+  docs/triage.md results/README.md .github/PULL_REQUEST_TEMPLATE.md)
+r09_stale="$(grep -nHE 'v10\.2\.1|bin/behavior|bin/campaign|behavior/scenarios' "${r09_docs[@]}" 2>/dev/null)"
+if [ -z "$r09_stale" ]; then
+  ok "no R-09 doc names v10.2.1, bin/behavior, bin/campaign, or behavior/scenarios"
+else
+  bad "no R-09 doc names v10.2.1, bin/behavior, bin/campaign, or behavior/scenarios ($(grep -c . <<<"$r09_stale") line(s))"
+  head -8 <<<"$r09_stale" | sed 's/^/        /'
+fi
+r09_count="$(sed -n 's/^### Documented pin rows that still name the v10\.2\.1 tag (\([0-9][0-9]*\))$/\1/p' "$DOC")"
+if [ "$r09_count" = 0 ]; then
+  ok "the coverage record counts zero documented pin rows on the old tag"
+else
+  bad "the coverage record counts zero documented pin rows on the old tag (count: ${r09_count:-absent})"
+fi
+r09_pin="$(jq -r '.upstream.commit' "$INV")"
+if grep -qF -- "$r09_pin" README.md && grep -qF -- "$r09_pin" "$DOC"; then
+  ok "README.md and the coverage record name the inventory's commit"
+else
+  bad "README.md and the coverage record name the inventory's commit"
+fi
+
 # --- the reported gaps match the assets on disk -----------------------------
 
 run_check "$INV" docs

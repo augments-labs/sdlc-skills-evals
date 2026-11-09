@@ -44,7 +44,7 @@ obligation. `bin/check` fails when a task in this table has no verdict.
 
 | Old task | Scope today | Verdict | Evidence |
 | --- | --- | --- | --- |
-| E-0 re-pin to v10.2.1, four renames | the committed inventory names the v11 commit, and the four renames stay applied; the lab's own documented pin rows still name the old tag (the gaps below) | extended | `f59d623`; ledger 2026-09-18 `E-0` |
+| E-0 re-pin to v10.2.1, four renames | the committed inventory names the v11 commit, and the four renames stay applied; the lab's documented pin rows name it too (no gap below) | extended | `f59d623`; ledger 2026-09-18 `E-0` |
 | E-1 repository skeleton, safety model, static CI | the same skeleton, and CI still runs shellcheck, `bin/check` and the offline tests | preserved | `f78a16a`; ledger 2026-09-18 `E-1` |
 | E-2 shared seams in `lib/` (assertion verbs, verdicts, throwaway home, plugin pinning) | the seams stand; the run boundary and the report seams are widened around them | extended | `353485d`; ledger 2026-09-18 `E-2` |
 | E-3 harness launchers, including the opencode behavioral adapter | four launchers stand; the seven missing adapters are added next | extended | `9dc9ca5`; ledger 2026-09-18 `E-3` |
@@ -121,13 +121,9 @@ None. The lab carries an adapter for every harness the pinned upstream names:
 contract test; whether the CLI runs on a given machine is a separate, later
 question.
 
-### Documented pin rows that still name the v10.2.1 tag (2)
+### Documented pin rows that still name the v10.2.1 tag (0)
 
-The committed inventory names the v11 commit. These two rows of the lab's own
-documentation still name the old tag, so the re-pin is not yet everywhere.
-
-- `README.md:39` — the `bin/campaign new sdd-opencode --plugin v10.2.1` example still names the tag. `README.md` is V3-DOCS's file.
-- `README.md:73` — the `SDLC_SKILLS_PIN` row of the environment-variable table still names the `v10.2.1` tag. The variable is read by no shell file, so this is a documented pin rather than a live default; the run-time plugin ref is V3-RUNNERS's to pin.
+None.
 
 ### The frozen split assignment
 

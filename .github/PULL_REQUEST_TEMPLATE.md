@@ -1,5 +1,5 @@
 <!--
-BEFORE SUBMITTING: this repo is the behavioral eval lab for sdlc-skills.
+BEFORE SUBMITTING: this repo is the eval lab for sdlc-skills.
 It runs agent CLIs in permissive modes and can handle sensitive transcripts.
 Low-evidence, speculative, or bundled PRs will be closed.
 -->
@@ -13,7 +13,9 @@ Low-evidence, speculative, or bundled PRs will be closed.
 <!-- 1-3 sentences. Keep this to the actual files/behavior changed. -->
 
 ## Relationship to sdlc-skills
-<!-- Plugin pin under test (see SDLC_SKILLS_PIN in the README).
+<!-- Plugin pin under test (the inventory pins commit
+     40f8ff4c532da29b286b4d06ecf4516a4a093a7d, 11.2.0, in config/upstream-inventory.json;
+     name the --plugin a recorded run used).
      If this changes skill behavior, harness loading, or eval methodology,
      describe the expected before/after signal and why it belongs here. -->
 
@@ -21,7 +23,7 @@ Low-evidence, speculative, or bundled PRs will be closed.
 - [ ] This PR does not commit API keys, `.env` files, session logs, `results/`, or other run artifacts
 - [ ] This PR does not cause CI to run live agent evals or call model APIs, and needs no credentials or secrets in CI (this lab uses none — harnesses authenticate through the operator's own CLI setup, never through keys in the repo)
 - [ ] If this touches dangerous-mode backend flags, shell execution, environment inheritance, or log collection, the risk is explained below
-- [ ] If this adds or changes a scenario, setup helper, or assertion command, I considered how untrusted input could affect shell execution
+- [ ] If this adds or changes an eval set, a `[check:` assertion, a harness adapter, or a grader prompt, I considered how untrusted input could affect shell execution
 
 Risk notes:
 <!-- Required for changes touching backends, setup helpers, assertions, session launch, logs, or verifier input. Otherwise write "N/A". -->
@@ -36,9 +38,10 @@ Risk notes:
      bash bin/check
      per-file: bash lib/tests/<name>.sh
 
-     Live `bin/behavior` / `bin/campaign` runs are not required for every PR and
-     must stay out of public CI because they require credentials and permissive
-     agent CLIs. -->
+     A live run (bin/evaluate, bin/triggering, bin/optimize-description without
+     --dry-run, or bin/grade --harness) is started by the user only, never by an
+     agent, and never in public CI. If one backs this PR, name its record path
+     and the --dry-run that priced it. -->
 
 ## Human review
 - [ ] A maintainer has reviewed the complete proposed diff before merge
