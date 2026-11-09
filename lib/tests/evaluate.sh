@@ -204,6 +204,10 @@ jq -e '.assertion_results[0].passed == true and .assertion_results[3].passed == 
   && [ ! -e "$it/change-seed/with_skill/outputs/files" ] && [ ! -e "$it/nested-files/with_skill/outputs/files" ] \
   && ok "case.files entries stage into the workdir without a nested files/" \
   || bad "case.files entries stage into the workdir without a nested files/"
+[ -f "$it/pending/with_skill/outputs/seed.txt" ] && [ -f "$it/pending/with_skill/outputs/sub/x.txt" ] \
+  && [ -f "$it/pending/without_skill/outputs/sub/x.txt" ] && [ ! -e "$it/pending/with_skill/outputs/files" ] \
+  && ok "a case with no files key still runs in the evals/<skill>/files/ project" \
+  || bad "a case with no files key still runs in the evals/<skill>/files/ project"
 jq -e '.summary.total == 0 and .summary.pass_rate == null' "$it/pending/with_skill/grading.json" >/dev/null 2>&1 \
   && ok "a pending_first_run eval grades to a null pass rate" \
   || bad "a pending_first_run eval grades to a null pass rate"

@@ -155,9 +155,11 @@ case_of() { # $1 eval id — prints that eval's object
   jq -c --arg id "$1" '.evals[] | select((.id | tostring) == $id)' "$evals_file"
 }
 
-# Each case.files entry, as the source under evals/<skill>/ and the target
-# under the workdir: "files" or "files/" is the whole files/ tree into the
-# workdir root, "files/<rel>" is <rel>, so no nested files/ appears.
+# Every workdir starts as the whole evals/<skill>/files/ tree (the project
+# the prompts name). Each case.files entry is then copied on top, as the
+# source under evals/<skill>/ and the target under the workdir: "files" or
+# "files/" is the whole files/ tree into the workdir root, "files/<rel>" is
+# <rel>, so no nested files/ appears.
 stage_pairs() { # $1 case json — prints "src<TAB>dest" lines, returns 1 on a bad entry
   local f rel
   while IFS= read -r f; do
@@ -328,6 +330,7 @@ run_arm() { # $1 eval id $2 arm $3 plugin source ("" for none)
   run_base="$(TMPDIR="$_outer_tmpdir" lab_run_dir "eval-$arm")" || return 1
   workdir="$run_base/work"
   mkdir -p "$workdir" || return 1
+  if [ -d "$skill_evals/files" ]; then cp -a "$skill_evals/files/." "$workdir/" || return 1; fi
   pairs="$(stage_pairs "$case_json")" || return 1
   while IFS=$'\t' read -r s d; do
     [ -n "$s" ] || continue
