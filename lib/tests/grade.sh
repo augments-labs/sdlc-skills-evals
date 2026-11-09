@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# Offline test: bin/grade on a recorded fixture run directory. No live run.
+# Offline test: bin/grade on recorded fixture run directories, and its rubric
+# grader against the FAKE adapter only (tripwire first on PATH). No live run.
 set -uo pipefail
 here="$(cd "$(dirname "$0")/../.." && pwd)"
 
@@ -27,5 +28,128 @@ jq -e '[.assertion_results[] | select(.passed == true and (.evidence | length > 
   && ok "passes cite concrete evidence" || bad "passes cite concrete evidence"
 jq -e '.assertion_results[1].passed == false and (.assertion_results[1].evidence | length > 0)' "$g" >/dev/null \
   && ok "failures cite actuals, not silence" || bad "failures cite actuals, not silence"
+
+
+# --- the arm measured nothing: indeterminate short-circuits the grade --------
+cp -r "$here/lib/tests/fixtures/grade-run" "$work/indet"
+printf '{"outcome":"indeterminate","reason":"timeout (exit 124)"}\n' > "$work/indet/run_status.json"
+"$here/bin/grade" "$work/indet" >/dev/null 2>&1
+jq -e '.summary == {outcome:"indeterminate", reason:"timeout (exit 124)", passed:0, failed:0,
+  needs_review:0, total:6, pass_rate:null}' "$work/indet/grading.json" >/dev/null 2>&1 \
+  && ok "an indeterminate arm grades to a null pass rate, not a score" \
+  || bad "an indeterminate arm grades to a null pass rate, not a score ($(cat "$work/indet/grading.json" 2>/dev/null))"
+cp -r "$here/lib/tests/fixtures/grade-run" "$work/okrun"
+printf '{"outcome":"ok"}\n' > "$work/okrun/run_status.json"
+"$here/bin/grade" "$work/okrun" >/dev/null 2>&1
+jq -e '.summary.outcome == "ok" and .summary.pass_rate == 0.5' "$work/okrun/grading.json" >/dev/null 2>&1 \
+  && ok "an ok arm is graded as usual" || bad "an ok arm is graded as usual"
+
+# --- file-not-contains, and git-count from the recorded change list ----------
+mk_case() { # $1 dir, rest: assertions — a run dir over the fixture outputs
+  local d="$1"; shift
+  cp -r "$here/lib/tests/fixtures/grade-run" "$d"
+  jq -n --args '{id:"t", prompt:"p", expected_output:"e", assertions:$ARGS.positional}' "$@" > "$d/eval-case.json"
+}
+mk_case "$work/fnc" "[check:file-not-contains test.txt goodbye] no farewell" \
+  "[check:file-not-contains test.txt hello] no greeting" "[check:file-not-contains absent.txt x] absent file"
+"$here/bin/grade" "$work/fnc" >/dev/null 2>&1
+jq -e '[.assertion_results[].passed] == [true, false, false]
+  and (.assertion_results[1].evidence | test("hello"))
+  and (.assertion_results[2].evidence | test("absent"))' "$work/fnc/grading.json" >/dev/null 2>&1 \
+  && ok "file-not-contains passes on no match and fails on a match or an absent file" \
+  || bad "file-not-contains passes on no match and fails on a match or an absent file"
+mk_case "$work/gc" "[check:git-count 2] two changed" "[check:git-count 3] three changed"
+printf 'app.js\ntest.txt\n' > "$work/gc/git-changed.txt"
+"$here/bin/grade" "$work/gc" >/dev/null 2>&1
+jq -e '[.assertion_results[].passed] == [true, false]' "$work/gc/grading.json" >/dev/null 2>&1 \
+  && ok "git-count reads git-changed.txt when the run recorded one" \
+  || bad "git-count reads git-changed.txt when the run recorded one"
+mk_case "$work/gcgit" "[check:git-count 1] one changed" "[check:git-count 2] two changed"
+( cd "$work/gcgit/outputs" && git init -q . && git add -A \
+  && git -c user.name=t -c user.email=t@example.invalid commit -q -m seed && printf 'x\n' > new.txt )
+"$here/bin/grade" "$work/gcgit" >/dev/null 2>&1
+jq -e '[.assertion_results[].passed] == [true, false]' "$work/gcgit/grading.json" >/dev/null 2>&1 \
+  && ok "git-count still falls back to outputs/.git" || bad "git-count still falls back to outputs/.git"
+
+# --- the rubric grader, through the fake harness only ------------------------
+fake_h="$here/lib/tests/fake-cli"
+PATH="$here/lib/tests/tripwire:$PATH"; export PATH
+own_trip="$work/tripwire.log"
+outer_home="$work/outer-home"
+mkdir -p "$outer_home/.config/sdlc-skills-evals/credentials/fake" "$work/outer-tmp"
+printf 'token\n' > "$outer_home/.config/sdlc-skills-evals/credentials/fake/.fakerc"
+rub_hook="$work/rubric-hook"
+cat > "$rub_hook" <<'HOOK'
+#!/usr/bin/env bash
+workdir="$1"
+printf 'seeded=%s outputs=%s\n' "$([ -f "$HOME/.fakerc" ] && echo yes || echo no)" \
+  "$([ -f "$workdir/outputs/app.js" ] && echo yes || echo no)" >> "$RUBRIC_LOG"
+ok='{"expectations":[{"text":"output is well structured","passed":false,"evidence":"RUBRIC-SAYS-NO"}]}'
+case "$RUBRIC_MODE" in
+  file) printf '%s\n' "$ok" > "$workdir/grading-rubric.json";;
+  stdout) printf '%s\n' "$ok";;
+  garbage) printf 'not json\n' > "$workdir/grading-rubric.json";;
+  mismatch) printf '{"expectations":[{"text":"another claim","passed":true,"evidence":"x"}]}\n' \
+              > "$workdir/grading-rubric.json";;
+  nonbool) printf '{"expectations":[{"text":"output is well structured","passed":"yes","evidence":"x"}]}\n' \
+              > "$workdir/grading-rubric.json";;
+  fail) printf '%s\n' "$ok" > "$workdir/grading-rubric.json"; exit 1;;
+esac
+HOOK
+chmod +x "$rub_hook"
+rubric() { # $1 tag $2 mode — grades a fresh fixture copy with the rubric grader
+  cp -r "$here/lib/tests/fixtures/grade-run" "$work/$1"
+  TMPDIR="$work/outer-tmp" HOME="$outer_home" TRIPWIRE_LOG="$own_trip" RUBRIC_MODE="$2" \
+  RUBRIC_LOG="$work/$1.log" FAKE_BEHAVIORAL_HOOK="$rub_hook" FAKE_RECORD_DIR="$work/$1.rec" \
+  FAKE_SOURCE_LOG="$work/$1.src" FAKE_LAUNCH_LOG="$work/$1.launch" \
+    "$here/bin/grade" "$work/$1" --harness fake --harness-dir "$fake_h" --timeout 20 >/dev/null 2>&1
+}
+rubric rfile file; rc=$?
+jq -e '.assertion_results[5].passed == false and (.assertion_results[5].evidence | test("RUBRIC-SAYS-NO"))
+  and .summary.needs_review == 0 and .summary.failed == 3 and .summary.passed == 3' \
+  "$work/rfile/grading.json" >/dev/null 2>&1 && [ "$rc" -eq 0 ] \
+  && ok "the rubric grader turns prose into true/false with evidence" \
+  || bad "the rubric grader turns prose into true/false with evidence"
+jq -e '[.assertion_results[0:5][].passed] == [true, false, true, false, true]' "$work/rfile/grading.json" >/dev/null 2>&1 \
+  && ok "mechanical checks never go to the rubric" || bad "mechanical checks never go to the rubric"
+p="$work/rfile.rec/call-1/prompt.txt"
+grep -qF 'output is well structured' "$p" 2>/dev/null && grep -qF 'grading-rubric.json' "$p" \
+  && ! grep -qF 'app.js present' "$p" \
+  && ok "the grader is asked about the prose assertions only" \
+  || bad "the grader is asked about the prose assertions only"
+grep -qx 'seeded=yes outputs=yes' "$work/rfile.log" 2>/dev/null \
+  && ok "the grader sees the outputs, in a seeded throwaway home" \
+  || bad "the grader sees the outputs, in a seeded throwaway home"
+g_env="$work/rfile.rec/call-1/env"
+g_home="$(sed -n 's/^HOME=//p' "$g_env" 2>/dev/null)"
+case "$g_home" in "$work/outer-tmp/sdlc-skills-evals/"*/home) true;; *) false;; esac \
+  && grep -qx "TMPDIR=$(dirname "$g_home")/tmp" "$g_env" \
+  && grep -qx "LAB_CREDENTIAL_SEED=$outer_home/.config/sdlc-skills-evals/credentials" "$g_env" \
+  && grep -qx "source_home=$outer_home" "$g_env" && [ "$(grep -c . "$work/rfile.src")" = 1 ] \
+  && ok "the grader runs isolated, with the adapter sourced once against the operator's home" \
+  || bad "the grader runs isolated, with the adapter sourced once against the operator's home"
+grep -q '^install $' "$work/rfile.launch" 2>/dev/null && ! grep -q '^install .' "$work/rfile.launch" \
+  && ok "the grader is skill-free" || bad "the grader is skill-free"
+[ -n "$g_home" ] && [ ! -e "$(dirname "$g_home")" ] \
+  && [ -z "$(find "$work/outer-tmp" -mindepth 1 2>/dev/null | grep -v '/sdlc-skills-evals$')" ] \
+  && ok "the grader leaves no run_base behind" || bad "the grader leaves no run_base behind"
+rubric rstdout stdout
+jq -e '.assertion_results[5].passed == false' "$work/rstdout/grading.json" >/dev/null 2>&1 \
+  && ok "without the file, the verdict is read from the answer" \
+  || bad "without the file, the verdict is read from the answer"
+for m in garbage mismatch nonbool fail; do
+  rubric "r$m" "$m"
+  jq -e '.assertion_results[5].passed == "needs_review" and .summary.needs_review == 1' \
+    "$work/r$m/grading.json" >/dev/null 2>&1 \
+    && ok "a $m rubric answer falls back to needs_review" \
+    || bad "a $m rubric answer falls back to needs_review"
+done
+cp -r "$here/lib/tests/fixtures/grade-run" "$work/rindet"
+printf '{"outcome":"indeterminate","reason":"x"}\n' > "$work/rindet/run_status.json"
+TMPDIR="$work/outer-tmp" HOME="$outer_home" TRIPWIRE_LOG="$own_trip" RUBRIC_MODE=file RUBRIC_LOG="$work/rindet.log" \
+  FAKE_BEHAVIORAL_HOOK="$rub_hook" "$here/bin/grade" "$work/rindet" --harness fake --harness-dir "$fake_h" >/dev/null 2>&1
+[ ! -e "$work/rindet.log" ] && ok "an indeterminate arm spends no grader call" \
+  || bad "an indeterminate arm spends no grader call"
+[ ! -s "$own_trip" ] && ok "no real agent CLI was called" || bad "no real agent CLI was called"
 
 exit "$fails"

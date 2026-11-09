@@ -1,4 +1,7 @@
 #!/usr/bin/env bash
+# shellcheck disable=SC2034
+# errlog/timeout_s/scenario_model_tier are read by the adapter this script
+# sources for the rubric grader; referenced indirectly, never in this file.
 # bin/grade — grade one eval arm run directory against its assertions.
 #
 # The run dir holds eval-case.json {id, prompt, expected_output, assertions[]}
@@ -6,32 +9,106 @@
 # mechanical — prefixed `[check:<verb> <args...>]` — or prose, which is
 # recorded needs_review with an evidence pointer for a human. Writes
 # grading.json {assertion_results[]: {text, passed, evidence}, summary:
-# {passed, failed, needs_review, total, pass_rate}}. No live calls.
+# {outcome, passed, failed, needs_review, total, pass_rate}}.
+#
+# An arm whose run_status.json says "indeterminate" measured nothing, so it
+# is not scored: its summary carries the reason and a null pass rate, and
+# no grader call is spent on it.
 #
 # Check verbs (args are relative to outputs/ unless absolute):
 #   file-exists <path>
 #   file-contains <path> <regex>
+#   file-not-contains <path> <regex>   (an absent file fails: nothing was checked)
 #   command-succeeds <cmd...>   (full shell under `timeout`, CWD=outputs/)
-#   git-count <min>              (added-or-modified files vs the seed commit)
+#   git-count <min>              (added-or-modified files vs the seed commit:
+#                                 git-changed.txt when the run recorded one,
+#                                 else outputs/.git)
+#
+# --harness H grades the prose assertions with a skill-free session on that
+# harness (the rubric grader). It is a live call against your own harness
+# account — one per arm that has prose — and is never run in CI. Without
+# it, prose waits for a human as needs_review; a grader answer that is
+# missing, malformed, does not name the assertion, or comes from a session
+# that failed also leaves it needs_review.
 #
 # Trust note: eval files are lab-authored and reviewed like scenarios —
 # command-succeeds authors assume a full shell. Never grade eval files
 # from untrusted input.
 
 set -uo pipefail
+if [ -n "${SDLC_SKILLS_EVALS_ROOT:-}" ]; then
+  lab_root="$SDLC_SKILLS_EVALS_ROOT"
+else
+  lab_root="$(cd "$(dirname "$0")/.." && pwd)"
+fi
+harnessdir="$lab_root/harnesses"
 
-[ "${1:-}" = "-h" ] || [ "${1:-}" = "--help" ] && {
-  echo "usage: bin/grade <arm-run-dir>"; exit 0; }
-run_dir="${1:-}"; [ -n "$run_dir" ] || { echo "needs an arm run dir" >&2; exit 2; }
+usage() {
+  cat <<'EOF'
+usage: bin/grade <arm-run-dir> [--harness NAME [--harness-dir DIR] [--timeout S]]
+
+  --harness NAME     grade prose assertions with a skill-free session on NAME
+                     (a live call per arm with prose; never in CI)
+  --harness-dir DIR  read the adapter from DIR instead of harnesses/
+  --timeout S        the grader session's wall clock, seconds (default: 600)
+
+Exit codes: 0 graded · 2 bad arguments, a missing record, or an unrunnable
+harness · 3 the harness CLI is unavailable
+EOF
+}
+
+run_dir=""; harness=""; timeout_s=600
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    -h|--help)     usage; exit 0;;
+    --harness)     harness="${2:-}"; shift 2 || exit 2;;
+    --harness-dir) harnessdir="${2:-}"; shift 2 || exit 2;;
+    --timeout)     timeout_s="${2:-}"; shift 2 || exit 2;;
+    -*)            echo "unknown argument: $1" >&2; exit 2;;
+    *)             [ -z "$run_dir" ] || { echo "one arm run dir only" >&2; exit 2; }
+                   run_dir="$1"; shift;;
+  esac
+done
+[ -n "$run_dir" ] || { echo "needs an arm run dir" >&2; exit 2; }
+case "$timeout_s" in ''|*[!0-9]*|0) echo "--timeout needs a positive integer" >&2; exit 2;; esac
 case_file="$run_dir/eval-case.json"
 out_dir="$run_dir/outputs"
+status_file="$run_dir/run_status.json"
 [ -f "$case_file" ] || { echo "no eval-case.json in $run_dir" >&2; exit 2; }
 [ -d "$out_dir" ] || { echo "no outputs/ in $run_dir" >&2; exit 2; }
 
-results_tmp="$(mktemp)"
-trap 'rm -f "$results_tmp"' EXIT
-
 n_assert="$(jq '.assertions | length' "$case_file")"
+
+# --- an arm that measured nothing is not scored ------------------------------
+if [ -f "$status_file" ] && [ "$(jq -r '.outcome // empty' "$status_file" 2>/dev/null)" = indeterminate ]; then
+  jq -n --arg reason "$(jq -r '.reason // "indeterminate"' "$status_file")" --argjson total "$n_assert" \
+    '{assertion_results: [], summary: {outcome: "indeterminate", reason: $reason, passed: 0,
+      failed: 0, needs_review: 0, total: $total, pass_rate: null}}' > "$run_dir/grading.json"
+  exit 0
+fi
+
+results_tmp="$(mktemp)"
+grader_base=""
+cleanup() {
+  rm -f "$results_tmp"
+  [ -z "$grader_base" ] || {
+    LAB_RUN_BASE="" TMPDIR="$_outer_tmpdir" lab_home_cleanup "$grader_base"; rm -rf "$grader_base"; }
+}
+trap cleanup EXIT
+
+# The changed files of the run, one per line: the list bin/evaluate recorded
+# before outputs/ was written, else the outputs/ tree's own git history.
+changed_files() {
+  if [ -f "$run_dir/git-changed.txt" ]; then
+    cat "$run_dir/git-changed.txt"
+  elif [ -d "$out_dir/.git" ]; then
+    (cd "$out_dir" && { git diff --name-only HEAD 2>/dev/null; git status --porcelain -uall 2>/dev/null | awk '{print $2}'; } | sort -u)
+  else
+    return 1
+  fi
+}
+
+prose_idx=()
 for i in $(seq 0 $((n_assert - 1)) 2>/dev/null || true); do
   text="$(jq -r ".assertions[$i]" "$case_file")"
   verdict="needs_review"; evidence="outputs/ (human review)"
@@ -46,17 +123,25 @@ for i in $(seq 0 $((n_assert - 1)) 2>/dev/null || true); do
           verdict="failed"; evidence="absent: $args"
         fi
         ;;
-      file-contains)
+      file-contains|file-not-contains)
         fp="${args%% *}"; re="${args#* }"
         if [ "$fp" = "$args" ]; then
           verdict="failed"; evidence="malformed check (need: path regex): $args"
         elif [ ! -f "$out_dir/$fp" ]; then
           verdict="failed"; evidence="absent: $fp"
         elif grep -qiE -- "$re" "$out_dir/$fp" 2>/dev/null; then
-          verdict="passed"
-          evidence="matched /$re/ in $fp: $(grep -iE -m1 -- "$re" "$out_dir/$fp" | head -c 120)"
+          match="$(grep -iE -m1 -- "$re" "$out_dir/$fp" | head -c 120)"
+          if [ "$verb" = file-contains ]; then
+            verdict="passed"; evidence="matched /$re/ in $fp: $match"
+          else
+            verdict="failed"; evidence="found /$re/ in $fp: $match"
+          fi
         else
-          verdict="failed"; evidence="no match for /$re/ in $fp"
+          if [ "$verb" = file-contains ]; then
+            verdict="failed"; evidence="no match for /$re/ in $fp"
+          else
+            verdict="passed"; evidence="no match for /$re/ in $fp"
+          fi
         fi
         ;;
       command-succeeds)
@@ -67,31 +152,159 @@ for i in $(seq 0 $((n_assert - 1)) 2>/dev/null || true); do
         fi
         ;;
       git-count)
-        if [ -d "$out_dir/.git" ]; then
-          cnt="$(cd "$out_dir" && { git diff --name-only HEAD 2>/dev/null; git status --porcelain -uall 2>/dev/null | awk '{print $2}'; } | sort -u | grep -c .)"
+        if changed="$(changed_files)"; then
+          cnt="$(printf '%s\n' "$changed" | grep -c .)"
           if [ "$cnt" -ge "$args" ]; then
             verdict="passed"; evidence="$cnt changed files (>= $args)"
           else
             verdict="failed"; evidence="$cnt changed files (< $args)"
           fi
         else
-          verdict="failed"; evidence="no git tree in outputs/"
+          verdict="failed"; evidence="no git-changed.txt and no git tree in outputs/"
         fi
         ;;
       *)
         verdict="needs_review"; evidence="unknown check verb $verb — outputs/ (human review)"
         ;;
     esac
+  else
+    prose_idx+=("$i")
   fi
-  jq -n --arg text "$text" --argjson passed "$([ "$verdict" = needs_review ] && printf '"needs_review"' || { [ "$verdict" = passed ] && printf 'true' || printf 'false'; })" \
+  jq -nc --arg text "$text" --argjson passed "$([ "$verdict" = needs_review ] && printf '"needs_review"' || { [ "$verdict" = passed ] && printf 'true' || printf 'false'; })" \
     --arg evidence "$verdict: $evidence" \
     '{text:$text, passed:$passed, evidence:$evidence}' >> "$results_tmp"
 done
 
+# --- the rubric grader: prose assertions through a skill-free session --------
+rubric_prompt() { # the grader's opening — the task, the expectation, the prose only
+  cat <<EOF
+You are grading one run of an AI agent. Judge only what its outputs show.
+
+The task the agent was given:
+$(jq -r '.prompt' "$case_file")
+
+What a good result looks like:
+$(jq -r '.expected_output // ""' "$case_file")
+
+The files the agent produced are in ./outputs/ in the current directory; its
+final answer is outputs/response.txt.
+
+Grade each assertion below. An assertion passes only when the outputs give
+concrete evidence for it; cite that evidence (a file and what it holds).
+EOF
+  for i in "${prose_idx[@]}"; do printf -- '- %s\n' "$(jq -r ".assertions[$i]" "$case_file")"; done
+  cat <<'EOF'
+
+Write your verdicts as JSON to the file grading-rubric.json in the current
+directory, one entry per assertion, its text copied exactly:
+{"expectations": [{"text": "<the assertion>", "passed": true, "evidence": "<what shows it>"}]}
+Use true or false for "passed". If you cannot write files, reply with that
+JSON alone.
+EOF
+}
+
+# Prints the grader's expectations array, or returns 1 when there is none.
+rubric_verdicts() { # $1 workdir $2 stream
+  local src="" text
+  if [ -f "$1/grading-rubric.json" ]; then
+    src="$(cat "$1/grading-rubric.json")"
+  elif adapter_ran "$2"; then
+    # The answer text; a bare JSON answer is no envelope the extractor
+    # knows, so the stream itself is tried too. Only a top-level object
+    # holding an expectations array is read as a verdict.
+    src="$(lab_extract_stream_text "$2" "$harness" 2>/dev/null)" || src="$(cat "$2")"
+  fi
+  for text in "$src" "$(printf '%s' "$src" | tr '\n' ' ' | sed -n 's/^[^{]*\({.*}\)[^}]*$/\1/p')"; do
+    [ -n "$text" ] || continue
+    printf '%s' "$text" | jq -ce '.expectations | arrays' 2>/dev/null && return 0
+  done
+  return 1
+}
+
+if [ -n "$harness" ] && [ "${#prose_idx[@]}" -gt 0 ]; then
+  command -v jq >/dev/null 2>&1 || { echo "needs \`jq\`" >&2; exit 3; }
+  adapter="$harnessdir/$harness.sh"
+  [ -f "$adapter" ] || { echo "no harness adapter: $harness" >&2; exit 2; }
+  if [ "$(sed -n 's/^runnable=//p' "$adapter")" != "yes" ]; then
+    echo "harness $harness is unrunnable here ($(sed -n 's/^runnable_reason=//p' "$adapter"))" >&2; exit 2
+  fi
+  # The operator's home and temp root, before the grader's run reassigns
+  # them: the adapter binds its source-time home here, the throwaway home is
+  # cut under the outer TMPDIR, and the credential seed resolves from here.
+  _orig_home="${HOME:-}"
+  _outer_tmpdir="${TMPDIR:-/tmp}"
+  unset LAB_RUN_BASE
+  # shellcheck source=../lib/common.sh
+  . "$lab_root/lib/common.sh"
+  # shellcheck source=../lib/home-env.sh
+  . "$lab_root/lib/home-env.sh"
+  # shellcheck source=../lib/stream-text.sh
+  . "$lab_root/lib/stream-text.sh"
+  # shellcheck source=/dev/null
+  . "$adapter"
+  adapter_check || exit 3
+  declare -F adapter_ran >/dev/null 2>&1 || adapter_ran() { [ -s "$1" ]; }
+
+  grader_base="$(TMPDIR="$_outer_tmpdir" lab_run_dir "grader")" || exit 2
+  workdir="$grader_base/work"
+  mkdir -p "$workdir/outputs"
+  # Under outputs/, so a grading-rubric.json the agent wrote cannot pose as
+  # the grader's own answer.
+  cp -a "$out_dir/." "$workdir/outputs/"
+  rm -rf "$workdir/outputs/.git"
+  rubric_prompt > "$grader_base/prompt.txt"
+  stream="$grader_base/stream"; : > "$stream"
+  errlog="$run_dir/grader-stderr.txt"; : > "$errlog"
+  scenario_model_tier=""
+  (
+    TMPDIR="$_outer_tmpdir"
+    eval "$(lab_home_env "$grader_base")" \
+      && export HOME XDG_CONFIG_HOME XDG_DATA_HOME XDG_CACHE_HOME TMPDIR \
+      && export LAB_CREDENTIAL_SEED="${LAB_CREDENTIAL_SEED:-$_orig_home/.config/sdlc-skills-evals/credentials}" \
+      && lab_seed_credentials "$grader_base" "$harness" \
+      && adapter_install "" \
+      && adapter_run_behavioral "$workdir" "$grader_base/prompt.txt" "$stream"
+  )
+  grc=$?
+  cp "$stream" "$run_dir/grader-stream.txt" 2>/dev/null
+
+  why=""
+  if grep -qiE 'usage limit|login_required|api_error: 4' "$stream" 2>/dev/null \
+     || grep -qiE 'usage limit|login_required|authorization grant|no credential|credential configured|not authenticated|invalid_grant|unauthorized' \
+          "$errlog" 2>/dev/null; then
+    why="the grader session was refused by the provider"
+  elif [ "$grc" -ne 0 ]; then
+    why="the grader session exited $grc"
+  elif ! verdicts="$(rubric_verdicts "$workdir" "$stream")"; then
+    why="the grader wrote no readable grading-rubric.json"
+  fi
+
+  for i in "${prose_idx[@]}"; do
+    text="$(jq -r ".assertions[$i]" "$case_file")"
+    if [ -z "$why" ] && v="$(jq -ce --arg t "$text" \
+         'map(select(type == "object" and .text == $t and (.passed | type) == "boolean")) | .[0] // empty' \
+         <<<"$verdicts" 2>/dev/null)" && [ -n "$v" ]; then
+      row="$(jq -c --arg t "$text" '{text: $t, passed: .passed,
+        evidence: ((if .passed then "passed" else "failed" end) + ": rubric: " + (.evidence // "" | tostring))}' <<<"$v")"
+    else
+      row="$(jq -nc --arg t "$text" --arg w "${why:-the grader gave no true/false verdict for this assertion}" \
+        '{text: $t, passed: "needs_review", evidence: ("needs_review: " + $w + " — outputs/ (human review)")}')"
+    fi
+    # One compact result per line: line i+1 is assertion i.
+    # The row goes through ENVIRON: awk -v would unescape its JSON.
+    ROW="$row" awk -v n="$((i + 1))" 'NR == n { print ENVIRON["ROW"]; next } { print }' \
+      "$results_tmp" > "$results_tmp.new" && mv "$results_tmp.new" "$results_tmp"
+  done
+
+  LAB_RUN_BASE="" TMPDIR="$_outer_tmpdir" lab_home_cleanup "$grader_base"; rm -rf "$grader_base"
+  grader_base=""
+fi
+
 if [ "$n_assert" -eq 0 ]; then
-  summary='{"passed":0,"failed":0,"needs_review":0,"total":0,"pass_rate":null}'
+  summary='{"outcome":"ok","passed":0,"failed":0,"needs_review":0,"total":0,"pass_rate":null}'
 else
-  summary="$(jq -s '{passed: map(select(.passed == true)) | length,
+  summary="$(jq -s '{outcome: "ok",
+    passed: map(select(.passed == true)) | length,
     failed: map(select(.passed == false)) | length,
     needs_review: map(select(.passed == "needs_review")) | length,
     total: length,

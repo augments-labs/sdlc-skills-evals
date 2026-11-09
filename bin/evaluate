@@ -1,0 +1,402 @@
+#!/usr/bin/env bash
+# shellcheck disable=SC2034
+# errlog/timeout_s/maxturns/scenario_model_tier/plugin_dir are read by the
+# adapter this script sources; referenced indirectly, never in this file.
+# bin/evaluate — the agentskills.io paired evaluation of one skill.
+#
+# For each eval in evals/<skill>/evals.json, runs the eval's prompt twice on
+# one harness, in a staged workdir holding the eval's input files:
+#
+#   with_skill     the pinned plugin installed
+#   without_skill  no plugin installed           (the default pair)
+#   old_skill      the --baseline-plugin installed (replaces without_skill)
+#
+# and records workspaces/<campaign>/iteration-<N>/<eval-id>/:
+#   eval_metadata.json                      {eval_id, eval_name, prompt, assertions}
+#   <arm>/eval-case.json                    the case bin/grade reads
+#   <arm>/outputs/                          the workdir the agent left, without
+#                                           .git, plus response.txt (its answer)
+#   <arm>/git-changed.txt                   the files the agent changed, taken
+#                                           before outputs/ was written
+#   <arm>/timing.json                       {total_tokens, duration_ms}
+#   <arm>/run_status.json                   {outcome: ok|indeterminate, reason}
+#   <arm>/grading.json                      bin/grade
+# then benchmark.json and benchmark.md (bin/benchmark) for the iteration,
+# and an empty feedback.json {"reviews": []} for the human review.
+#
+# An arm that timed out, exited non-zero, was refused by the provider, ran
+# no model turn, or — in without_skill — loaded a skill anyway measured
+# nothing: it is "indeterminate", scores a null pass rate, and is counted,
+# never averaged in.
+#
+# ============================ THIS COSTS REAL MONEY ============================
+# Every arm is a live session against your own harness account: 2 calls per
+# eval, plus one rubric grader call per arm with a prose assertion under
+# --grade-with-harness.
+#
+# Price it first:  --dry-run  prints the plan and its call count, calls nothing.
+# ==============================================================================
+#
+# Each arm runs in its own throwaway home under the outer TMPDIR, seeded
+# only with this harness's credentials, and removed after the arm. Manual
+# tool, never CI. Flags and exit codes: --help.
+
+set -uo pipefail
+if [ -n "${SDLC_SKILLS_EVALS_ROOT:-}" ]; then
+  lab_root="$SDLC_SKILLS_EVALS_ROOT"
+else
+  lab_root="$(cd "$(dirname "$0")/.." && pwd)"
+fi
+evalsroot="${EVALS_ROOT:-$lab_root/evals}"
+wsroot="${WORKSPACES_ROOT:-$lab_root/workspaces}"
+harnessdir="$lab_root/harnesses"
+# shellcheck source=../lib/pin.sh
+source "$lab_root/lib/pin.sh"
+
+usage() {
+  cat <<'EOF'
+bin/evaluate — run one skill's evals, with the skill against without it.
+
+Usage:
+  bin/evaluate --harness NAME --skill NAME [options]
+
+Options:
+  --harness NAME          harness adapter under harnesses/ (must be runnable here)
+  --skill NAME            the skill; its evals are evals/<skill>/evals.json
+  --plugin PATH|REF       plugin tree for with_skill: a directory, or a ref in
+                          SDLC_SKILLS_ROOT (default: config/upstream-inventory.json)
+  --baseline-plugin P     pair with_skill against old_skill on this tree,
+                          instead of without_skill
+  --eval-id ID            run only this eval (repeatable; default: every eval)
+  --campaign NAME         workspace name under workspaces/  (default: evaluate-<skill>)
+  --iteration N           write iteration-N (refused if it holds a run;
+                          default: the next free iteration)
+  --timeout S             wall clock per session, seconds          (default: 1800)
+  --max-turns N           turn cap per session         (default: the adapter's own)
+  --grade-with-harness    grade prose assertions with a skill-free session on
+                          the same harness (bin/grade --harness)
+  --harness-dir DIR       read the adapter from DIR instead of harnesses/
+  --dry-run               print the plan and its call count; launch nothing
+
+COST: live sessions against your own harness account — 2 per eval, plus one
+per arm with a prose assertion under --grade-with-harness. Always --dry-run
+first.
+
+Exit codes: 0 every arm ran and was recorded (an indeterminate arm is a
+              recorded result, not an error)
+            2 bad or missing arguments, no evals.json, an unknown eval,
+              an iteration in use, an unrunnable harness, or a record
+              that could not be written
+            3 the harness CLI is unavailable
+
+Examples:
+  bin/evaluate --harness opencode --skill yagni --dry-run
+  bin/evaluate --harness opencode --skill yagni --plugin ../sdlc-skills --eval-id cut-the-knob
+EOF
+}
+
+harness=""; skill=""; plugin=""; baseline=""; iteration=""; campaign=""
+timeout_s=1800; maxturns=""; grade_harness=""; dry=""; eval_ids=()
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    -h|--help)            usage; exit 0;;
+    --harness)            harness="${2:-}"; shift 2 || exit 2;;
+    --skill)              skill="${2:-}"; shift 2 || exit 2;;
+    --plugin)             plugin="${2:-}"; shift 2 || exit 2;;
+    --baseline-plugin)    baseline="${2:-}"; shift 2 || exit 2;;
+    --eval-id)            eval_ids+=("${2:-}"); shift 2 || exit 2;;
+    --campaign)           campaign="${2:-}"; shift 2 || exit 2;;
+    --iteration)          iteration="${2:-}"; shift 2 || exit 2;;
+    --timeout)            timeout_s="${2:-}"; shift 2 || exit 2;;
+    --max-turns)          maxturns="${2:-}"; shift 2 || exit 2;;
+    --grade-with-harness) grade_harness="1"; shift;;
+    --harness-dir)        harnessdir="${2:-}"; shift 2 || exit 2;;
+    --dry-run)            dry="1"; shift;;
+    *) echo "unknown argument: $1" >&2; exit 2;;
+  esac
+done
+[ -n "$harness" ] || { echo "needs --harness NAME" >&2; exit 2; }
+[ -n "$skill" ] || { echo "needs --skill NAME" >&2; exit 2; }
+case "$skill" in */*|.|..) echo "--skill is a name, not a path" >&2; exit 2;; esac
+command -v jq >/dev/null 2>&1 || { echo "needs \`jq\`" >&2; exit 3; }
+for pair in timeout:timeout_s max-turns:maxturns iteration:iteration; do
+  flag="${pair%%:*}"; var="${pair#*:}"
+  [ -n "${!var}" ] || continue
+  case "${!var}" in
+    *[!0-9]*) echo "--$flag needs a positive integer" >&2; exit 2;;
+    *) [ "$((10#${!var}))" -gt 0 ] || { echo "--$flag needs a positive integer" >&2; exit 2; };;
+  esac
+done
+[ -n "$timeout_s" ] || { echo "--timeout needs a positive integer" >&2; exit 2; }
+[ -n "$campaign" ] || campaign="evaluate-$skill"
+case "$campaign" in */*|.|..) echo "--campaign is a name, not a path" >&2; exit 2;; esac
+
+skill_evals="$evalsroot/$skill"
+evals_file="$skill_evals/evals.json"
+[ -f "$evals_file" ] || { echo "no evals for skill: $skill ($evals_file)" >&2; exit 2; }
+jq -e '.evals | arrays' "$evals_file" >/dev/null 2>&1 || { echo "unreadable evals: $evals_file" >&2; exit 2; }
+
+# The selected evals, in file order; an id the file does not hold is refused.
+mapfile -t all_ids < <(jq -r '.evals[].id | tostring' "$evals_file")
+if [ "${#eval_ids[@]}" -eq 0 ]; then
+  selected=("${all_ids[@]}")
+else
+  for id in "${eval_ids[@]}"; do
+    printf '%s\n' "${all_ids[@]}" | grep -qxF -- "$id" || { echo "no eval '$id' in $evals_file" >&2; exit 2; }
+  done
+  selected=()
+  for id in "${all_ids[@]}"; do
+    printf '%s\n' "${eval_ids[@]}" | grep -qxF -- "$id" && selected+=("$id")
+  done
+fi
+[ "${#selected[@]}" -gt 0 ] || { echo "no evals in $evals_file" >&2; exit 2; }
+case_of() { # $1 eval id — prints that eval's object
+  jq -c --arg id "$1" '.evals[] | select((.id | tostring) == $id)' "$evals_file"
+}
+
+# Each case.files entry, as the source under evals/<skill>/ and the target
+# under the workdir: "files" or "files/" is the whole files/ tree into the
+# workdir root, "files/<rel>" is <rel>, so no nested files/ appears.
+stage_pairs() { # $1 case json — prints "src<TAB>dest" lines, returns 1 on a bad entry
+  local f rel
+  while IFS= read -r f; do
+    case "$f" in /*|..|../*|*/../*|*/..) echo "eval file path escapes evals/$skill: $f" >&2; return 1;; esac
+    case "$f" in
+      files|files/) printf '%s\t%s\n' "$skill_evals/files/." "." ;;
+      files/*) rel="${f#files/}"; printf '%s\t%s\n' "$skill_evals/files/$rel" "$rel" ;;
+      *) printf '%s\t%s\n' "$skill_evals/$f" "$f" ;;
+    esac
+  done < <(jq -r '.files // [] | .[]' <<<"$1")
+}
+for id in "${selected[@]}"; do
+  pairs="$(stage_pairs "$(case_of "$id")")" || exit 2
+  while IFS=$'\t' read -r src _; do
+    [ -n "$src" ] || continue
+    [ -e "$src" ] || { echo "eval $id: no such input file: $src" >&2; exit 2; }
+  done <<<"$pairs"
+done
+
+# The pins: the caller's, or the committed upstream commit.
+if [ -z "$plugin" ]; then
+  plugin="$(lab_inventory_commit 2>/dev/null)" || {
+    echo "no usable upstream pin: config/upstream-inventory.json names no commit" >&2; exit 2; }
+  plugin_note="config/upstream-inventory.json"
+else
+  plugin_note="$(lab_pin_note --plugin "$plugin")"
+fi
+plugin_tree="$(lab_pin_tree "$plugin" 2>/dev/null)" || plugin_tree="$plugin"
+second_arm=without_skill
+if [ -n "$baseline" ]; then
+  second_arm=old_skill
+  baseline_note="$(lab_pin_note --baseline-plugin "$baseline")"
+  baseline_tree="$(lab_pin_tree "$baseline" 2>/dev/null)" || baseline_tree="$baseline"
+fi
+
+# A prose assertion is one bin/grade cannot check mechanically: the same
+# pattern bin/grade matches, negated.
+selected_json="$(printf '%s\n' "${selected[@]}" | jq -R . | jq -sc .)"
+prose_evals="$(jq --argjson ids "$selected_json" '[.evals[] | select((.id | tostring) as $i | $ids | index($i))
+  | select(any(.assertions[]?; test("^\\[check:[a-z-]+[[:space:]]+[^\\]]*\\]") | not))] | length' \
+  "$evals_file")"
+
+if [ -n "$dry" ]; then
+  # The plan, priced: no pin, no checkout, no adapter, no CLI.
+  arm_calls=$((2 * ${#selected[@]}))
+  grader_calls=0
+  [ -n "$grade_harness" ] && grader_calls=$((2 * prose_evals))
+  echo "plugin   : $plugin_tree  ($plugin_note)"
+  [ -n "$baseline" ] && echo "baseline : $baseline_tree  ($baseline_note)"
+  echo "harness  : $harness"
+  echo "arms     : with_skill, $second_arm"
+  echo "evals    : ${selected[*]}"
+  printf 'budget   : %d eval(s) x 2 arms = %d arm calls\n' "${#selected[@]}" "$arm_calls"
+  [ -n "$grade_harness" ] && printf '         + %d rubric grader call(s) (%d eval(s) with prose x 2 arms)\n' \
+    "$grader_calls" "$prose_evals"
+  printf '\nat most %d calls total, billed to your own harness account.\n' "$((arm_calls + grader_calls))"
+  exit 0
+fi
+
+adapter="$harnessdir/$harness.sh"
+[ -f "$adapter" ] || { echo "no harness adapter: $harness" >&2; exit 2; }
+if [ "$(sed -n 's/^runnable=//p' "$adapter")" != "yes" ]; then
+  reason="$(sed -n 's/^runnable_reason=//p' "$adapter")"
+  echo "harness $harness is unrunnable here (${reason:-no reason})" >&2
+  exit 2
+fi
+
+# The iteration: the one named, if it holds no run, else the next free one.
+ws="$wsroot/$campaign"
+if [ -n "$iteration" ]; then
+  it="$ws/iteration-$iteration"
+  if [ -e "$it" ] && [ -n "$(ls -A "$it" 2>/dev/null)" ]; then
+    echo "iteration already holds a run: $it (omit --iteration for the next one)" >&2; exit 2
+  fi
+else
+  iteration=1
+  while [ -e "$ws/iteration-$iteration" ]; do iteration=$((iteration + 1)); done
+  it="$ws/iteration-$iteration"
+fi
+mkdir -p "$it" || exit 2
+
+# The operator's home and temp root, before any arm reassigns them: the
+# adapter binds its source-time home here, each arm's throwaway home is cut
+# under the outer TMPDIR, and the credential seed resolves from here.
+_orig_home="${HOME:-}"
+_outer_tmpdir="${TMPDIR:-/tmp}"
+unset LAB_RUN_BASE
+
+# shellcheck source=../lib/common.sh
+. "$lab_root/lib/common.sh"
+# shellcheck source=../lib/home-env.sh
+. "$lab_root/lib/home-env.sh"
+# shellcheck source=../lib/stream-text.sh
+. "$lab_root/lib/stream-text.sh"
+# shellcheck source=/dev/null
+. "$adapter"
+adapter_check || exit 3
+declare -F adapter_ran >/dev/null 2>&1 || adapter_ran() { [ -s "$1" ]; }
+declare -F adapter_chain >/dev/null 2>&1 || adapter_chain() { :; }
+declare -F adapter_usage >/dev/null 2>&1 || adapter_usage() { :; }
+
+# --- the trees the arms install: a directory as it is, a ref extracted -------
+stage_dir=""
+run_base=""
+# One arm's throwaway home and workdir, removed after the arm, after an arm
+# that failed part-way, and on exit.
+drop_run_base() {
+  [ -n "$run_base" ] || return 0
+  LAB_RUN_BASE="" TMPDIR="$_outer_tmpdir" lab_home_cleanup "$run_base"; rm -rf "$run_base"
+  run_base=""
+}
+cleanup() {
+  drop_run_base
+  [ -z "$stage_dir" ] || rm -rf "$stage_dir"
+}
+trap cleanup EXIT
+
+tree_for() { # $1 path|ref $2 name — prints the directory an arm installs
+  if [ -d "$1" ]; then printf '%s\n' "$1"; return 0; fi
+  local up_root commit
+  [ -n "$stage_dir" ] || stage_dir="$(TMPDIR="$_outer_tmpdir" mktemp -d)" || return 1
+  up_root="${SDLC_SKILLS_ROOT:-$lab_root/../sdlc-skills}"
+  commit="$(git -C "$up_root" rev-parse --verify --quiet "$1^{commit}")" \
+    || { echo "cannot pin '$1' (the plugin checkout has no such commit)" >&2; return 1; }
+  mkdir -p "$stage_dir/$2"
+  git -C "$up_root" archive "$commit" | tar -x -C "$stage_dir/$2" \
+    || { echo "cannot extract $commit from $up_root" >&2; return 1; }
+  printf '%s\n' "$stage_dir/$2"
+}
+# Not captured with $(...): the EXIT trap must see stage_dir.
+tree_for "$plugin" with > "$it/.tree" || exit 2
+with_src="$(cat "$it/.tree")"
+second_src=""
+if [ -n "$baseline" ]; then
+  tree_for "$baseline" old > "$it/.tree" || exit 2
+  second_src="$(cat "$it/.tree")"
+fi
+rm -f "$it/.tree"
+
+# Why an arm measured nothing, or nothing when it measured something.
+indeterminate_reason() { # $1 arm $2 exit code $3 stream $4 errlog
+  local m
+  if m="$(grep -oiE -m1 'usage limit|login_required|api_error: 4' "$3" 2>/dev/null)" \
+     || m="$(grep -oiE -m1 'usage limit|login_required|authorization grant|no credential|credential configured|not authenticated|invalid_grant|unauthorized' "$4" 2>/dev/null)"; then
+    printf 'provider refusal (auth or quota): %s\n' "$(head -n1 <<<"$m")"
+  elif [ "$2" -eq 124 ]; then
+    printf 'timeout (exit 124 after %ss)\n' "$timeout_s"
+  elif [ "$2" -ne 0 ]; then
+    printf 'the session exited %s\n' "$2"
+  elif ! adapter_ran "$3"; then
+    printf 'no model turn: the session did not run\n'
+  elif [ "$1" = without_skill ] && [ -n "$(adapter_chain "$3")" ]; then
+    printf 'contaminated: without_skill loaded skill(s): %s\n' "$(adapter_chain "$3" | sort -u | tr '\n' ' ' | sed 's/ $//')"
+  fi
+}
+
+ms_now() { date +%s%3N; }
+
+run_arm() { # $1 eval id $2 arm $3 plugin source ("" for none)
+  local id="$1" arm="$2" src="$3" case_json arm_dir workdir stream rc start end toks reason pairs s d
+  case_json="$(case_of "$id")"
+  arm_dir="$it/$id/$arm"
+  mkdir -p "$arm_dir" || return 1
+  jq '{id, prompt, expected_output, assertions: (.assertions // []), files: (.files // [])}' \
+    <<<"$case_json" > "$arm_dir/eval-case.json" || return 1
+
+  drop_run_base
+  run_base="$(TMPDIR="$_outer_tmpdir" lab_run_dir "eval-$arm")" || return 1
+  workdir="$run_base/work"
+  mkdir -p "$workdir" || return 1
+  pairs="$(stage_pairs "$case_json")" || return 1
+  while IFS=$'\t' read -r s d; do
+    [ -n "$s" ] || continue
+    mkdir -p "$workdir/$(dirname "$d")" && cp -a "$s" "$workdir/$d" || return 1
+  done <<<"$pairs"
+  ( cd "$workdir" && git init -q . && git add -A \
+    && git -c user.name='sdlc-skills-evals' -c user.email='evals@example.invalid' \
+         commit -q --allow-empty -m 'eval input' ) || return 1
+  jq -r '.prompt' <<<"$case_json" > "$run_base/prompt.txt"
+
+  stream="$arm_dir/stream.txt"; : > "$stream"
+  errlog="$arm_dir/stderr.txt"; : > "$errlog"
+  scenario_model_tier=""
+  log "$id/$arm: running"
+  start="$(ms_now)"
+  (
+    TMPDIR="$_outer_tmpdir"
+    eval "$(lab_home_env "$run_base")" \
+      && export HOME XDG_CONFIG_HOME XDG_DATA_HOME XDG_CACHE_HOME TMPDIR \
+      && export LAB_CREDENTIAL_SEED="${LAB_CREDENTIAL_SEED:-$_orig_home/.config/sdlc-skills-evals/credentials}" \
+      && lab_seed_credentials "$run_base" "$harness" \
+      && adapter_install "$src" \
+      && adapter_run_behavioral "$workdir" "$run_base/prompt.txt" "$stream"
+  )
+  rc=$?
+  end="$(ms_now)"
+
+  # The change list first: response.txt is the lab's, not the agent's.
+  ( cd "$workdir" && { git diff --name-only HEAD; git status --porcelain -uall | awk '{print $2}'; } | sort -u ) \
+    > "$arm_dir/git-changed.txt" 2>/dev/null
+  mkdir -p "$arm_dir/outputs"
+  cp -a "$workdir/." "$arm_dir/outputs/" && rm -rf "$arm_dir/outputs/.git" || return 1
+  lab_extract_stream_text "$stream" "$harness" > "$arm_dir/outputs/response.txt" 2>/dev/null \
+    || : > "$arm_dir/outputs/response.txt"
+
+  toks="$(adapter_usage "$stream" 2>/dev/null | tr -dc '0-9')"
+  jq -n --argjson toks "${toks:-null}" --argjson ms "$((end - start))" \
+    '{total_tokens: $toks, duration_ms: $ms}' > "$arm_dir/timing.json"
+  reason="$(indeterminate_reason "$arm" "$rc" "$stream" "$errlog")"
+  if [ -n "$reason" ]; then
+    jq -n --arg r "$reason" '{outcome: "indeterminate", reason: $r}' > "$arm_dir/run_status.json"
+    log "$id/$arm: indeterminate — $reason"
+  else
+    jq -n '{outcome: "ok"}' > "$arm_dir/run_status.json"
+  fi
+
+  drop_run_base
+
+  local grade_args=("$arm_dir")
+  [ -n "$grade_harness" ] && grade_args+=(--harness "$harness" --harness-dir "$harnessdir" --timeout "$timeout_s")
+  "$lab_root/bin/grade" "${grade_args[@]}" || { echo "$id/$arm: bin/grade failed" >&2; return 1; }
+}
+
+failed=""
+for id in "${selected[@]}"; do
+  mkdir -p "$it/$id"
+  case_of "$id" | jq '{eval_id: .id, eval_name: (.name // .id), prompt, assertions: (.assertions // [])}' \
+    > "$it/$id/eval_metadata.json"
+  run_arm "$id" with_skill "$with_src" || failed="$failed $id/with_skill"
+  run_arm "$id" "$second_arm" "$second_src" || failed="$failed $id/$second_arm"
+done
+
+"$lab_root/bin/benchmark" "$it" || failed="$failed benchmark"
+[ -e "$it/feedback.json" ] || printf '{"reviews": []}\n' > "$it/feedback.json"
+
+echo "iteration: $it"
+[ -f "$it/benchmark.md" ] && echo "summary  : $it/benchmark.md"
+echo "review   : $it/feedback.json"
+if [ -n "$failed" ]; then
+  echo "not recorded:$failed" >&2
+  exit 2
+fi
+exit 0
