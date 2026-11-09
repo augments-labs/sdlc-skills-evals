@@ -14,6 +14,20 @@
 # FAKE_NO_TIER=1 binds NO tier: the double has no adapter_model, so it
 # stands for an adapter that cannot set one and the runner must refuse a
 # run that asks for a tier.
+# FAKE_ACTIVATION_HOOK=<exe> decides what an activation run fires: it is
+# called as `<exe> <installed plugin dir> <prompt>` and each line it prints
+# becomes a "SKILL <line>" record, so a test can make routing depend on the
+# description the installed tree carries.
+# Behavioral runs (reviser, paired and grader calls) are scripted by:
+#   FAKE_RECORD_DIR=<dir>      records call-<n>/{prompt.txt,workdir,env}
+#   FAKE_AUTH_FAIL=1           refuses as an unauthenticated CLI (exit 1)
+#   FAKE_BEHAVIORAL_CHAIN="a b"  emits "SKILL a" "SKILL b"
+#   FAKE_BEHAVIORAL_STDOUT=<text>  emits <text> as the answer
+#   FAKE_BEHAVIORAL_HOOK=<exe> runs `<exe> <workdir> <opening> <stream>` in
+#                              the workdir; its stdout is the stream
+#   FAKE_BEHAVIORAL_EXIT=<n>   the launch's exit code (else the hook's)
+# With none of the last five set, a behavioral run is the canned ok run.
+# FAKE_RAN=0 makes adapter_ran report a refusal whatever the stream holds.
 #
 # The launch redirects its stderr to "$errlog", exactly as every real
 # adapter does (harnesses/*.sh). The double keeps that contract on
@@ -25,8 +39,12 @@ adapter_name='fake'
 # The runner SOURCES this file. FAKE_SOURCE_LOG records that it happened,
 # so a test can tell a path that only planned from a path that loaded an
 # adapter at all.
+# The HOME the adapter was sourced under, like the source_*_home every
+# real adapter binds at source time: a test can tell the operator's home
+# (where credentials are seeded from) from the run's throwaway one.
+fake_source_home="${HOME:-}"
 if [ -n "${FAKE_SOURCE_LOG:-}" ]; then
-  printf 'sourced %s\n' "$adapter_name" >> "$FAKE_SOURCE_LOG"
+  printf 'sourced %s home=%s\n' "$adapter_name" "$fake_source_home" >> "$FAKE_SOURCE_LOG"
 fi
 
 runnable=yes
@@ -77,6 +95,7 @@ adapter_behavioral_events() { # $1 stream
 }
 
 adapter_ran() { # $1 stream — any line means the (fake) model spoke
+  [ "${FAKE_RAN:-1}" != 0 ] || return 1
   [ -s "$1" ]
 }
 
@@ -85,10 +104,12 @@ adapter_usage() { # $1 stream
   printf '42\n'
 }
 
-_fake_emit_ok() { # $1 stream
+_fake_emit_ok() { # $1 stream [$2 prompt]
   # FAKE_SUBJECT lets the triggering runner's subject matching hit;
   # FAKE_CHAIN=0 or FAKE_FIRE=0 emits no chain (a clean baseline).
-  if [ "${FAKE_CHAIN:-1}" != 0 ] && [ "${FAKE_FIRE:-1}" != 0 ]; then
+  if [ -n "${FAKE_ACTIVATION_HOOK:-}" ]; then
+    "$FAKE_ACTIVATION_HOOK" "${FAKE_PLUGIN_DIR:-}" "${2:-}" | sed 's/^/SKILL /' >> "$1"
+  elif [ "${FAKE_CHAIN:-1}" != 0 ] && [ "${FAKE_FIRE:-1}" != 0 ]; then
     printf 'SKILL %s\n' "${FAKE_SUBJECT:-fake-subject}" >> "$1"
   fi
   printf 'EDIT fixture-marker.txt\n' >> "$1"
@@ -100,7 +121,7 @@ _fake_body() { # $1 workdir $2 prompt $3 stream — the canned behavior
     error) return 1;;
     blocked) printf 'usage limit exceeded\n' >> "$3"; return 0;;
     dead) : > "$3"; return 0;;
-    *) _fake_emit_ok "$3"; return 0;;
+    *) _fake_emit_ok "$3" "$2"; return 0;;
   esac
 }
 
@@ -113,6 +134,7 @@ adapter_run_activation() { # $1 workdir $2 prompt $3 stream
   if [ -n "${FAKE_LAUNCH_LOG:-}" ]; then
     printf 'activation %s\n' "$1" >> "$FAKE_LAUNCH_LOG"
   fi
+  export FAKE_PLUGIN_DIR="${plugin_dir:-}"
   export -f _fake_body _fake_emit_ok
   timeout "${timeout_s:-5}" bash -c '_fake_body "$@"' _ "$@" 2>>"$errlog"
 }
@@ -124,7 +146,40 @@ adapter_run_behavioral() { # $1 workdir $2 opening file $3 stream
     # campaign's frozen tier is observable at the launch this way.
     printf 'tier %s\n' "${scenario_model_tier:-}" >> "$FAKE_LAUNCH_LOG"
   fi
-  adapter_run_activation "$1" "behavioral" "$3"
+  if [ -n "${FAKE_RECORD_DIR:-}" ]; then
+    # What the launch was handed, kept for the test: the opening, the
+    # workdir, and the environment the CLI would have run under.
+    local n=1 rec
+    while [ -e "$FAKE_RECORD_DIR/call-$n" ]; do n=$((n + 1)); done
+    rec="$FAKE_RECORD_DIR/call-$n"
+    mkdir -p "$rec"
+    cp "$2" "$rec/prompt.txt" 2>/dev/null || : > "$rec/prompt.txt"
+    printf '%s\n' "$1" > "$rec/workdir"
+    {
+      printf 'HOME=%s\n' "${HOME:-}"
+      printf 'TMPDIR=%s\n' "${TMPDIR:-}"
+      printf 'XDG_CONFIG_HOME=%s\n' "${XDG_CONFIG_HOME:-}"
+      printf 'LAB_CREDENTIAL_SEED=%s\n' "${LAB_CREDENTIAL_SEED:-}"
+      printf 'source_home=%s\n' "$fake_source_home"
+      printf 'plugin_dir=%s\n' "${plugin_dir:-}"
+    } > "$rec/env"
+  fi
+  if [ -z "${FAKE_BEHAVIORAL_HOOK:-}${FAKE_BEHAVIORAL_STDOUT:-}${FAKE_BEHAVIORAL_CHAIN:-}${FAKE_BEHAVIORAL_EXIT:-}${FAKE_AUTH_FAIL:-}" ]; then
+    adapter_run_activation "$1" "behavioral" "$3"
+    return
+  fi
+  if [ -n "${FAKE_AUTH_FAIL:-}" ]; then
+    printf 'not authenticated\n' >> "$errlog"
+    return 1
+  fi
+  local rc=0 s
+  for s in ${FAKE_BEHAVIORAL_CHAIN:-}; do printf 'SKILL %s\n' "$s" >> "$3"; done
+  [ -z "${FAKE_BEHAVIORAL_STDOUT:-}" ] || printf '%s\n' "$FAKE_BEHAVIORAL_STDOUT" >> "$3"
+  if [ -n "${FAKE_BEHAVIORAL_HOOK:-}" ]; then
+    ( cd "$1" && timeout "${timeout_s:-5}" "$FAKE_BEHAVIORAL_HOOK" "$1" "$2" "$3" ) \
+      >> "$3" 2>>"$errlog" || rc=$?
+  fi
+  return "${FAKE_BEHAVIORAL_EXIT:-$rc}"
 }
 
 adapter_continue_behavioral() { # $1 workdir $2 prompt $3 new stream $4 prior

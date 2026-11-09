@@ -1,0 +1,7 @@
+#!/bin/sh
+# Tripwire for the real `claude` CLI. Offline suites put this directory first
+# on PATH so no real agent CLI is reachable: this runs nothing, records the
+# call in the exported, absolute $TRIPWIRE_LOG, and fails with 97.
+printf '%s %s\n' "claude" "$*" >> "${TRIPWIRE_LOG:-/dev/null}"
+echo "tripwire: the real claude CLI was called" >&2
+exit 97

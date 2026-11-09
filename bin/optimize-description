@@ -1,0 +1,444 @@
+#!/usr/bin/env bash
+# shellcheck disable=SC2034
+# errlog/timeout_s/maxturns/scenario_model_tier/plugin_dir are read by the
+# adapter this script sources; referenced indirectly, never in this file.
+# Description optimizer — the agentskills.io description-tuning loop.
+#
+# Scores one skill's description with bin/triggering, hands the TRAIN
+# failures to a skill-free reviser session on the same harness, writes the
+# revised description into a staged copy of the plugin, and repeats — then
+# keeps the iteration with the best VALIDATION pass rate, which is often
+# not the last one:
+#
+#   iteration i:  score the staged description (train + validation)
+#                 stop when train has no failure, or at --max-iterations
+#                 else ask the reviser for a candidate built from the
+#                 skill body, the current description and the train
+#                 failures ONLY, and stage it for iteration i+1
+#   select:       best validation rate, then best train rate, then the
+#                 shorter description, then the earlier iteration
+#
+# The reviser never sees a validation query, verdict or count: tuning on
+# validation would turn it into a second training set. Both splits are
+# consumed by this loop, so neither is a held-out result.
+#
+# ============================ THIS COSTS REAL MONEY ============================
+# Every scored query is a live session against your own harness account, and
+# so is every reviser call. One skill at the defaults is up to
+# 5 iterations x 20 queries x 3 runs + 4 reviser calls = 304 CALLS.
+#
+# Price it first:  --dry-run  prints the budget and calls nothing.
+# ==============================================================================
+#
+# The pinned plugin is never written: a ref is extracted with `git archive`,
+# a directory is copied, and every candidate is written into that staged
+# copy. Only --apply, on an explicit writable --plugin directory, writes the
+# winning description back into that directory's SKILL.md copies.
+#
+# Manual tool, never CI. Flags and exit codes: --help.
+
+set -uo pipefail
+if [ -n "${SDLC_SKILLS_EVALS_ROOT:-}" ]; then
+  lab_root="$SDLC_SKILLS_EVALS_ROOT"
+else
+  lab_root="$(cd "$(dirname "$0")/.." && pwd)"
+fi
+descroot="${DESCRIPTIONS_ROOT:-$lab_root/descriptions}"
+wsroot="${WORKSPACES_ROOT:-$lab_root/workspaces}"
+harnessdir="$lab_root/harnesses"
+# shellcheck source=../lib/pin.sh
+source "$lab_root/lib/pin.sh"
+
+usage() {
+  cat <<'EOF'
+bin/optimize-description — tune one skill's description against its query set.
+
+Usage:
+  bin/optimize-description --harness NAME --skill NAME [options]
+
+Options:
+  --harness NAME        harness adapter under harnesses/ (must be runnable here)
+  --skill NAME          the skill; its query set is descriptions/<skill>.json
+  --plugin PATH|REF     plugin tree: a directory, or a ref in SDLC_SKILLS_ROOT
+                        (default: the commit in config/upstream-inventory.json)
+  --max-iterations K    scoring rounds, at most                     (default: 5)
+  --runs N              runs per query per round                    (default: 3)
+  --jobs N              parallel queries                            (default: 3)
+  --timeout S           wall clock per session, seconds             (default: 120)
+  --max-turns N         turn cap per session                        (default: 6)
+  --campaign NAME       workspace name under workspaces/  (default: optimize-<skill>-<date>)
+  --apply               write the winner into the --plugin directory's SKILL.md
+                        copies (needs an explicit, writable directory --plugin)
+  --no-fixture          score in an empty workdir (passed to bin/triggering)
+  --harness-dir DIR     read the adapter from DIR instead of harnesses/
+  --dry-run             print the plan and its call budget; launch nothing
+
+Writes, under workspaces/<campaign>/:
+  iteration-<i>/{description.txt,results.json,metrics.json}
+  best-description.txt, optimization.json, optimization.md
+
+COST: live sessions against your own harness account. The budget is at most
+K x (train + validation queries) x runs scoring calls plus K-1 reviser calls;
+at the defaults one skill is up to 304 calls. Always --dry-run first.
+
+Exit codes: 0 the loop finished (its stop reason is recorded)
+            2 bad or missing arguments, no query set, harness unrunnable,
+              or a scoring round that could not run
+            3 the harness CLI is unavailable
+
+Examples:
+  bin/optimize-description --harness opencode --skill yagni --dry-run
+  bin/optimize-description --harness opencode --skill yagni --plugin ../sdlc-skills --apply
+EOF
+}
+
+harness=""; skill=""; plugin=""; max_iter=5; runs=3; jobs=3; timeout_s=120
+maxturns=6; campaign=""; apply=""; fixture="1"; harnessdir_override=""; dry=""
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    -h|--help)        usage; exit 0;;
+    --harness)        harness="${2:-}"; shift 2 || exit 2;;
+    --skill)          skill="${2:-}"; shift 2 || exit 2;;
+    --plugin)         plugin="${2:-}"; shift 2 || exit 2;;
+    --max-iterations) max_iter="${2:-}"; shift 2 || exit 2;;
+    --runs)           runs="${2:-}"; shift 2 || exit 2;;
+    --jobs)           jobs="${2:-}"; shift 2 || exit 2;;
+    --timeout)        timeout_s="${2:-}"; shift 2 || exit 2;;
+    --max-turns)      maxturns="${2:-}"; shift 2 || exit 2;;
+    --campaign)       campaign="${2:-}"; shift 2 || exit 2;;
+    --apply)          apply="1"; shift;;
+    --no-fixture)     fixture=""; shift;;
+    --harness-dir)    harnessdir_override="${2:-}"; shift 2 || exit 2;;
+    --dry-run)        dry="1"; shift;;
+    *) echo "unknown argument: $1" >&2; exit 2;;
+  esac
+done
+[ -n "$harness" ] || { echo "needs --harness NAME" >&2; exit 2; }
+[ -n "$skill" ] || { echo "needs --skill NAME" >&2; exit 2; }
+command -v jq >/dev/null 2>&1 || { echo "needs \`jq\`" >&2; exit 3; }
+for n in max_iter runs jobs timeout_s maxturns; do
+  case "${!n}" in ''|*[!0-9]*|0) echo "--${n//_/-} needs a positive integer" >&2; exit 2;; esac
+done
+case "$campaign" in */*|.|..) echo "--campaign is a name, not a path" >&2; exit 2;; esac
+[ -n "$harnessdir_override" ] && harnessdir="$harnessdir_override"
+
+set_file="$descroot/$skill.json"
+[ -f "$set_file" ] || { echo "no query set for skill: $skill ($set_file)" >&2; exit 2; }
+nq="$(jq '[.[] | select(.split == "train" or .split == "validation")] | length' "$set_file" 2>/dev/null)" \
+  || { echo "unreadable query set: $set_file" >&2; exit 2; }
+[ "$nq" -gt 0 ] || { echo "no train or validation queries in $set_file" >&2; exit 2; }
+
+# --apply writes the operator's own tree, so it is refused before anything
+# runs unless that tree is named explicitly and every copy can be written.
+if [ -n "$apply" ]; then
+  [ -n "$plugin" ] || { echo "--apply needs an explicit --plugin directory" >&2; exit 2; }
+  [ -d "$plugin" ] || { echo "--apply needs a directory --plugin, not a ref: $plugin" >&2; exit 2; }
+  [ -w "$plugin" ] || { echo "--apply: the plugin directory is not writable: $plugin" >&2; exit 2; }
+fi
+
+# The plugin a run scores: the caller's, or the committed upstream commit.
+if [ -z "$plugin" ]; then
+  plugin="$(lab_inventory_commit 2>/dev/null)" || {
+    echo "no usable upstream pin: config/upstream-inventory.json names no commit" >&2; exit 2; }
+  plugin_note="config/upstream-inventory.json"
+else
+  plugin_note="$(lab_pin_note --plugin "$plugin")"
+fi
+plugin_tree="$(lab_pin_tree "$plugin" 2>/dev/null)" || plugin_tree="$plugin"
+[ -n "$campaign" ] || campaign="optimize-$skill-$(date +%Y-%m-%d)"
+
+# The SKILL.md copies a tree carries for this skill: the flat skills/
+# layout, the phase-grouped one, and the packaged plugins/ copy.
+skill_copies() { # $1 tree — prints each copy's path
+  local f
+  for f in "$1/skills/$skill/SKILL.md" "$1"/skills/*/"$skill"/SKILL.md \
+           "$1/plugins/sdlc-skills/skills/$skill/SKILL.md"; do
+    [ -f "$f" ] && printf '%s\n' "$f"
+  done
+}
+
+if [ -n "$apply" ]; then
+  mapfile -t apply_copies < <(skill_copies "$plugin")
+  [ "${#apply_copies[@]}" -gt 0 ] || { echo "--apply: no SKILL.md for $skill under $plugin" >&2; exit 2; }
+  for f in "${apply_copies[@]}"; do
+    [ -w "$f" ] || { echo "--apply: not writable: $f" >&2; exit 2; }
+  done
+fi
+
+if [ -n "$dry" ]; then
+  # The plan, priced: no pin, no checkout, no adapter, no CLI.
+  plan_cmd="bin/optimize-description --harness $(printf '%q' "$harness") --skill $(printf '%q' "$skill")"
+  plan_cmd="$plan_cmd --plugin $(printf '%q' "$plugin_tree") --max-iterations $max_iter --runs $runs"
+  plan_cmd="$plan_cmd --jobs $jobs --timeout $timeout_s --max-turns $maxturns --campaign $(printf '%q' "$campaign")"
+  [ -n "$apply" ] && plan_cmd="$plan_cmd --apply"
+  [ -z "$fixture" ] && plan_cmd="$plan_cmd --no-fixture"
+  [ -n "$harnessdir_override" ] && plan_cmd="$plan_cmd --harness-dir $(printf '%q' "$harnessdir_override")"
+  echo "plugin   : $plugin_tree  ($plugin_note)"
+  echo "harness  : $harness"
+  echo "command  : $plan_cmd"
+  scoring=$((max_iter * nq * runs))
+  total=$((scoring + max_iter - 1))
+  printf 'budget   : %d iteration(s) x %d queries x %d runs = %d scoring calls\n' \
+    "$max_iter" "$nq" "$runs" "$scoring"
+  printf '         + %d reviser call(s)\n' "$((max_iter - 1))"
+  printf '\nat most %d calls total, billed to your own harness account; the loop\n' "$total"
+  printf 'stops early once train has no failure.\n'
+  exit 0
+fi
+
+adapter="$harnessdir/$harness.sh"
+[ -f "$adapter" ] || { echo "no harness adapter: $harness" >&2; exit 2; }
+if [ "$(sed -n 's/^runnable=//p' "$adapter")" != "yes" ]; then
+  reason="$(sed -n 's/^runnable_reason=//p' "$adapter")"
+  echo "harness $harness is unrunnable here (${reason:-no reason})" >&2
+  exit 2
+fi
+
+ws="$wsroot/$campaign"
+if [ -e "$ws" ] && [ -n "$(ls -A "$ws" 2>/dev/null)" ]; then
+  echo "campaign workspace already holds a run: $ws (pass another --campaign)" >&2; exit 2
+fi
+mkdir -p "$ws" || exit 2
+
+# The operator's home and temp root, before any run reassigns them: the
+# reviser's throwaway home is cut under the outer TMPDIR, and its
+# credential seed resolves from the operator's home.
+_orig_home="${HOME:-}"
+_outer_tmpdir="${TMPDIR:-/tmp}"
+
+# shellcheck source=../lib/common.sh
+. "$lab_root/lib/common.sh"
+# shellcheck source=../lib/home-env.sh
+. "$lab_root/lib/home-env.sh"
+# shellcheck source=../lib/stream-text.sh
+. "$lab_root/lib/stream-text.sh"
+# shellcheck source=/dev/null
+. "$adapter"
+adapter_check || exit 3
+
+# --- the staged tree: every candidate is written here, never upstream --------
+stage_dir="$(mktemp -d)" || exit 2
+reviser_base=""
+cleanup() {
+  [ -z "$reviser_base" ] || { TMPDIR="$_outer_tmpdir" lab_home_cleanup "$reviser_base"; rm -rf "$reviser_base"; }
+  rm -rf "$stage_dir"
+}
+trap cleanup EXIT
+stage="$stage_dir/plugin"
+mkdir -p "$stage"
+if [ -d "$plugin" ]; then
+  cp -a "$plugin/." "$stage/" || { echo "cannot copy --plugin $plugin" >&2; exit 2; }
+else
+  up_root="${SDLC_SKILLS_ROOT:-$lab_root/../sdlc-skills}"
+  commit="$(git -C "$up_root" rev-parse --verify --quiet "$plugin^{commit}")" \
+    || { echo "cannot pin --plugin '$plugin' (the plugin checkout has no such commit)" >&2; exit 2; }
+  git -C "$up_root" archive "$commit" | tar -x -C "$stage" \
+    || { echo "cannot extract $commit from $up_root" >&2; exit 2; }
+fi
+mapfile -t copies < <(skill_copies "$stage")
+[ "${#copies[@]}" -gt 0 ] || { echo "no SKILL.md for $skill in the plugin tree" >&2; exit 2; }
+
+read_description() { # $1 SKILL.md — prints the frontmatter description
+  local v
+  v="$(awk 'NR == 1 && $0 != "---" { exit } NR > 1 && $0 == "---" { exit }
+            NR > 1 && /^description:/ { sub(/^description:[ \t]*/, ""); print; exit }' "$1")"
+  case "$v" in
+    \"*) printf '%s' "$v" | jq -r . 2>/dev/null ;;
+    \'*\') v="${v#\'}"; v="${v%\'}"; printf '%s\n' "${v//\'\'/\'}" ;;
+    *) printf '%s\n' "$v" ;;
+  esac
+}
+
+write_description() { # $1 description $2.. SKILL.md copies — rewrites the line in place
+  local line f tmp
+  line="description: $(jq -n --arg d "$1" '$d')"
+  for f in "${@:2}"; do
+    tmp="$(mktemp)" || return 1
+    LINE="$line" awk 'NR == 1 { fm = ($0 == "---") }
+         fm && NR > 1 && $0 == "---" { fm = 0 }
+         fm && !done && /^description:/ { print ENVIRON["LINE"]; done = 1; next }
+         { print }' "$f" > "$tmp" || { rm -f "$tmp"; return 1; }
+    # cat > keeps the file's own inode and mode
+    cat "$tmp" > "$f" || { rm -f "$tmp"; return 1; }
+    rm -f "$tmp"
+  done
+}
+
+skill_body() { # $1 SKILL.md — everything after the frontmatter
+  awk 'NR == 1 && $0 == "---" { fm = 1; next } fm && $0 == "---" { fm = 0; next } !fm { print }' "$1"
+}
+
+current="$(read_description "${copies[0]}")"
+[ -n "$current" ] || { echo "no description in ${copies[0]}" >&2; exit 2; }
+body="$(skill_body "${copies[0]}")"
+
+# A candidate the loop will stage, or the reason it will not.
+check_candidate() { # $1 candidate — prints the refusal reason, returns 1
+  local c="$1"
+  [ -n "$c" ] || { echo "empty"; return 1; }
+  [ "${#c}" -le 1024 ] || { echo "longer than 1024 characters (${#c})"; return 1; }
+  case "$c" in *$'\n'*) echo "more than one line"; return 1;; esac
+  case "$c" in *[[:cntrl:]]*) echo "carries a control character"; return 1;; esac
+  case "$c" in *'<'*|*'>'*) echo "carries < or >"; return 1;; esac
+  return 0
+}
+
+trim() { # $1 text — strips leading and trailing whitespace
+  local s="$1"
+  s="${s#"${s%%[![:space:]]*}"}"
+  s="${s%"${s##*[![:space:]]}"}"
+  printf '%s' "$s"
+}
+
+reviser_prompt() { # $1 iteration dir — the prompt, from TRAIN failures only
+  local fails
+  fails="$(jq -r '.[] | select(.split == "train" and .verdict == "FAIL")
+    | if .should_trigger then "- should load the skill, but it did not: \(.query)"
+      else "- should NOT load the skill, but it did: \(.query)" end' "$1/results.json")"
+  cat <<EOF
+You are revising the description of one agent skill, \`$skill\`. An agent
+reads only this description when it decides whether to load the skill, so
+the description must make it load on the requests the skill serves and stay
+quiet on requests that belong elsewhere.
+
+Current description:
+$current
+
+The skill's instructions (its SKILL.md body):
+$body
+
+Requests the current description routed wrongly:
+$fails
+
+Write one improved description. Say what the skill is for and when to use
+it, so it covers requests like the ones it missed and excludes the ones it
+should not take; generalize from the requests rather than copying them.
+Rules: a single line, at most 1024 characters, no < or > characters.
+
+Write the description and nothing else to the file candidate-description.txt
+in the current directory. If you cannot write files, reply with the
+description alone.
+EOF
+}
+
+run_reviser() { # $1 iteration dir — writes $1/candidate.txt, returns 1 on none
+  # Runs in this shell, never in $(...): the EXIT trap must see reviser_base.
+  local it="$1" cand="" answered=""
+  reviser_base="$(TMPDIR="$_outer_tmpdir" lab_run_dir "reviser-$skill")" || return 1
+  mkdir -p "$reviser_base/work"
+  reviser_prompt "$it" > "$reviser_base/prompt.txt"
+  cp "$reviser_base/prompt.txt" "$it/reviser-prompt.txt"
+  errlog="$it/reviser-stderr.txt"
+  scenario_model_tier=""
+  (
+    unset LAB_RUN_BASE
+    TMPDIR="$_outer_tmpdir"
+    eval "$(lab_home_env "$reviser_base")" \
+      && export HOME XDG_CONFIG_HOME XDG_DATA_HOME XDG_CACHE_HOME TMPDIR \
+      && export LAB_CREDENTIAL_SEED="${LAB_CREDENTIAL_SEED:-$_orig_home/.config/sdlc-skills-evals/credentials}" \
+      && lab_seed_credentials "$reviser_base" "$harness" \
+      && adapter_install "" \
+      && adapter_run_behavioral "$reviser_base/work" "$reviser_base/prompt.txt" "$reviser_base/stream"
+  ) || echo "reviser session exited non-zero" >> "$errlog"
+  # The file the prompt names is the answer, even when it is empty (an
+  # empty candidate is refused as one); the stream is read only without it.
+  if [ -f "$reviser_base/work/candidate-description.txt" ]; then
+    cand="$(cat "$reviser_base/work/candidate-description.txt")"; answered=1
+  elif [ -s "$reviser_base/stream" ]; then
+    cand="$(lab_extract_stream_text "$reviser_base/stream" "$harness" 2>/dev/null)" && answered=1
+  fi
+  TMPDIR="$_outer_tmpdir" lab_home_cleanup "$reviser_base"
+  rm -rf "$reviser_base"
+  reviser_base=""
+  [ -n "$answered" ] || return 1
+  printf '%s\n' "$cand" > "$it/candidate.txt"
+}
+
+score() { # $1 iteration dir — bin/triggering on the staged tree
+  local args=(--harness "$harness" --skill "$skill" --plugin "$stage" --split all
+              --runs "$runs" --jobs "$jobs" --timeout "$timeout_s" --max-turns "$maxturns"
+              --json "$1/results.json")
+  [ -z "$fixture" ] && args+=(--no-fixture)
+  [ -n "$harnessdir_override" ] && args+=(--harness-dir "$harnessdir_override")
+  "$lab_root/bin/triggering" "${args[@]}" > "$1/triggering.txt" 2>&1
+  local rc=$?
+  [ "$rc" -le 1 ] && [ -s "$1/results.json" ] || return 1
+}
+
+metrics_of() { # $1 results.json — per split: passed, failed, inconclusive, total, pass_rate
+  jq '
+    def split_of($s): [.[] | select(.split == $s)]
+      | { passed: ([.[] | select(.verdict == "PASS")] | length),
+          failed: ([.[] | select(.verdict == "FAIL")] | length),
+          inconclusive: ([.[] | select(.verdict == "INCONCLUSIVE")] | length),
+          total: length }
+      | .pass_rate = (if .passed + .failed > 0 then .passed / (.passed + .failed) else null end);
+    { train: split_of("train"), validation: split_of("validation") }' "$1"
+}
+
+iterations_json="[]"
+stop_reason=""
+i=1
+while :; do
+  it="$ws/iteration-$i"
+  mkdir -p "$it"
+  printf '%s\n' "$current" > "$it/description.txt"
+  log "iteration $i: scoring"
+  score "$it" || { echo "iteration $i: bin/triggering could not score (see $it/triggering.txt)" >&2; exit 2; }
+  metrics_of "$it/results.json" > "$it/metrics.json"
+  iterations_json="$(jq --argjson i "$i" --arg d "$current" --slurpfile m "$it/metrics.json" \
+    '. + [{iteration: $i, description: $d, train: $m[0].train, validation: $m[0].validation}]' \
+    <<<"$iterations_json")"
+  read -r t_pass t_fail < <(jq -r '"\(.train.passed) \(.train.failed)"' "$it/metrics.json")
+  if [ $((t_pass + t_fail)) -eq 0 ]; then stop_reason="train scored nothing (every run inconclusive)"; break; fi
+  if [ "$t_fail" -eq 0 ]; then stop_reason="train has no failure"; break; fi
+  if [ "$i" -ge "$max_iter" ]; then stop_reason="reached --max-iterations $max_iter"; break; fi
+
+  log "iteration $i: revising against $t_fail train failure(s)"
+  if ! run_reviser "$it"; then stop_reason="the reviser returned no candidate"; break; fi
+  cand="$(trim "$(cat "$it/candidate.txt")")"
+  if ! why="$(check_candidate "$cand")"; then stop_reason="candidate rejected: $why"; break; fi
+  write_description "$cand" "${copies[@]}" || { echo "cannot stage the candidate" >&2; exit 2; }
+  current="$cand"
+  i=$((i + 1))
+done
+
+# Selection: validation decides; train, brevity and order break ties.
+best="$(jq '
+  map(. + {v: (.validation.pass_rate // -1), t: (.train.pass_rate // -1), n: (.description | length)})
+  | sort_by(-.v, -.t, .n, .iteration) | .[0] | .iteration' <<<"$iterations_json")"
+best_desc="$(jq -r --argjson b "$best" '.[] | select(.iteration == $b) | .description' <<<"$iterations_json")"
+printf '%s\n' "$best_desc" > "$ws/best-description.txt"
+
+applied="false"
+if [ -n "$apply" ]; then
+  write_description "$best_desc" "${apply_copies[@]}" || { echo "--apply: cannot write $plugin" >&2; exit 2; }
+  applied="true"
+fi
+
+jq -n --arg skill "$skill" --arg harness "$harness" --arg plugin "$plugin" \
+      --arg plugin_tree "$plugin_tree" --arg campaign "$campaign" \
+      --argjson iterations "$iterations_json" --argjson best "$best" \
+      --arg best_desc "$best_desc" --arg stop "$stop_reason" --argjson applied "$applied" \
+      --argjson runs "$runs" --argjson max_iter "$max_iter" \
+  '{skill: $skill, harness: $harness, plugin: $plugin, plugin_tree: $plugin_tree,
+    campaign: $campaign, runs: $runs, max_iterations: $max_iter,
+    iterations: $iterations, best_iteration: $best, best_description: $best_desc,
+    stop_reason: $stop, applied: $applied}' > "$ws/optimization.json"
+
+{
+  printf '# Description optimization: %s on %s\n\n' "$skill" "$harness"
+  printf 'Plugin: `%s` · runs per query: %s · stop: %s\n\n' "$plugin_tree" "$runs" "$stop_reason"
+  printf '| iteration | train | validation | description |\n|---|---|---|---|\n'
+  jq -r '.[] | def r: if . == null then "—" else "\(. * 100 | round)%" end;
+    "| \(.iteration) | \(.train.passed)/\(.train.passed + .train.failed) (\(.train.pass_rate | r)) | \(.validation.passed)/\(.validation.passed + .validation.failed) (\(.validation.pass_rate | r)) | \(.description | gsub("\\|"; "\\\\|")) |"' \
+    <<<"$iterations_json"
+  printf '\nBest: iteration %s (highest validation pass rate). Both splits were\n' "$best"
+  printf 'consumed by this loop, so neither rate is a held-out result.\n'
+} > "$ws/optimization.md"
+
+echo "stop     : $stop_reason"
+echo "best     : iteration $best — $best_desc"
+echo "wrote    : $ws/optimization.json"
+[ "$applied" = true ] && echo "applied  : $plugin"
+exit 0
