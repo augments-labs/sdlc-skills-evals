@@ -181,6 +181,10 @@ jq -e '(.total_tokens == null or (.total_tokens | type) == "number") and (.durat
   && ok "timing.json holds tokens and duration" || bad "timing.json holds tokens and duration"
 n_ok="$(cat "$it"/*/*/run_status.json 2>/dev/null | jq -s '[.[] | select(.outcome == "ok")] | length')"
 [ "$n_ok" = 6 ] && ok "a clean run is outcome ok on every arm" || bad "a clean run is outcome ok on every arm ($n_ok/6)"
+jq -e '.exit_status == 0 and .adapter_ran == true and .skill_chain == []' \
+  "$it/change-seed/without_skill/run_status.json" >/dev/null 2>&1 \
+  && ok "run_status.json records the exit status, the model turn and the skill chain" \
+  || bad "run_status.json records the exit status, the model turn and the skill chain (got $(cat "$it/change-seed/without_skill/run_status.json" 2>/dev/null))"
 grep -qx 'done answer' "$it/change-seed/with_skill/outputs/response.txt" 2>/dev/null \
   && ok "outputs/response.txt holds the answer" || bad "outputs/response.txt holds the answer"
 [ "$(cat "$it/change-seed/with_skill/git-changed.txt" 2>/dev/null)" = "$(printf 'new.txt\nseed.txt')" ] \
@@ -318,6 +322,14 @@ indet noturn 'model turn|did not run' both FAKE_RAN=0 \
 indet contaminated 'contaminat|skill' without FAKE_BEHAVIORAL_CHAIN=probe \
   && ok "a skill loaded into without_skill makes that arm indeterminate" \
   || bad "a skill loaded into without_skill makes that arm indeterminate"
+rs() { # $1 tag $2 arm $3 jq test on that arm's run_status.json
+  jq -e "$3" "$work/$1/ws/$1/iteration-1/change-seed/$2/run_status.json" >/dev/null 2>&1
+}
+rs timeout with_skill '.exit_status == 124' && rs nonzero with_skill '.exit_status == 3' \
+  && rs noturn with_skill '.adapter_ran == false' \
+  && rs contaminated without_skill '.skill_chain == ["probe"] and .adapter_ran == true' \
+  && ok "run_status.json carries the evidence behind each indeterminate verdict" \
+  || bad "run_status.json carries the evidence behind each indeterminate verdict"
 
 # --- the rubric grader, through the harness ----------------------------------
 

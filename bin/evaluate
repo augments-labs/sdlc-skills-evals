@@ -19,7 +19,8 @@
 #   <arm>/git-changed.txt                   the files the agent changed, taken
 #                                           before outputs/ was written
 #   <arm>/timing.json                       {total_tokens, duration_ms}
-#   <arm>/run_status.json                   {outcome: ok|indeterminate, reason}
+#   <arm>/run_status.json                   {outcome: ok|indeterminate, reason,
+#                                           exit_status, adapter_ran, skill_chain}
 #   <arm>/grading.json                      bin/grade
 # then benchmark.json and benchmark.md (bin/benchmark) for the iteration,
 # and an empty feedback.json {"reviews": []} for the human review.
@@ -316,7 +317,7 @@ indeterminate_reason() { # $1 arm $2 exit code $3 stream $4 errlog
 ms_now() { date +%s%3N; }
 
 run_arm() { # $1 eval id $2 arm $3 plugin source ("" for none)
-  local id="$1" arm="$2" src="$3" case_json arm_dir workdir stream rc start end toks reason pairs s d
+  local id="$1" arm="$2" src="$3" case_json arm_dir workdir stream rc start end toks reason pairs s d ran chain
   case_json="$(case_of "$id")"
   arm_dir="$it/$id/$arm"
   mkdir -p "$arm_dir" || return 1
@@ -365,13 +366,16 @@ run_arm() { # $1 eval id $2 arm $3 plugin source ("" for none)
   toks="$(adapter_usage "$stream" 2>/dev/null | tr -dc '0-9')"
   jq -n --argjson toks "${toks:-null}" --argjson ms "$((end - start))" \
     '{total_tokens: $toks, duration_ms: $ms}' > "$arm_dir/timing.json"
+  # The verdict and the evidence behind it: the exit status, whether a
+  # model turn ran, and the skills the session loaded, in load order.
   reason="$(indeterminate_reason "$arm" "$rc" "$stream" "$errlog")"
-  if [ -n "$reason" ]; then
-    jq -n --arg r "$reason" '{outcome: "indeterminate", reason: $r}' > "$arm_dir/run_status.json"
-    log "$id/$arm: indeterminate — $reason"
-  else
-    jq -n '{outcome: "ok"}' > "$arm_dir/run_status.json"
-  fi
+  ran=false; adapter_ran "$stream" && ran=true
+  chain="$(adapter_chain "$stream" 2>/dev/null | jq -R . | jq -sc 'map(select(length > 0))')"
+  jq -n --arg r "$reason" --argjson rc "$rc" --argjson ran "$ran" --argjson chain "${chain:-[]}" \
+    '{outcome: (if $r == "" then "ok" else "indeterminate" end),
+      reason: (if $r == "" then null else $r end),
+      exit_status: $rc, adapter_ran: $ran, skill_chain: $chain}' > "$arm_dir/run_status.json" || return 1
+  [ -z "$reason" ] || log "$id/$arm: indeterminate — $reason"
 
   drop_run_base
 
