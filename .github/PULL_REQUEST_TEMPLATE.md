@@ -34,7 +34,7 @@ Risk notes:
 
 ## Tests
 <!-- Paste exact commands and outcomes. At minimum, explain whether these ran:
-     shellcheck -S warning <the explicit file list in .github/workflows/static.yml>
+     shellcheck -S warning <the file globs in .github/workflows/static.yml>
      bash bin/check
      per-file: bash lib/tests/<name>.sh
 

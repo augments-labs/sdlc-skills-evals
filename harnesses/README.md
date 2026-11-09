@@ -15,9 +15,9 @@ these optional ones, each only where the harness truly offers it:
 for a multi-turn run, which no current runner makes; it must resume from structured session
 evidence, never a fresh session), `adapter_model` and
 `adapter_model_flags` (required only when a runner sets a non-empty
-`scenario_model_tier` — the current runners leave it empty; a runner refuses the run
-on an adapter without them rather than running the default model and
-calling it that tier), `adapter_ran`, `adapter_usage`,
+`scenario_model_tier` — the current runners leave it empty; a runner that
+sets a tier must refuse the run on an adapter without them rather than run
+the default model and call it that tier), `adapter_ran`, `adapter_usage`,
 `adapter_activation_flags`, `adapter_prompt_suffix`, `adapter_name`.
 
 Detection is structural, never a prose grep: an activation counts only
@@ -73,7 +73,7 @@ Every launcher carries four header fields:
 
 ## Where each parser's shape comes from
 
-`harnesses/README.md` is the capability and provenance table. Every row
+The table below is the capability and provenance record. Every row
 names the source and its version, the fixture's provenance, and the
 runtime status. A row whose runtime status is *unverified* is a parser
 that has never seen this CLI's own stream.
@@ -107,7 +107,8 @@ are unaffected.
 
 `plugin_dir` (the pinned plugin directory — adapters name the pin, never
 the lab root), `harness_home`, `errlog`, `timeout_s`, `maxturns`,
-`scenario_model_tier`. An unrunnable harness is refused before any launch
+`scenario_model_tier` (a capability tier; the name is historical, and the
+current runners leave it empty). An unrunnable harness is refused before any launch
 (exit 2) and is `indeterminate`, never `fail`.
 
 ## Auth

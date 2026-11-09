@@ -33,7 +33,8 @@ gets built?
    - `[check:file-contains <path> <regex>]`
    - `[check:file-not-contains <path> <regex>]` (an absent file fails)
    - `[check:command-succeeds <cmd...>]` (full shell, CWD `outputs/`)
-   - `[check:git-count <min>]` (files added or modified vs the seed commit)
+   - `[check:git-count <min>]` (files added, modified, or deleted vs the
+     seed commit, committed or not; a rename git detects counts once)
 
    An assertion without a `[check:` prefix is prose: `bin/grade` records it
    `needs_review` for you, or for the rubric grader under `--harness`. An

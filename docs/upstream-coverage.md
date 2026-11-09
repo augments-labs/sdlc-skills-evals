@@ -60,6 +60,12 @@ obligation. `bin/check` fails when a task in this table has no verdict.
 | E-13 per-plugin-release records | the successor drops the obligation, and the lab is still never versioned or released | removed | predecessor plan, task list; no commit — it never ran |
 | E-14 authoring, triage and harness guides, and the records-not-code rule | the guides stand; a user runbook and an offline acceptance record are added | extended | `973acde`; ledger 2026-09-18 `E-14` |
 
+Rows E-2, E-4, E-8 and E-10 describe the lab before the behavior runner, its
+scenarios and manifests, `bin/campaign`, `lib/verdict.sh` and
+`lib/prelude.sh` were retired by the agentskills.io alignment, and "46
+skills" in E-5 and E-7 is that pin's count; the current pin has 48. The rows
+stay as written: they are provenance.
+
 Work after the tasks themselves: the independent review fixes (`5b15240`),
 the pull-request feedback round (`2d15beb`) and the merge of the whole lab
 (`054080b`, the base this record starts from).

@@ -217,6 +217,13 @@ cp "$m2b/evals/yagni/evals.json" \
 run_gate "$m2b"
 expect_fail "a stale skill's eval definition is rejected" "names a skill the inventory does not hold"
 
+# 2c. a set under a retired phase directory is read by no runner
+m2c="$work/m2c"; copy_repo "$m2c"
+mkdir -p "$m2c/descriptions/common"
+cp "$m2c/descriptions/yagni.json" "$m2c/descriptions/common/yagni.json"
+run_gate "$m2c"
+expect_fail "a query set under a phase directory is rejected" "descriptions/common/yagni.json is not at"
+
 # 3. a duplicated query inside a set
 m3="$work/m3"; copy_repo "$m3"
 jq '.[1].query = .[0].query' "$m3/descriptions/yagni.json" > "$m3/descriptions/yagni.json.new"

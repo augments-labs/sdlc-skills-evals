@@ -4,8 +4,8 @@
 # isolated opencode config); referenced indirectly, never in this file.
 # Trigger eval — scores a DESCRIPTION, not a run.
 #
-# THIS IS AN OPTIMIZATION INSTRUMENT, NOT A TEST. It lives under
-# descriptions/ for that reason. It implements the standard's
+# THIS IS AN OPTIMIZATION INSTRUMENT, NOT A TEST: its query sets live under
+# descriptions/, apart from the evals. It implements the standard's
 # description-tuning loop: score, revise against TRAIN failures, repeat,
 # then select the iteration with the best VALIDATION rate. Both splits are
 # consumed by that loop, so neither is a held-out result and a red sheet
@@ -13,8 +13,9 @@
 #
 # ============================ THIS COSTS REAL MONEY ============================
 # Every query is a live session against your own harness account, and the default
-# is 20 queries x 3 runs = 60 CALLS PER SKILL. `--all` is 34 skills — roughly
-# 2,000 calls, hours of wall time, and enough usage to exhaust a plan's quota.
+# is 20 queries x 3 runs = 60 CALLS PER SKILL. `--all` runs every set under
+# DESCRIPTIONS_ROOT: thousands of calls, hours of wall time, and enough usage
+# to exhaust a plan's quota.
 #
 # Price any selection first:  --dry-run  prints the budget and calls nothing.
 # ==============================================================================
@@ -61,7 +62,8 @@ usage() {
   cat <<'EOF'
 bin/triggering — score a skill DESCRIPTION against its query set.
 
-  --harness NAME    opencode | claude-code | codex | kimi-code   (required)
+  --harness NAME    a harness adapter under harnesses/ whose header says
+                    runnable=yes (see harnesses/README.md)       (required)
   --skill NAME      the skill to score                            (or --all)
   --plugin P        path or git ref of the plugin tree under test
                     (default: the pinned upstream commit, a commit and
@@ -81,10 +83,12 @@ bin/triggering — score a skill DESCRIPTION against its query set.
   --help            this text
 
 COST: live sessions against your own harness account. One skill at the defaults
-is 20 queries x 3 runs = 60 calls; --all is ~2,000. Always --dry-run first.
+is 20 queries x 3 runs = 60 calls; --all is every set. Always --dry-run
+first: it prints the exact count.
 
 Exit codes: 0 every scored query passed · 1 at least one FAIL
             2 bad or missing arguments, or harness unrunnable (indeterminate)
+            3 jq or the harness CLI is unavailable
 
 Examples:
   bin/triggering --harness opencode --skill yagni --dry-run

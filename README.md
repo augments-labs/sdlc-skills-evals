@@ -45,11 +45,16 @@ Prerequisites:
   to your own account — the lab carries no key;
 - the plugin checkout at `SDLC_SKILLS_ROOT` (default `../sdlc-skills`)
   holding the pinned commit. `--plugin` takes a directory or a ref in that
-  checkout and defaults to the inventory's commit; whichever you use is
-  recorded with the run.
+  checkout and defaults to the inventory's commit. Every `--dry-run` prints
+  the pin it resolved; `bin/optimize-description` also records it in
+  `optimization.json`. `bin/evaluate` and `bin/triggering` record none, so
+  note the pin you priced when you start one of them.
 
 Price every live command with its own `--dry-run` first: it prints the pin,
-the selection, and the exact number of CLI calls, and launches nothing.
+the selection, and the number of CLI calls, and launches nothing. For
+`bin/triggering` the number is exact; for `bin/evaluate` and
+`bin/optimize-description` it is an upper bound, since an early stop or an
+indeterminate arm makes fewer calls.
 
 ### Evaluating a skill
 
@@ -98,16 +103,17 @@ bin/optimize-description --harness opencode --skill yagni --plugin ../sdlc-skill
 up to `--max-iterations` candidates under
 `workspaces/<campaign>/iteration-<i>/`, shows the reviser only the `train`
 failures, and writes `best-description.txt`, `optimization.json`, and
-`optimization.md`. `--apply` writes the winner into every `SKILL.md` copy
+`optimization.md`; its `outcome` is `selected`, or `indeterminate` (exit 2,
+nothing selected or applied) when no iteration has a validation rate.
+`--apply` writes the winner into every `SKILL.md` copy
 of the skill in the `--plugin` directory, which must be a writable
 checkout you review with `git diff` there; without `--apply` nothing
 outside `workspaces/` changes. A fresh holdout, written only after the
 selection, is scored once with `--split holdout`
 (`descriptions/holdout/README.md`).
 
-A record cites the plugin commit it ran against; quote its `results/` path
-when referring to it. The lab itself is never versioned, tagged, or
-released — a record pins `lab_commit`, which is the only lab identity
+A record is cited by its `results/` path. The lab itself is never
+versioned, tagged, or released, so a record's path is the only lab identity
 anything cites.
 
 ## Layout
@@ -140,4 +146,4 @@ anything cites.
 | `DOCS_ROOT` | guide root for the records-not-code rule | `docs/` under the lab root |
 | `WORKSPACES_ROOT` | where `bin/evaluate` and `bin/optimize-description` write iterations | `workspaces/` under the lab root |
 | `TMPDIR` | parent for per-run homes and workdirs | system default |
-| `LAB_CREDENTIAL_SEED` | directory of per-harness credential seeds (`<seed>/<harness>/`) copied into run homes | `~/.config/sdlc-skills-evals/credentials` for `bin/evaluate`; seeding is a quiet no-op when it is absent |
+| `LAB_CREDENTIAL_SEED` | directory of per-harness credential seeds (`<seed>/<harness>/`) copied into run homes | `~/.config/sdlc-skills-evals/credentials`; seeding is a quiet no-op when it is absent |

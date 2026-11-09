@@ -47,8 +47,8 @@ new ones); the shape check below is what keeps them honest between runs.
 ## Anyone can run this, and it spends your own quota
 
 **A 20-query set at the defaults is 60 CLI invocations** — each repeated 3 times —
-billed to whatever account your harness CLI is logged into, and `--all` is
-roughly 2,000. Nothing about it is free and nothing about it runs in CI.
+billed to whatever account your harness CLI is logged into, and `--all` runs
+every set. Nothing about it is free and nothing about it runs in CI.
 
 Always price a selection with `--dry-run` first; it prints the exact call count
 and calls nothing. Runtime varies with the harness, query, and stopping limit.
@@ -82,7 +82,9 @@ Practical consequences:
   reviser nothing else.
 - Keep the iteration with the best **validation** rate, which is very often not
   the last one you tried — `bin/optimize-description` writes that one to
-  `best-description.txt`.
+  `best-description.txt`. When no iteration has a validation rate (every
+  validation run inconclusive), it selects nothing, records the outcome as
+  `indeterminate`, and exits 2.
 - Report the real numbers, including inconclusive and failing ones, and say how
   many runs produced them.
 
@@ -104,10 +106,9 @@ quarter and a half of the set with the same positive-to-negative proportion
 as train, and no query shared between a set and its holdout. Ten of each is
 twenty queries: a set that cannot decide anything is not worth the money it
 costs to run. A main set may not carry a `holdout` entry — that role belongs
-to the holdout file, which is written after the selection. A set is only
-worth the money it costs to run if it can actually decide something: twenty
-happy-path positives will pass every eval they are ever run through and
-prove nothing.
+to the holdout file, which is written after the selection. Twenty
+happy-path positives decide nothing either: they pass every eval they are
+ever run through and prove nothing.
 
 **The near-misses are the point.** A description firing on its own happy-path
 opening proves nothing, because every description does that. The runner observes the subject anywhere in the bounded skill chain, including
