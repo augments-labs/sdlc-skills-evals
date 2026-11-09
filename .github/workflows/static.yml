@@ -4,30 +4,40 @@ on:
   push:
   pull_request:
 
+# A newer push to the same ref supersedes the run still going on it.
+concurrency:
+  group: static-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 permissions:
   contents: read
 
+# Offline only: no secret, no API key, no agent CLI, no live launcher. The
+# job id `static` is the status check branch protection on main requires.
 jobs:
   static:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
-      - name: shellcheck runners, seams, launchers, fixtures
-        # Explicit file list: globs would lint READMEs (SC2148). -S warning:
-        # infos (sourced-library following, trap reachability) are inherent
-        # to the sourced-runner design and documented at each site.
-        run: >
-          shellcheck -S warning
-          bin/behavior bin/campaign bin/check bin/triggering
-          bin/grade bin/benchmark bin/report
-          lib/*.sh lib/tests/*.sh lib/tests/fake-cli/*.sh
-          harnesses/*.sh fixtures/*.sh
+      - name: shellcheck every runner, library, test, adapter and fixture
+        # -S warning: infos (sourced-library following, trap reachability) are
+        # inherent to the sourced-runner design and documented at each site.
+        # bin/ holds executable bash scripts only (bin/check enforces it), so
+        # the bin/* glob lints no README.
+        run: shellcheck -S warning bin/* lib/*.sh lib/tests/*.sh lib/tests/fake-cli/*.sh harnesses/*.sh fixtures/*.sh
       - name: static gate
         run: bash bin/check
-      - name: offline seam tests
+      - name: offline suites under the live-CLI tripwire
+        # Runs every other lib/tests/*.sh suite with lib/tests/tripwire/ first
+        # on PATH, and fails if any suite reaches a real agent CLI.
+        run: bash lib/tests/ci-static.sh
+      - name: the suites leave the tree clean
+        run: test -z "$(git status --porcelain)"
+      - name: static gate on committed state alone
+        # No root override inherited from the runner: bin/check reads only
+        # what HEAD holds.
         run: |
-          for t in lib/tests/*.sh; do
-            [ -e "$t" ] || continue
-            bash "$t" || { echo "FAIL $t"; exit 1; }
-          done
+          d="$(mktemp -d)"
+          git archive HEAD | tar -x -C "$d"
+          cd "$d" && env -u SDLC_SKILLS_ROOT -u INVENTORY_PATH -u DOCS_ROOT -u DESCRIPTIONS_ROOT -u EVALS_ROOT bash bin/check
