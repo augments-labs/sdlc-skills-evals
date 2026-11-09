@@ -77,6 +77,10 @@ plug="\$1"; q="\$2"
 d="\$(sed -n 's/^description: *//p' "\$plug/skills/common/probe/SKILL.md" | head -1 | tr -d '"')"
 o="\$(sed -n 's/^description: *//p' "\$plug/plugins/sdlc-skills/skills/probe/SKILL.md" | head -1 | tr -d '"')"
 printf '%s|%s\n' "\$d" "\$o" >> "$tree_log"
+# DEAD=validation|all: those runs read as a provider refusal (INCONCLUSIVE)
+case "\${DEAD:-}:\$q" in validation:*" check "*|all:*) echo "usage limit exceeded"; exit 0;; esac
+# LOCK_DIR: the workspace turns unwritable while the round is scored
+[ -z "\${LOCK_DIR:-}" ] || chmod a-w "\$LOCK_DIR"
 w="\${q%% *}"
 case " \$d " in *" \$w "*) echo probe;; esac
 HOOK
@@ -96,6 +100,7 @@ case "${REVISER_MODE:-file}" in
   stdout) printf '%s\n' "$cand";;
   raw) cat "$CANDIDATE_RAW" > "$workdir/candidate-description.txt";;
   silent) exit 1;;
+  stdout-fail) printf '%s\n' "$cand"; exit 3;;
 esac
 HOOK
 chmod +x "$rev_hook"
@@ -361,6 +366,19 @@ mkdir -p "$work/silent"; : > "$work/silent/candidates"
   && jq -e '.stop_reason | length > 0' "$work/silent/ws/c6/optimization.json" >/dev/null 2>&1 \
   && ok "a silent reviser stops the loop with a reason" \
   || bad "a silent reviser stops the loop with a reason"
+jq -e '.stop_reason | test("exited 1")' "$work/silent/ws/c6/optimization.json" >/dev/null 2>&1 \
+  && ok "the stop reason names the reviser's exit code" \
+  || bad "the stop reason names the reviser's exit code (got $(jq -c '.stop_reason' "$work/silent/ws/c6/optimization.json" 2>/dev/null))"
+
+# a reviser that failed is not read from its stream, whatever it printed
+mkdir -p "$work/failed"
+printf '%s\n' "covers alpha beta gamma" > "$work/failed/candidates"
+( export TMPDIR="$work/outer-tmp" REVISER_MODE=stdout-fail
+  run_opt failed --plugin "$plug_commit" --max-iterations 3 --campaign c6b )
+[ ! -e "$work/failed/ws/c6b/iteration-2" ] \
+  && jq -e '.stop_reason | test("exited 3")' "$work/failed/ws/c6b/optimization.json" >/dev/null 2>&1 \
+  && ok "a failed reviser's stream is never taken as a candidate" \
+  || bad "a failed reviser's stream is never taken as a candidate"
 
 # --- --apply -----------------------------------------------------------------
 apply_plug="$work/apply-plug"
@@ -412,7 +430,161 @@ chmod -R u+w "$ro_plug"
   && ok "--apply on an unwritable directory exits 2 before any launch" \
   || bad "--apply on an unwritable directory exits 2 before any launch (rc $(cat "$work/apply-ro/rc"))"
 
+# --apply takes the selected iteration, not the last one
+g1_plug="$work/g1-plug"; cp -r "$plug" "$g1_plug"
+mkdir -p "$work/g1"
+printf '%s\n' "covers alpha beta delta epsilon" "covers alpha beta gamma zeta" > "$work/g1/candidates"
+( export TMPDIR="$work/outer-tmp"
+  run_opt g1 --plugin "$g1_plug" --max-iterations 5 --campaign c11 --apply
+  printf '%s\n' "$?" > "$work/g1/rc" )
+[ "$(cat "$work/g1/rc")" -eq 0 ] \
+  && grep -qxF 'description: "covers alpha beta delta epsilon"' "$g1_plug/skills/common/probe/SKILL.md" \
+  && grep -qxF 'description: "covers alpha beta delta epsilon"' "$g1_plug/plugins/sdlc-skills/skills/probe/SKILL.md" \
+  && ok "--apply writes an earlier winning iteration, not the last" \
+  || bad "--apply writes an earlier winning iteration, not the last (rc $(cat "$work/g1/rc"))"
+
+# --- the cap and the tie-breaks ----------------------------------------------
+# it-1 "covers alpha" train 2/4; it-2 "covers alpha beta" and it-3 "covers
+# beta alpha" both train 3/4, all three validation 1/3: train beats it-1,
+# then the earlier of two equal lengths wins
+mkdir -p "$work/cap"
+printf '%s\n' "covers alpha beta" "covers beta alpha" "never used" > "$work/cap/candidates"
+( export TMPDIR="$work/outer-tmp"
+  run_opt cap --plugin "$plug_commit" --max-iterations 3 --campaign c12
+  printf '%s\n' "$?" > "$work/cap/rc" )
+cj="$work/cap/ws/c12/optimization.json"
+[ "$(cat "$work/cap/rc")" -eq 0 ] && [ -e "$work/cap/ws/c12/iteration-3" ] \
+  && [ ! -e "$work/cap/ws/c12/iteration-4" ] && [ "$(wc -l < "$work/cap/calls")" -eq 2 ] \
+  && jq -e '(.iterations | length) == 3 and .stop_reason == "reached --max-iterations 3"' "$cj" >/dev/null 2>&1 \
+  && ok "--max-iterations caps the rounds at K, with K-1 reviser calls" \
+  || bad "--max-iterations caps the rounds at K, with K-1 reviser calls ($(jq -c '.stop_reason' "$cj" 2>/dev/null))"
+jq -e '.best_iteration == 2' "$cj" >/dev/null 2>&1 \
+  && ok "a validation tie goes to the higher train rate, then the earlier iteration" \
+  || bad "a validation tie goes to the higher train rate, then the earlier iteration (got $(jq -c '.best_iteration' "$cj" 2>/dev/null))"
+# it-2 "covers alpha beta xx" and it-3 "covers alpha beta" score alike:
+# the shorter wins, though it came later
+mkdir -p "$work/short"
+printf '%s\n' "covers alpha beta xx" "covers alpha beta" > "$work/short/candidates"
+( export TMPDIR="$work/outer-tmp"
+  run_opt short --plugin "$plug_commit" --max-iterations 3 --campaign c13 )
+jq -e '.best_iteration == 3' "$work/short/ws/c13/optimization.json" >/dev/null 2>&1 \
+  && ok "a tie on both rates goes to the shorter description" \
+  || bad "a tie on both rates goes to the shorter description (got $(jq -c '.best_iteration' "$work/short/ws/c13/optimization.json" 2>/dev/null))"
+
+# --- no validation signal: nothing is selected or applied --------------------
+nv_plug="$work/nv-plug"; cp -r "$plug" "$nv_plug"
+mkdir -p "$work/nv"
+printf '%s\n' "covers alpha beta" > "$work/nv/candidates"
+( export TMPDIR="$work/outer-tmp" DEAD=validation
+  run_opt nv --plugin "$nv_plug" --max-iterations 2 --campaign c14 --apply
+  printf '%s\n' "$?" > "$work/nv/rc" )
+nj="$work/nv/ws/c14/optimization.json"
+[ "$(cat "$work/nv/rc")" -eq 2 ] \
+  && jq -e '.outcome == "indeterminate" and .best_iteration == null and .applied == false
+            and (.iterations | length) == 2' "$nj" >/dev/null 2>&1 \
+  && [ ! -e "$work/nv/ws/c14/best-description.txt" ] \
+  && cmp -s "$plug/skills/common/probe/SKILL.md" "$nv_plug/skills/common/probe/SKILL.md" \
+  && ok "no validation signal selects nothing, applies nothing, and exits 2" \
+  || bad "no validation signal selects nothing, applies nothing, and exits 2 (rc $(cat "$work/nv/rc"); $(jq -c '{outcome,best_iteration,applied}' "$nj" 2>/dev/null))"
+mkdir -p "$work/dead"; : > "$work/dead/candidates"
+( export TMPDIR="$work/outer-tmp" DEAD=all
+  run_opt dead --plugin "$plug_commit" --max-iterations 3 --campaign c15
+  printf '%s\n' "$?" > "$work/dead/rc" )
+[ "$(cat "$work/dead/rc")" -eq 2 ] && [ ! -s "$work/dead/calls" ] \
+  && jq -e '(.stop_reason | test("train scored nothing")) and .outcome == "indeterminate"' \
+       "$work/dead/ws/c15/optimization.json" >/dev/null 2>&1 \
+  && ok "a round with every run refused stops, unselected, with no reviser call" \
+  || bad "a round with every run refused stops, unselected, with no reviser call (rc $(cat "$work/dead/rc"))"
+
+# --- the records are written before --apply touches the plugin ---------------
+lk_plug="$work/lk-plug"; cp -r "$plug" "$lk_plug"
+mkdir -p "$work/lk"; : > "$work/lk/candidates"
+( export TMPDIR="$work/outer-tmp" LOCK_DIR="$work/lk/ws/c16"
+  run_opt lk --plugin "$lk_plug" --max-iterations 1 --campaign c16 --apply
+  printf '%s\n' "$?" > "$work/lk/rc" )
+chmod u+w "$work/lk/ws/c16" 2>/dev/null
+[ "$(cat "$work/lk/rc")" -eq 2 ] \
+  && cmp -s "$plug/skills/common/probe/SKILL.md" "$lk_plug/skills/common/probe/SKILL.md" \
+  && ok "a record that cannot be written exits 2 before --apply" \
+  || bad "a record that cannot be written exits 2 before --apply (rc $(cat "$work/lk/rc"))"
+
+# --- the whole description key: folded, literal, plain, unquoted -------------
+body_tail() { printf '\n# Probe\n\nPROBE-BODY-MARKER: route here when the task names one of the words above.\n'; }
+key_case() { # $1 tag $2 label $3 expected description line; frontmatter lines on stdin
+  local p="$work/$1-plug" fm
+  fm="$(cat)"
+  mkdir -p "$p/skills/common/probe" "$p/plugins/sdlc-skills/skills/probe" "$work/$1"
+  { printf -- '---\nname: probe\n%s\nlicense: MIT\n---\n' "$fm"; body_tail; } > "$p/skills/common/probe/SKILL.md"
+  cp "$p/skills/common/probe/SKILL.md" "$p/plugins/sdlc-skills/skills/probe/SKILL.md"
+  : > "$work/$1/candidates"
+  ( export TMPDIR="$work/outer-tmp"
+    run_opt "$1" --plugin "$p" --max-iterations 1 --campaign "c-$1" --apply
+    printf '%s\n' "$?" > "$work/$1/rc" )
+  local want="$work/$1/want"
+  { printf -- '---\nname: probe\n%s\nlicense: MIT\n---\n' "$3"; body_tail; } > "$want"
+  if [ "$(cat "$work/$1/rc")" -eq 0 ] && cmp -s "$want" "$p/skills/common/probe/SKILL.md" \
+     && cmp -s "$want" "$p/plugins/sdlc-skills/skills/probe/SKILL.md"; then
+    ok "$2"
+  else
+    bad "$2 (rc $(cat "$work/$1/rc"); got: $(sed -n '2,6p' "$p/skills/common/probe/SKILL.md" | tr '\n' '|'))"
+  fi
+}
+key_case k-folded "a folded description is read whole and replaced whole" \
+  'description: "covers alpha beta"' <<'FM'
+description: >-
+  covers alpha
+  beta
+FM
+[ "$(cat "$work/k-folded/ws/c-k-folded/iteration-1/description.txt" 2>/dev/null)" = "covers alpha beta" ] \
+  && ok "a folded description is scored as its joined text" \
+  || bad "a folded description is scored as its joined text"
+key_case k-literal "a literal block description keeps its line break, escaped" \
+  'description: "covers alpha\nbeta"' <<'FM'
+description: |
+  covers alpha
+  beta
+FM
+key_case k-plain "a plain multi-line description is read whole and replaced whole" \
+  'description: "covers alpha beta"' <<'FM'
+description: covers alpha
+  beta
+FM
+key_case k-unquoted "an unquoted one-line description is replaced quoted" \
+  'description: "covers alpha"' <<'FM'
+description: covers alpha
+FM
+
+# a copy with no description key is refused before any launch
+nk="$work/nk-plug"
+mkdir -p "$nk/skills/common/probe" "$nk/plugins/sdlc-skills/skills/probe" "$work/nk"
+skill_md "covers alpha" > "$nk/skills/common/probe/SKILL.md"
+{ printf -- '---\nname: probe\n---\n'; body_tail; } > "$nk/plugins/sdlc-skills/skills/probe/SKILL.md"
+: > "$work/nk/candidates"
+( export TMPDIR="$work/outer-tmp"
+  run_opt nk --plugin "$nk" --max-iterations 1 --campaign c-nk
+  printf '%s\n' "$?" > "$work/nk/rc" )
+[ "$(cat "$work/nk/rc")" -eq 2 ] && ! grep -q '^activation' "$work/nk/launch.log" 2>/dev/null \
+  && ok "a SKILL.md copy with no description key exits 2 before any launch" \
+  || bad "a SKILL.md copy with no description key exits 2 before any launch (rc $(cat "$work/nk/rc"))"
+
 # --- refusals ----------------------------------------------------------------
+dry() { HOME="$outer_home" DESCRIPTIONS_ROOT="$desc" SDLC_SKILLS_ROOT="$plug" TRIPWIRE_LOG="$own_trip" \
+  "$opt" --harness fake --harness-dir "$fake_h" --plugin "$plug_commit" --dry-run "$@" 2>&1; }
+out="$(dry --skill probe --max-iterations 00)"; rc=$?
+[ "$rc" -eq 2 ] && ok "--max-iterations 00 is refused" || bad "--max-iterations 00 is refused (rc $rc: $out)"
+# 3 x 7 x 8 + 2: 08 is not octal here
+out="$(dry --skill probe --max-iterations 03 --runs 08)"; rc=$?
+[ "$rc" -eq 0 ] && printf '%s' "$out" | grep -qE '(^|[^0-9])170 calls' \
+  && ok "a zero-padded count is read as its decimal value" \
+  || bad "a zero-padded count is read as its decimal value (rc $rc: $out)"
+cp "$desc/probe.json" "$work/probe.json"; mkdir -p "$desc/sub"; cp "$desc/probe.json" "$desc/sub/x.json"
+for s in ../probe sub/x . ..; do
+  out="$(dry --skill "$s")"; rc=$?
+  [ "$rc" -eq 2 ] && printf '%s' "$out" | grep -q 'is a name' \
+    && ok "--skill '$s' is refused as a path" || bad "--skill '$s' is refused as a path (rc $rc: $out)"
+done
+rm -rf "$work/probe.json" "$desc/sub"
+
 HOME="$outer_home" DESCRIPTIONS_ROOT="$desc" "$opt" --harness fake --harness-dir "$fake_h" \
   --skill nosuch --plugin "$plug" --dry-run >/dev/null 2>&1
 [ "$?" -eq 2 ] && ok "a skill with no query set exits 2" || bad "a skill with no query set exits 2"

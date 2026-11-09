@@ -11,12 +11,17 @@
 # not the last one:
 #
 #   iteration i:  score the staged description (train + validation)
-#                 stop when train has no failure, or at --max-iterations
+#                 stop when train has no failure, train scored nothing
+#                 (every run inconclusive), or at --max-iterations
 #                 else ask the reviser for a candidate built from the
 #                 skill body, the current description and the train
-#                 failures ONLY, and stage it for iteration i+1
+#                 failures ONLY, and stage it for iteration i+1; stop
+#                 when the reviser returns no candidate or the candidate
+#                 is rejected
 #   select:       best validation rate, then best train rate, then the
-#                 shorter description, then the earlier iteration
+#                 shorter description, then the earlier iteration; with
+#                 no validation rate anywhere, nothing is selected and
+#                 the outcome is indeterminate (exit 2)
 #
 # The reviser never sees a validation query, verdict or count: tuning on
 # validation would turn it into a second training set. Both splits are
@@ -24,10 +29,10 @@
 #
 # ============================ THIS COSTS REAL MONEY ============================
 # Every scored query is a live session against your own harness account, and
-# so is every reviser call. One skill at the defaults is up to
-# 5 iterations x 20 queries x 3 runs + 4 reviser calls = 304 CALLS.
+# so is every reviser call: at most K iterations x queries x runs scoring
+# calls plus K-1 reviser calls, and the query count differs per skill.
 #
-# Price it first:  --dry-run  prints the budget and calls nothing.
+# Price it first:  --dry-run  prints the exact budget and calls nothing.
 # ==============================================================================
 #
 # The pinned plugin is never written: a ref is extracted with `git archive`,
@@ -79,11 +84,14 @@ Writes, under workspaces/<campaign>/:
 
 COST: live sessions against your own harness account. The budget is at most
 K x (train + validation queries) x runs scoring calls plus K-1 reviser calls;
-at the defaults one skill is up to 304 calls. Always --dry-run first.
+--dry-run prints that number for the skill. Always --dry-run first.
 
-Exit codes: 0 the loop finished (its stop reason is recorded)
+Exit codes: 0 the loop finished and selected an iteration (its stop
+              reason is recorded)
             2 bad or missing arguments, no query set, harness unrunnable,
-              or a scoring round that could not run
+              a scoring round that could not run, a record that could not
+              be written, or no iteration with a validation rate (the
+              records are written; nothing is selected or applied)
             3 the harness CLI is unavailable
 
 Examples:
@@ -116,9 +124,15 @@ done
 [ -n "$harness" ] || { echo "needs --harness NAME" >&2; exit 2; }
 [ -n "$skill" ] || { echo "needs --skill NAME" >&2; exit 2; }
 command -v jq >/dev/null 2>&1 || { echo "needs \`jq\`" >&2; exit 3; }
-for n in max_iter runs jobs timeout_s maxturns; do
-  case "${!n}" in ''|*[!0-9]*|0) echo "--${n//_/-} needs a positive integer" >&2; exit 2;; esac
+# Counts are decimal whatever their leading zeros ("08" is not octal here),
+# and at least 1 ("00" is zero).
+for n in max_iter:max-iterations runs:runs jobs:jobs timeout_s:timeout maxturns:max-turns; do
+  var="${n%%:*}"
+  case "${!var}" in ''|*[!0-9]*) echo "--${n#*:} needs a positive integer" >&2; exit 2;; esac
+  printf -v "$var" '%d' "$((10#${!var}))"
+  [ "${!var}" -ge 1 ] || { echo "--${n#*:} needs a positive integer" >&2; exit 2; }
 done
+case "$skill" in */*|.|..) echo "--skill is a name, not a path" >&2; exit 2;; esac
 case "$campaign" in */*|.|..) echo "--campaign is a name, not a path" >&2; exit 2;; esac
 [ -n "$harnessdir_override" ] && harnessdir="$harnessdir_override"
 
@@ -157,11 +171,72 @@ skill_copies() { # $1 tree — prints each copy's path
   done
 }
 
+# The frontmatter `description:` key is the line itself plus every
+# continuation line indented under it (a folded `>`, a literal `|`, or a
+# plain scalar wrapped over several lines); blank lines inside it belong to
+# it only when an indented line follows.
+read_description() { # $1 SKILL.md — prints the description; returns 1 with no key
+  local v
+  v="$(awk '
+    NR == 1 { if ($0 != "---") exit; next }
+    $0 == "---" { exit }
+    inkey && /^[ \t]*$/ { held++; next }
+    inkey && /^[ \t]/ { while (held > 0) { n++; lines[n] = ""; held-- } n++; lines[n] = $0; next }
+    inkey { exit }
+    /^description:/ { first = $0; sub(/^description:[ \t]*/, "", first); inkey = 1; found = 1 }
+    END {
+      if (!found) exit 1
+      if (first ~ /^[>|][-+0-9]*[ \t]*(#.*)?$/) {
+        style = substr(first, 1, 1); ind = -1
+        for (i = 1; i <= n; i++) if (lines[i] != "") { match(lines[i], /^[ \t]*/); ind = RLENGTH; break }
+        out = ""
+        for (i = 1; i <= n; i++) {
+          l = (lines[i] == "") ? "" : substr(lines[i], ind + 1)
+          if (style == "|") out = out (i > 1 ? "\n" : "") l
+          else if (l == "") out = out "\n"
+          else out = out ((out != "" && out !~ /\n$/) ? " " : "") l
+        }
+        printf "block:%s", out
+      } else {
+        out = first
+        for (i = 1; i <= n; i++) { l = lines[i]; sub(/^[ \t]+/, "", l); out = out (l == "" ? "\n" : (out ~ /\n$/ ? "" : " ") l) }
+        printf "flow:%s", out
+      }
+    }' "$1")" || return 1
+  case "$v" in
+    block:*) printf '%s\n' "${v#block:}" ;;
+    flow:\"*) printf '%s' "${v#flow:}" | jq -r . 2>/dev/null ;;
+    flow:\'*\') v="${v#flow:\'}"; v="${v%\'}"; printf '%s\n' "${v//\'\'/\'}" ;;
+    *) printf '%s\n' "${v#flow:}" ;;
+  esac
+}
+
+write_description() { # $1 description $2.. SKILL.md copies — replaces the whole key in place
+  local line f tmp
+  line="description: $(jq -n --arg d "$1" '$d')"
+  for f in "${@:2}"; do
+    tmp="$(mktemp)" || return 1
+    LINE="$line" awk '
+      NR == 1 { fm = ($0 == "---"); print; next }
+      skip && $0 != "---" && /^[ \t]*$/ { held = held $0 "\n"; next }
+      skip && /^[ \t]/ { held = ""; next }
+      skip { skip = 0; printf "%s", held; held = "" }
+      fm && $0 == "---" { fm = 0 }
+      fm && !done && /^description:/ { print ENVIRON["LINE"]; done = 1; skip = 1; next }
+      { print }
+      END { exit !done }' "$f" > "$tmp" || { rm -f "$tmp"; return 1; }
+    # cat > keeps the file's own inode and mode
+    cat "$tmp" > "$f" || { rm -f "$tmp"; return 1; }
+    rm -f "$tmp"
+  done
+}
+
 if [ -n "$apply" ]; then
   mapfile -t apply_copies < <(skill_copies "$plugin")
   [ "${#apply_copies[@]}" -gt 0 ] || { echo "--apply: no SKILL.md for $skill under $plugin" >&2; exit 2; }
   for f in "${apply_copies[@]}"; do
     [ -w "$f" ] || { echo "--apply: not writable: $f" >&2; exit 2; }
+    read_description "$f" >/dev/null || { echo "--apply: no description key in $f" >&2; exit 2; }
   done
 fi
 
@@ -238,38 +313,16 @@ fi
 mapfile -t copies < <(skill_copies "$stage")
 [ "${#copies[@]}" -gt 0 ] || { echo "no SKILL.md for $skill in the plugin tree" >&2; exit 2; }
 
-read_description() { # $1 SKILL.md — prints the frontmatter description
-  local v
-  v="$(awk 'NR == 1 && $0 != "---" { exit } NR > 1 && $0 == "---" { exit }
-            NR > 1 && /^description:/ { sub(/^description:[ \t]*/, ""); print; exit }' "$1")"
-  case "$v" in
-    \"*) printf '%s' "$v" | jq -r . 2>/dev/null ;;
-    \'*\') v="${v#\'}"; v="${v%\'}"; printf '%s\n' "${v//\'\'/\'}" ;;
-    *) printf '%s\n' "$v" ;;
-  esac
-}
-
-write_description() { # $1 description $2.. SKILL.md copies — rewrites the line in place
-  local line f tmp
-  line="description: $(jq -n --arg d "$1" '$d')"
-  for f in "${@:2}"; do
-    tmp="$(mktemp)" || return 1
-    LINE="$line" awk 'NR == 1 { fm = ($0 == "---") }
-         fm && NR > 1 && $0 == "---" { fm = 0 }
-         fm && !done && /^description:/ { print ENVIRON["LINE"]; done = 1; next }
-         { print }' "$f" > "$tmp" || { rm -f "$tmp"; return 1; }
-    # cat > keeps the file's own inode and mode
-    cat "$tmp" > "$f" || { rm -f "$tmp"; return 1; }
-    rm -f "$tmp"
-  done
-}
-
 skill_body() { # $1 SKILL.md — everything after the frontmatter
   awk 'NR == 1 && $0 == "---" { fm = 1; next } fm && $0 == "---" { fm = 0; next } !fm { print }' "$1"
 }
 
+# Every copy is rewritten per candidate, so every copy must carry the key.
+for f in "${copies[@]}"; do
+  read_description "$f" >/dev/null || { echo "no description key in ${f#"$stage/"}" >&2; exit 2; }
+done
 current="$(read_description "${copies[0]}")"
-[ -n "$current" ] || { echo "no description in ${copies[0]}" >&2; exit 2; }
+[ -n "$current" ] || { echo "no description in ${copies[0]#"$stage/"}" >&2; exit 2; }
 body="$(skill_body "${copies[0]}")"
 
 # A candidate the loop will stage, or the reason it will not.
@@ -323,7 +376,9 @@ EOF
 
 run_reviser() { # $1 iteration dir — writes $1/candidate.txt, returns 1 on none
   # Runs in this shell, never in $(...): the EXIT trap must see reviser_base.
+  # Sets reviser_rc to the session's exit code.
   local it="$1" cand="" answered=""
+  reviser_rc=0
   reviser_base="$(TMPDIR="$_outer_tmpdir" lab_run_dir "reviser-$skill")" || return 1
   mkdir -p "$reviser_base/work"
   reviser_prompt "$it" > "$reviser_base/prompt.txt"
@@ -339,12 +394,14 @@ run_reviser() { # $1 iteration dir — writes $1/candidate.txt, returns 1 on non
       && lab_seed_credentials "$reviser_base" "$harness" \
       && adapter_install "" \
       && adapter_run_behavioral "$reviser_base/work" "$reviser_base/prompt.txt" "$reviser_base/stream"
-  ) || echo "reviser session exited non-zero" >> "$errlog"
+  ) || reviser_rc=$?
+  [ "$reviser_rc" -eq 0 ] || echo "reviser session exited $reviser_rc" >> "$errlog"
   # The file the prompt names is the answer, even when it is empty (an
-  # empty candidate is refused as one); the stream is read only without it.
+  # empty candidate is refused as one); the stream is read only without it,
+  # and only from a session that exited 0: a failed one may hold error text.
   if [ -f "$reviser_base/work/candidate-description.txt" ]; then
     cand="$(cat "$reviser_base/work/candidate-description.txt")"; answered=1
-  elif [ -s "$reviser_base/stream" ]; then
+  elif [ "$reviser_rc" -eq 0 ] && [ -s "$reviser_base/stream" ]; then
     cand="$(lab_extract_stream_text "$reviser_base/stream" "$harness" 2>/dev/null)" && answered=1
   fi
   TMPDIR="$_outer_tmpdir" lab_home_cleanup "$reviser_base"
@@ -395,7 +452,11 @@ while :; do
   if [ "$i" -ge "$max_iter" ]; then stop_reason="reached --max-iterations $max_iter"; break; fi
 
   log "iteration $i: revising against $t_fail train failure(s)"
-  if ! run_reviser "$it"; then stop_reason="the reviser returned no candidate"; break; fi
+  if ! run_reviser "$it"; then
+    if [ "$reviser_rc" -ne 0 ]; then stop_reason="the reviser session exited $reviser_rc with no candidate"
+    else stop_reason="the reviser returned no candidate"; fi
+    break
+  fi
   cand="$(trim "$(cat "$it/candidate.txt")")"
   if ! why="$(check_candidate "$cand")"; then stop_reason="candidate rejected: $why"; break; fi
   write_description "$cand" "${copies[@]}" || { echo "cannot stage the candidate" >&2; exit 2; }
@@ -403,42 +464,68 @@ while :; do
   i=$((i + 1))
 done
 
-# Selection: validation decides; train, brevity and order break ties.
+# Selection: validation decides; train, brevity and order break ties. With
+# no validation rate anywhere there is no signal to select on: nothing is
+# chosen and nothing applied.
 best="$(jq '
-  map(. + {v: (.validation.pass_rate // -1), t: (.train.pass_rate // -1), n: (.description | length)})
-  | sort_by(-.v, -.t, .n, .iteration) | .[0] | .iteration' <<<"$iterations_json")"
-best_desc="$(jq -r --argjson b "$best" '.[] | select(.iteration == $b) | .description' <<<"$iterations_json")"
-printf '%s\n' "$best_desc" > "$ws/best-description.txt"
-
-applied="false"
-if [ -n "$apply" ]; then
-  write_description "$best_desc" "${apply_copies[@]}" || { echo "--apply: cannot write $plugin" >&2; exit 2; }
-  applied="true"
+  map(select(.validation.pass_rate != null)
+      | . + {v: .validation.pass_rate, t: (.train.pass_rate // -1), n: (.description | length)})
+  | sort_by(-.v, -.t, .n, .iteration) | .[0].iteration' <<<"$iterations_json")"
+if [ "$best" = null ]; then
+  outcome="indeterminate"; best_desc=""
+  stop_reason="$stop_reason; no iteration has a validation rate, so none is selected"
+else
+  outcome="selected"
+  best_desc="$(jq -r --argjson b "$best" '.[] | select(.iteration == $b) | .description' <<<"$iterations_json")"
 fi
 
-jq -n --arg skill "$skill" --arg harness "$harness" --arg plugin "$plugin" \
-      --arg plugin_tree "$plugin_tree" --arg campaign "$campaign" \
-      --argjson iterations "$iterations_json" --argjson best "$best" \
-      --arg best_desc "$best_desc" --arg stop "$stop_reason" --argjson applied "$applied" \
-      --argjson runs "$runs" --argjson max_iter "$max_iter" \
-  '{skill: $skill, harness: $harness, plugin: $plugin, plugin_tree: $plugin_tree,
-    campaign: $campaign, runs: $runs, max_iterations: $max_iter,
-    iterations: $iterations, best_iteration: $best, best_description: $best_desc,
-    stop_reason: $stop, applied: $applied}' > "$ws/optimization.json"
+# The records come first and must all land: --apply never writes the
+# operator's tree for a selection that left no record.
+write_records() { # $1 applied — true|false
+  if [ "$outcome" = selected ]; then
+    printf '%s\n' "$best_desc" > "$ws/best-description.txt" || return 1
+  fi
+  jq -n --arg skill "$skill" --arg harness "$harness" --arg plugin "$plugin" \
+        --arg plugin_tree "$plugin_tree" --arg campaign "$campaign" \
+        --argjson iterations "$iterations_json" --argjson best "$best" \
+        --arg best_desc "$best_desc" --arg stop "$stop_reason" --argjson applied "$1" \
+        --argjson runs "$runs" --argjson max_iter "$max_iter" --arg outcome "$outcome" \
+    '{skill: $skill, harness: $harness, plugin: $plugin, plugin_tree: $plugin_tree,
+      campaign: $campaign, runs: $runs, max_iterations: $max_iter,
+      iterations: $iterations, outcome: $outcome, best_iteration: $best,
+      best_description: (if $best == null then null else $best_desc end),
+      stop_reason: $stop, applied: $applied}' > "$ws/optimization.json" || return 1
+  {
+    printf '# Description optimization: %s on %s\n\n' "$skill" "$harness"
+    printf 'Plugin: `%s` · runs per query: %s · stop: %s\n\n' "$plugin_tree" "$runs" "$stop_reason"
+    printf '| iteration | train | validation | description |\n|---|---|---|---|\n'
+    jq -r '.[] | def r: if . == null then "—" else "\(. * 100 | round)%" end;
+      "| \(.iteration) | \(.train.passed)/\(.train.passed + .train.failed) (\(.train.pass_rate | r)) | \(.validation.passed)/\(.validation.passed + .validation.failed) (\(.validation.pass_rate | r)) | \(.description | gsub("\\|"; "\\\\|")) |"' \
+      <<<"$iterations_json"
+    if [ "$outcome" = selected ]; then
+      printf '\nBest: iteration %s (highest validation pass rate). Both splits were\n' "$best"
+      printf 'consumed by this loop, so neither rate is a held-out result.\n'
+    else
+      printf '\nNo iteration was selected: validation scored nothing (every run\n'
+      printf 'inconclusive), so the outcome is indeterminate.\n'
+    fi
+  } > "$ws/optimization.md" || return 1
+}
+write_records false || { echo "cannot write the records under $ws" >&2; exit 2; }
 
-{
-  printf '# Description optimization: %s on %s\n\n' "$skill" "$harness"
-  printf 'Plugin: `%s` · runs per query: %s · stop: %s\n\n' "$plugin_tree" "$runs" "$stop_reason"
-  printf '| iteration | train | validation | description |\n|---|---|---|---|\n'
-  jq -r '.[] | def r: if . == null then "—" else "\(. * 100 | round)%" end;
-    "| \(.iteration) | \(.train.passed)/\(.train.passed + .train.failed) (\(.train.pass_rate | r)) | \(.validation.passed)/\(.validation.passed + .validation.failed) (\(.validation.pass_rate | r)) | \(.description | gsub("\\|"; "\\\\|")) |"' \
-    <<<"$iterations_json"
-  printf '\nBest: iteration %s (highest validation pass rate). Both splits were\n' "$best"
-  printf 'consumed by this loop, so neither rate is a held-out result.\n'
-} > "$ws/optimization.md"
+applied="false"
+if [ -n "$apply" ] && [ "$outcome" = selected ]; then
+  write_description "$best_desc" "${apply_copies[@]}" || { echo "--apply: cannot write $plugin" >&2; exit 2; }
+  applied="true"
+  write_records true || { echo "--apply wrote $plugin, but cannot record it under $ws" >&2; exit 2; }
+fi
 
 echo "stop     : $stop_reason"
-echo "best     : iteration $best — $best_desc"
 echo "wrote    : $ws/optimization.json"
+if [ "$outcome" != selected ]; then
+  echo "outcome  : indeterminate — no validation signal; nothing selected${apply:+ or applied}" >&2
+  exit 2
+fi
+echo "best     : iteration $best — $best_desc"
 [ "$applied" = true ] && echo "applied  : $plugin"
 exit 0
