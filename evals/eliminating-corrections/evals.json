@@ -1,0 +1,24 @@
+{
+  "skill_name": "eliminating-corrections",
+  "pending_first_run": true,
+  "evals": [
+    {
+      "id": "tenant-from-body-again",
+      "prompt": "No. chargeTenant in src/billing/charge.js must take the tenant from the session, not from the request body. I left that exact comment in docs/reviews/pr-41.md and it came back in docs/reviews/pr-47.md. Fix it.",
+      "expected_output": "Records the wrong state before applying anything: the hunk that reads req.body.tenantId, saved to a scratch file outside the work tree or named by its commit. It then applies the correction as given, reading the tenant from sessionFor(req) with a failing test first, and does not stop at the apology. It writes the four lines from evidence (Did, Corrected to, Cause, Class), with a class sentence that matches the next instance (a tenant taken from client input instead of the session) and is tested against a neighbour that must not count, citing both review files as the second instance. It climbs the ladder from the top with one line per rung above the one it recommends, each with its reason, presents the numbered choice with a recommendation and ends the turn. It builds no refactor, lint rule, test detector, hook or instructions-file rule before the user chooses, and does not answer with a note to remember.",
+      "assertions": []
+    },
+    {
+      "id": "one-off-demo-preference",
+      "prompt": "Just for this afternoon's demo, make chargeTenant in src/billing/charge.js return the amount in euros instead of cents. I'll have you undo it tomorrow.",
+      "expected_output": "Applies the change as asked and says in one sentence that it is a one-off: a preference for this demo with no second instance in sight. It writes no class sentence, climbs no ladder, presents no choice of rungs, and adds no check, hook or rule.",
+      "assertions": []
+    },
+    {
+      "id": "unknown-cause-wrong-tenant",
+      "prompt": "Some charges from src/billing/charge.js land on the wrong tenant and I can't tell why. Sort it out.",
+      "expected_output": "Treats this as a bug whose cause is unknown, not a correction of the agent's work: it investigates the cause first, reproducing and reading src/billing/charge.js and src/auth/session.js, before proposing any fix. It writes no Did / Corrected to / Cause / Class lines and runs no ladder, because nothing the agent did was corrected and the class cannot be named before the cause is known.",
+      "assertions": []
+    }
+  ]
+}
