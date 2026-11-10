@@ -5,7 +5,7 @@
     {
       "id": "review-a-pr",
       "prompt": "PR 42 from a teammate is waiting on your review. Read it and tell me what you found.",
-      "expected_output": "Binds the PR before reading it: the number and title, the author, the base ref and the head ref each as a full revision, the changed-file inventory of base..head, and each host check with the revision it ran on. It reads the head by object reads only — `git show`, `git ls-tree`, `git cat-file` — and never checks out the head, adds a worktree for it, or runs the PR's code. It writes each finding for the author with a repository-relative path:line at the head revision, what fails, why, the smallest fix and whether it blocks, and drops a disproved finding. It then shows the filled review and asks which of the four answers the user wants before anything is posted, and posts nothing under any verdict until that answer comes back.",
+      "expected_output": "Binds the PR before reading it: the number and title, the author, the base ref and the head ref each as a full revision, their merge base, the changed-file inventory of merge-base..head, and each host check with the revision it ran on. It reads the head by object reads only — `git show`, `git ls-tree`, `git cat-file` — and never checks out the head, adds a worktree for it, or runs the PR's code. It writes each finding for the author with a repository-relative path:line at the head revision, what fails, why, the smallest fix and whether it blocks, and drops a disproved finding. It then shows the filled review and asks which of the four answers the user wants before anything is posted, and posts nothing under any verdict until that answer comes back.",
       "assertions": []
     },
     {

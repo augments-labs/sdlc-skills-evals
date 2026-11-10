@@ -17,7 +17,7 @@
   {
     "split": "train",
     "should_trigger": true,
-    "query": "fix the typo in the footer copyright year, it says 2019"
+    "query": "Small one, go ahead: the page size of the orders list is hard-coded. Make it a parameter callers can pass."
   },
   {
     "split": "train",

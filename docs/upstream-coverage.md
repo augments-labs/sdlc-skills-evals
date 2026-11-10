@@ -223,8 +223,12 @@ with its own fixture tree. A row is not a name: it links the upstream body
 the corpus was written against, the positives, the near misses, the output
 case that bounds the skill, and the inputs the corpus stages for it.
 `12.0.0` changed the body of every one of the 48 skills the earlier pin
-held, and none of their sets has been re-checked against the new bodies yet.
-The `runtime-evidence` row is new with `12.0.0`: its two corpora were
+held. Their sets were re-read against the diff between the two pins: two
+expected outputs (`reviewing-a-pr`, `writing-specs`) and one query
+(`using-git-worktrees`) were corrected. The re-read found nothing else that
+the diff makes wrong, so the other sets are unchanged; it was not a search
+for errors older than the diff. It compared text with text; no run backs
+it. The `runtime-evidence` row is new with `12.0.0`: its two corpora were
 written against the skill's body at the pin.
 
 Two staged-input trees exist, and they are different things. The
