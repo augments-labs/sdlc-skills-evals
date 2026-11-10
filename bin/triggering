@@ -327,6 +327,19 @@ declare -F adapter_ran >/dev/null 2>&1 || adapter_ran() { return 0; }
 declare -F adapter_version >/dev/null 2>&1 || adapter_version() { :; }
 declare -F adapter_session_model >/dev/null 2>&1 || adapter_session_model() { :; }
 
+# Stop a launch and every process found under it when it is stopped. The CLI
+# is not the job the runner started but a descendant of it (the adapter's
+# subshell, then `timeout`, then the CLI), so a signal to the job alone
+# leaves the CLI running. Each process gets TERM, the signal `timeout` sends
+# a CLI at its deadline, children before their parent. A process started
+# after the walk passed its parent, or one that left the tree before it, is
+# not reached. Without `pgrep` only the job is signalled.
+stop_tree() { # $1 pid
+  local kid
+  for kid in $(pgrep -P "$1" 2>/dev/null); do stop_tree "$kid"; done
+  kill "$1" 2>/dev/null
+}
+
 # --- the observation primitive ------------------------------------------------
 # ONE query, ONE run, emitting one JSON record. Non-deterministic by nature, so a
 # single run is never a verdict — the scoring loop below repeats it and reduces
@@ -373,7 +386,7 @@ observe_once() { # $1 query text  $2 subject skill
   # others prefix sdlc-skills:) — normalize before comparing with the subject.
   local want="$subject"
   while kill -0 "$cpid" 2>/dev/null; do
-    adapter_chain "$stream" | sed 's/^sdlc-skills://' | grep -qx "$want" && { kill "$cpid" 2>/dev/null; break; }
+    adapter_chain "$stream" | sed 's/^sdlc-skills://' | grep -qx "$want" && { stop_tree "$cpid"; break; }
     # The chain is read every two seconds. The wait between two reads is cut
     # into ten, so a CLI that has exited is not held for the rest of it.
     for _ in 1 2 3 4 5 6 7 8 9 10; do
