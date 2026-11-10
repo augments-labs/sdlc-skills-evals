@@ -103,13 +103,13 @@ else
   bad "the coverage record is committed ($DOC)"
 fi
 
-# --- the committed inventory is the v11.2.0 pin ----------------------------
+# --- the committed inventory is the v12.0.0 pin ----------------------------
 #
 # The pin is read off the committed file, not off the gate: a gate and an
 # inventory that agree on a stale commit would both pass the gate.
 
-PIN_COMMIT="40f8ff4c532da29b286b4d06ecf4516a4a093a7d"
-PIN_VERSION="11.2.0"
+PIN_COMMIT="c1e995a0371b11271b1d9a393e89fb2f345b2611"
+PIN_VERSION="12.0.0"
 if jq -e --arg c "$PIN_COMMIT" --arg v "$PIN_VERSION" \
     '.upstream.commit == $c and .upstream.version == $v' "$INV" >/dev/null 2>&1; then
   ok "the inventory pins $PIN_COMMIT ($PIN_VERSION)"
@@ -320,7 +320,7 @@ if mutate '.upstream.commit = "0000000000000000000000000000000000000000"' "$work
   run_check "$work/m.json" docs
   expect_fail "a rewritten upstream commit is rejected" "does not pin"
 fi
-if mutate '.upstream.commit = "v11.2.0"' "$work/m.json"; then
+if mutate '.upstream.commit = "v12.0.0"' "$work/m.json"; then
   run_check "$work/m.json" docs
   expect_fail "a version tag instead of a commit is rejected" "does not pin"
 fi
@@ -331,6 +331,10 @@ fi
 if mutate '.upstream.commit = "638040d407eae2834414968478792be99b3ff0cf" | .upstream.version = "11.0.0"' "$work/m.json"; then
   run_check "$work/m.json" docs
   expect_fail "the superseded v11.0.0 pin is rejected" "does not pin"
+fi
+if mutate '.upstream.commit = "40f8ff4c532da29b286b4d06ecf4516a4a093a7d" | .upstream.version = "11.2.0"' "$work/m.json"; then
+  run_check "$work/m.json" docs
+  expect_fail "the superseded v11.2.0 pin is rejected" "does not pin"
 fi
 if mutate '.upstream.url = "https://example.invalid/sdlc-skills"' "$work/m.json"; then
   run_check "$work/m.json" docs

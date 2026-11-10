@@ -1,9 +1,10 @@
-# Upstream coverage — the pinned v11 scope and the work already done
+# Upstream coverage — the pinned v12 scope and the work already done
 
 This record answers two questions for whoever picks the lab up next.
 
-1. **What has to be covered?** The pinned upstream: 48 canonical skills and
-   11 harnesses, at one commit. `config/upstream-inventory.json` holds the
+1. **What has to be covered?** The pinned upstream: the 48 canonical skills
+   the inventory holds, of the 49 at the pin, and 11 harnesses, at one
+   commit. `config/upstream-inventory.json` holds the
    pin; `bin/check` enforces it offline.
 2. **What of the earlier plan is already built?** Every task of the
    predecessor plan, mapped to preserved, extended or removed scope, with
@@ -22,13 +23,13 @@ which.
 | Field | Value |
 | --- | --- |
 | Repository | `https://github.com/augments-labs/sdlc-skills` |
-| Commit | `40f8ff4c532da29b286b4d06ecf4516a4a093a7d` — a commit, not a mutable version tag |
-| Package version | `11.2.0` |
-| Canonical skills | 48, at `skills/<phase>/<name>/SKILL.md`; the inventory holds the bare `<name>` |
+| Commit | `c1e995a0371b11271b1d9a393e89fb2f345b2611` — a commit, not a mutable version tag |
+| Package version | `12.0.0` |
+| Canonical skills | 48 of the 49 at `skills/<phase>/<name>/SKILL.md`; the inventory holds the bare `<name>`. The 49th, `runtime-evidence`, is new in `12.0.0` and joins the inventory together with its eval set and query set, which the gate requires of every skill it holds |
 | Upstream harnesses | 11, at `tests/harnesses/<name>.sh` |
 
-The packaged mirror under `plugins/sdlc-skills/skills/` carries the same 48
-skills in a flat layout. It is a distribution artifact, never a second
+The packaged mirror under `plugins/sdlc-skills/skills/` carries the same
+skills as `skills/` in a flat layout. It is a distribution artifact, never a second
 canonical copy: the inventory and the drift check count `skills/` only.
 `bin/check --plugin` reads a skill as the basename of the directory that
 holds its `SKILL.md`, so it accepts either layout, and it refuses a tree in
@@ -63,8 +64,9 @@ obligation. `bin/check` fails when a task in this table has no verdict.
 Rows E-2, E-4, E-8 and E-10 describe the lab before the behavior runner, its
 scenarios and manifests, `bin/campaign`, `lib/verdict.sh` and
 `lib/prelude.sh` were retired by the agentskills.io alignment, and "46
-skills" in E-5 and E-7 is that pin's count; the current pin has 48. The rows
-stay as written: they are provenance.
+skills" in E-5 and E-7 is that pin's count; the inventory holds 48. "The v11
+commit" in E-0 and "the pinned v11 bodies" in E-5 name the pin of that time;
+the pin is now `12.0.0`. The rows stay as written: they are provenance.
 
 Work after the tasks themselves: the independent review fixes (`5b15240`),
 the pull-request feedback round (`2d15beb`) and the merge of the whole lab

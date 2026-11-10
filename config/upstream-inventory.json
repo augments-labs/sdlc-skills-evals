@@ -1,8 +1,8 @@
 {
   "upstream": {
     "url": "https://github.com/augments-labs/sdlc-skills",
-    "commit": "40f8ff4c532da29b286b4d06ecf4516a4a093a7d",
-    "version": "11.2.0"
+    "commit": "c1e995a0371b11271b1d9a393e89fb2f345b2611",
+    "version": "12.0.0"
   },
   "skills": [
     "adding-observability",
