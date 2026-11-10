@@ -29,8 +29,8 @@ which.
 | Upstream harnesses | 11, at `tests/harnesses/<name>.sh` |
 
 The packaged mirror under `plugins/sdlc-skills/skills/` carries the same
-skills as `skills/` in a flat layout. It is a distribution artifact, never a second
-canonical copy: the inventory and the drift check count `skills/` only.
+skills as `skills/` in a flat layout. It is a distribution artifact, never a
+second canonical copy: the inventory and the drift check count `skills/` only.
 `bin/check --plugin` reads a skill as the basename of the directory that
 holds its `SKILL.md`, so it accepts either layout, and it refuses a tree in
 which two directories share a basename. A packaged mirror carries no
@@ -67,10 +67,10 @@ scenarios and manifests, `bin/campaign`, `lib/verdict.sh` and
 skills" in E-5 and E-7 is that pin's count; the inventory holds 48. E-0's
 "the committed inventory names the v11 commit", E-5's "the pinned v11
 bodies" and E-7's "every skill in the pin now carries a definition" were
-true of the pin of that time, as is each "the v11 body of" cell of the
-corpus audit; the pin is now `12.0.0`, the inventory names its commit, and
-one skill at it has no definition yet (the gaps section below). The rows
-stay as written: they are provenance.
+true of the pin of that time, as is each "the v11 body of" or "the v11
+bodies of" cell of the corpus audit; the pin is now `12.0.0`, the inventory
+names its commit, and one skill at it has no definition yet (the gaps
+section below). The rows stay as written: they are provenance.
 
 Work after the tasks themselves: the independent review fixes (`5b15240`),
 the pull-request feedback round (`2d15beb`) and the merge of the whole lab
@@ -221,11 +221,11 @@ holdout cannot simply be placed in the corpus before the selection step.
 Every skill the inventory holds carries two corpora: a description set of at
 least twenty balanced queries with fixed `train`/`validation` splits and
 near-miss negatives, and an output-eval definition of two or three cases
-with its own fixture tree. A row is not a name: it links the upstream body the corpus was
-written against, the positives, the near misses, the output case that bounds
-the skill, and the inputs the corpus stages for it. `12.0.0` changed the
-body of every one of the 48 skills, and no set has been re-checked against
-the new bodies yet.
+with its own fixture tree. A row is not a name: it links the upstream body
+the corpus was written against, the positives, the near misses, the output
+case that bounds the skill, and the inputs the corpus stages for it.
+`12.0.0` changed the body of every one of the 48 skills, and no set has been
+re-checked against the new bodies yet.
 
 Two staged-input trees exist, and they are different things. The
 **description-query tree** is what `bin/triggering` seeds each run with

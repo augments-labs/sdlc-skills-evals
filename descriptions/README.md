@@ -101,7 +101,7 @@ diagnostic; the scorer does not evaluate that activity.
 `DESCRIPTIONS_ROOT`): at least ten positives and ten near-miss negatives
 (holdout files: 5–10), no duplicates, every entry with `split` and boolean
 `should_trigger`, every negative with a non-empty `expect` that names a skill
-the pin holds or the activity it belongs to, a validation split between a
+the inventory holds or the activity it belongs to, a validation split between a
 quarter and a half of the set with the same positive-to-negative proportion
 as train, and no query shared between a set and its holdout. Ten of each is
 twenty queries: a set that cannot decide anything is not worth the money it

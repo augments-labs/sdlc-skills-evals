@@ -204,7 +204,7 @@ rm -f "$m1b/evals/yagni/evals.json"
 run_gate "$m1b"
 expect_fail "a removed eval definition is rejected" "no evals.json for yagni"
 
-# 2. a stale skill: a corpus asset for a skill the pin does not hold
+# 2. a stale skill: a corpus asset for a skill the inventory does not hold
 m2="$work/m2"; copy_repo "$m2"
 cp "$m2/descriptions/yagni.json" "$m2/descriptions/a-skill-that-was-removed.json"
 run_gate "$m2"
@@ -307,7 +307,7 @@ mv "$m6e/evals/yagni/evals.json.new" "$m6e/evals/yagni/evals.json"
 run_gate "$m6e"
 expect_fail "an output case naming a project outside the workdir is rejected" "names a project outside the run workdir"
 
-# 7. a near miss that routes to a skill the pin does not hold
+# 7. a near miss that routes to a skill the inventory does not hold
 m7c="$work/m7c"; copy_repo "$m7c"
 jq '.[10].expect = "a-skill-that-does-not-exist"' "$m7c/descriptions/yagni.json" \
   > "$m7c/descriptions/yagni.json.new"
