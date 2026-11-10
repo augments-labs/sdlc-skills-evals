@@ -122,6 +122,83 @@ lab_pin_note() {
   fi
 }
 
+# --- which skill text a reference names --------------------------------------
+#
+# lab_pin_identity <path|ref> <skill> — prints {"commit": ..., "skill_tree":
+# ...} for the tree a run installs: the full commit it comes from, and the
+# git tree hash of the skill's directory at that commit
+# (git rev-parse <commit>:skills/<phase>/<name>). The tree hash names the
+# skill text by content, so it still matches after a squash merge changes
+# the commit.
+#
+# A ref is resolved in the plugin checkout. A directory is identified only
+# when it is the top of a git work tree and `git status --porcelain --
+# <skill dir>` prints nothing: then it is HEAD and that tree. Any other
+# directory is {null, null} — a working tree with uncommitted skill text is
+# no commit's text, and naming one would describe content the run never
+# measured. A commit that holds no single directory for the skill keeps its
+# commit and has a null skill_tree. The reason for a null goes to stderr.
+# Always returns 0: an unnamed tree is a fact to record, not an error.
+
+_lab_skill_dir_at() { # $1 repo $2 commit $3 skill — prints the skill's directory in that commit
+  local hits
+  hits="$(git -C "$1" ls-tree -r --name-only "$2" -- skills 2>/dev/null \
+    | awk -F/ -v s="$3" '$NF == "SKILL.md" && ((NF == 3 && $2 == s) || (NF == 4 && $3 == s))')"
+  [ -n "$hits" ] && [ "$(printf '%s\n' "$hits" | wc -l)" -eq 1 ] || return 1
+  printf '%s\n' "${hits%/SKILL.md}"
+}
+
+_lab_identity_json() { # $1 commit ("" = null) $2 skill tree ("" = null)
+  local c=null t=null
+  [ -z "$1" ] || c="\"$1\""
+  [ -z "$2" ] || t="\"$2\""
+  printf '{"commit": %s, "skill_tree": %s}\n' "$c" "$t"
+}
+
+lab_pin_identity() {
+  [ "$#" -eq 2 ] || return 127
+  local src="$1" skill="$2" root commit dir tree dirty
+  if [ -d "$src" ]; then
+    if ! git -C "$src" rev-parse --show-toplevel >/dev/null 2>&1 \
+       || [ -n "$(git -C "$src" rev-parse --show-prefix 2>/dev/null)" ]; then
+      printf 'no identity for %s: not the top of a git work tree\n' "$src" >&2
+      _lab_identity_json "" ""; return 0
+    fi
+    if ! commit="$(git -C "$src" rev-parse --verify --quiet 'HEAD^{commit}' 2>/dev/null)"; then
+      printf 'no identity for %s: the work tree has no commit\n' "$src" >&2
+      _lab_identity_json "" ""; return 0
+    fi
+    if ! dir="$(_lab_skill_dir_at "$src" "$commit" "$skill")"; then
+      printf 'no identity for %s: HEAD holds no single skills/[<phase>/]%s/SKILL.md\n' "$src" "$skill" >&2
+      _lab_identity_json "" ""; return 0
+    fi
+    if ! dirty="$(git -C "$src" status --porcelain -- "$dir" 2>/dev/null)" || [ -n "$dirty" ]; then
+      printf "no identity for %s: %s has uncommitted changes, so its text is no commit's\n" "$src" "$dir" >&2
+      _lab_identity_json "" ""; return 0
+    fi
+    root="$src"
+  else
+    root="${SDLC_SKILLS_ROOT:-}"
+    if [ -z "$root" ]; then
+      root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/../sdlc-skills"
+    fi
+    if ! commit="$(git -C "$root" rev-parse --verify --quiet "$src^{commit}" 2>/dev/null)"; then
+      printf 'no identity for %s: the plugin checkout %s has no such commit\n' "$src" "$root" >&2
+      _lab_identity_json "" ""; return 0
+    fi
+    if ! dir="$(_lab_skill_dir_at "$root" "$commit" "$skill")"; then
+      printf 'no skill tree for %s: %s holds no single skills/[<phase>/]%s/SKILL.md\n' "$skill" "$commit" "$skill" >&2
+      _lab_identity_json "$commit" ""; return 0
+    fi
+  fi
+  if ! tree="$(git -C "$root" rev-parse --verify --quiet "$commit:$dir" 2>/dev/null)"; then
+    printf 'no skill tree for %s: cannot read %s:%s\n' "$skill" "$commit" "$dir" >&2
+    if [ -d "$src" ]; then _lab_identity_json "" ""; else _lab_identity_json "$commit" ""; fi
+    return 0
+  fi
+  _lab_identity_json "$commit" "$tree"
+}
+
 _lab_pin_worktrees=""
 
 _lab_pin_remove() { # $1 worktree path — removes via the owning repo, from any CWD

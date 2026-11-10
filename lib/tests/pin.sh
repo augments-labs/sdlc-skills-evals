@@ -11,7 +11,8 @@ ok() { printf '  ok    %s\n' "$1"; }
 bad() { printf '  FAIL  %s\n' "$1"; fails=1; }
 
 standin="$(mktemp -d)"
-trap 'rm -rf "$standin"' EXIT
+idrepo="$(mktemp -d)"; idwork="$(mktemp -d)"
+trap 'rm -rf "$standin" "$idrepo" "$idwork"' EXIT
 git -C "$standin" init -q
 git -C "$standin" -c user.name=t -c user.email=t@example.invalid commit -q --allow-empty -m seed
 commit="$(git -C "$standin" rev-parse HEAD)"
@@ -150,5 +151,93 @@ note_ref="$(lab_pin_note --plugin selftest-tag 2>/dev/null)"
 note_base="$(lab_pin_note --base selftest-tag 2>/dev/null)"
 [ "$note_base" = "--base selftest-tag" ] && ok "a note names the flag it came from" \
   || bad "a note names the flag it came from (got '$note_base')"
+
+# --- which skill text a reference names --------------------------------------
+#
+# lab_pin_identity <path|ref> <skill> prints {commit, skill_tree}: the commit
+# the tree comes from, and the git tree hash of the skill's directory at that
+# commit. The tree hash names the skill text by content, so it survives a
+# squash merge that changes the commit. A directory is identified only when it
+# is the top of a git work tree whose skill directory has nothing uncommitted;
+# anything else is {null, null}, never a guess.
+
+gc() { git -C "$idrepo" -c user.name=t -c user.email=t@example.invalid "$@"; }
+mkdir -p "$idrepo/skills/common/probe" "$idrepo/skills/flat" "$idrepo/skills/a/twin" "$idrepo/skills/b/twin" "$idrepo/sub"
+printf -- '---\nname: probe\ndescription: "probe one"\n---\n' > "$idrepo/skills/common/probe/SKILL.md"
+printf -- '---\nname: flat\ndescription: "flat"\n---\n' > "$idrepo/skills/flat/SKILL.md"
+printf 'twin\n' | tee "$idrepo/skills/a/twin/SKILL.md" > "$idrepo/skills/b/twin/SKILL.md"
+printf 'other\n' > "$idrepo/other.txt"
+git -C "$idrepo" init -q
+gc add -A && gc commit -q -m one
+id_commit="$(git -C "$idrepo" rev-parse HEAD)"
+id_tree="$(git -C "$idrepo" rev-parse "HEAD:skills/common/probe")"
+flat_tree="$(git -C "$idrepo" rev-parse "HEAD:skills/flat")"
+git -C "$idrepo" tag id-tag "$id_commit"
+ident() { # $1 path|ref $2 skill [$3 file for the reason] — prints the identity, compact
+  SDLC_SKILLS_ROOT="$idrepo" lab_pin_identity "$1" "$2" 2>"${3:-/dev/null}" | jq -c . 2>/dev/null
+}
+want="$(jq -nc --arg c "$id_commit" --arg t "$id_tree" '{commit: $c, skill_tree: $t}')"
+none='{"commit":null,"skill_tree":null}'
+
+got="$(ident "$id_commit" probe)"
+[ "$got" = "$want" ] && ok "a commit names the skill's tree at skills/<phase>/<name>" \
+  || bad "a commit names the skill's tree at skills/<phase>/<name> (got '$got')"
+got="$(ident id-tag probe)"
+[ "$got" = "$want" ] && ok "a tag is recorded as the commit it names" \
+  || bad "a tag is recorded as the commit it names (got '$got')"
+got="$(ident "$id_commit" flat)"
+[ "$got" = "$(jq -nc --arg c "$id_commit" --arg t "$flat_tree" '{commit: $c, skill_tree: $t}')" ] \
+  && ok "a skill at skills/<name> is found too" || bad "a skill at skills/<name> is found too (got '$got')"
+got="$(ident "$id_commit" nosuch "$idwork/reason")"
+[ "$got" = "$(jq -nc --arg c "$id_commit" '{commit: $c, skill_tree: null}')" ] \
+  && [ -s "$idwork/reason" ] \
+  && ok "a commit without the skill has no skill tree, and says why" \
+  || bad "a commit without the skill has no skill tree, and says why (got '$got')"
+rm -f "$idwork/reason"
+got="$(ident "$id_commit" twin)"
+[ "$got" = "$(jq -nc --arg c "$id_commit" '{commit: $c, skill_tree: null}')" ] \
+  && ok "a skill name two directories carry names no tree" \
+  || bad "a skill name two directories carry names no tree (got '$got')"
+got="$(ident does-not-exist-sdlc-skills-evals probe)"
+[ "$got" = "$none" ] && ok "an unknown ref has no identity" || bad "an unknown ref has no identity (got '$got')"
+
+# a clean work tree is its HEAD
+got="$(ident "$idrepo" probe)"
+[ "$got" = "$want" ] && ok "a clean work tree is identified by its HEAD and the skill's tree" \
+  || bad "a clean work tree is identified by its HEAD and the skill's tree (got '$got')"
+# dirt outside the skill's directory leaves the skill text what HEAD says
+printf 'changed\n' >> "$idrepo/other.txt"; printf 'x\n' >> "$idrepo/skills/flat/SKILL.md"
+got="$(ident "$idrepo" probe)"
+[ "$got" = "$want" ] && ok "a change outside the skill's directory does not unname it" \
+  || bad "a change outside the skill's directory does not unname it (got '$got')"
+# an edited or an untracked file inside it does
+got="$(ident "$idrepo" flat "$idwork/reason")"
+[ "$got" = "$none" ] && [ -s "$idwork/reason" ] \
+  && ok "an edited skill directory has no identity, and says why" \
+  || bad "an edited skill directory has no identity, and says why (got '$got')"
+rm -f "$idwork/reason"
+printf 'new\n' > "$idrepo/skills/common/probe/notes.md"
+got="$(ident "$idrepo" probe)"
+[ "$got" = "$none" ] && ok "an untracked file in the skill directory has no identity" \
+  || bad "an untracked file in the skill directory has no identity (got '$got')"
+rm -f "$idrepo/skills/common/probe/notes.md"
+# a directory that is not the top of a git work tree is not a commit's tree
+got="$(ident "$idrepo/sub" probe)"
+[ "$got" = "$none" ] && ok "a subdirectory of a work tree has no identity" \
+  || bad "a subdirectory of a work tree has no identity (got '$got')"
+plain="$idwork/plain"; mkdir -p "$plain/skills/probe"
+cp "$idrepo/skills/common/probe/SKILL.md" "$plain/skills/probe/SKILL.md"
+got="$(ident "$plain" probe)"
+[ "$got" = "$none" ] && ok "a directory that is no git work tree has no identity" \
+  || bad "a directory that is no git work tree has no identity (got '$got')"
+rm -rf "$plain"
+
+# the same skill text under another commit keeps its tree hash: what a
+# squash merge leaves behind still matches the record
+gc checkout -q -- . && gc commit -q --allow-empty -m two
+got="$(ident "$(git -C "$idrepo" rev-parse HEAD)" probe)"
+[ "$(jq -r .skill_tree <<<"$got")" = "$id_tree" ] && [ "$(jq -r .commit <<<"$got")" != "$id_commit" ] \
+  && ok "the skill tree is the same under a different commit" \
+  || bad "the skill tree is the same under a different commit (got '$got')"
 
 exit "$fails"
