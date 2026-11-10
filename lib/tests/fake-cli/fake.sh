@@ -9,7 +9,9 @@
 # grep-shaped stream; real detection is structural), driven by FAKE_MODE. Modes: ok (emits a
 # SKILL line unless FAKE_CHAIN=0), timeout (outlives timeout_s),
 # error (exit 1), blocked (provider-refusal pattern), dead (empty
-# stream). FAKE_UNAVAILABLE=1 makes adapter_check fail.
+# stream), linger (emits as ok does, then keeps running until it is stopped
+# or timed out; its pid is appended to FAKE_LINGER_LOG, so a test can ask
+# whether the runner stopped it). FAKE_UNAVAILABLE=1 makes adapter_check fail.
 # FAKE_TOKENS=1 makes adapter_usage report a number, else silence.
 # FAKE_NO_TIER=1 binds NO tier: the double has no adapter_model, so it
 # stands for an adapter that cannot set one and the runner must refuse a
@@ -133,14 +135,24 @@ _fake_body() { # $1 workdir $2 prompt $3 stream — the canned behavior
     error) return 1;;
     blocked) printf 'usage limit exceeded\n' >> "$3"; return 0;;
     dead) : > "$3"; return 0;;
+    linger)
+      # the pid first: the runner may stop this process as soon as it reads
+      # the subject, and `exec` keeps the pid
+      [ -z "${FAKE_LINGER_LOG:-}" ] || printf '%s\n' "$$" >> "$FAKE_LINGER_LOG"
+      _fake_emit_ok "$3" "$2"
+      exec sleep 600;;
     *) _fake_emit_ok "$3" "$2"; return 0;;
   esac
 }
 
+_fake_exec() { timeout "${timeout_s:-5}" "$@"; }
+
 adapter_run_activation() { # $1 workdir $2 prompt $3 stream
   # Mirrors the real adapters: the wall clock bounds the run, and the
   # runner sees 124 on timeout. The launch's stderr goes to "$errlog",
-  # the redirect every real adapter makes.
+  # the redirect every real adapter makes. The launch is a subshell
+  # around a function that calls `timeout`, as theirs is, so the process
+  # that stands for the CLI is as far below the caller as a real one.
   # FAKE_LAUNCH_LOG records that the launcher was reached, so a test can
   # tell a run that launched from a path that only planned.
   if [ -n "${FAKE_LAUNCH_LOG:-}" ]; then
@@ -148,7 +160,7 @@ adapter_run_activation() { # $1 workdir $2 prompt $3 stream
   fi
   export FAKE_PLUGIN_DIR="${plugin_dir:-}"
   export -f _fake_body _fake_emit_ok
-  timeout "${timeout_s:-5}" bash -c '_fake_body "$@"' _ "$@" 2>>"$errlog"
+  ( _fake_exec bash -c '_fake_body "$@"' _ "$@" ) 2>>"$errlog"
 }
 
 adapter_run_behavioral() { # $1 workdir $2 opening file $3 stream
