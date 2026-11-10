@@ -331,6 +331,23 @@ for text in "$("$here/bin/triggering" --help 2>&1)" \
   fi
 done
 
+# --- a CLI that has exited is not waited on ----------------------------------
+#
+# While the CLI runs, the runner reads its chain every two seconds. A CLI
+# that has already exited is not held for the rest of that interval: six
+# runs of the fake, which exits at once and routes nowhere, take less than
+# six intervals. FAKE_FIRE=0 keeps the other way out of the wait, the
+# subject showing up in the chain, out of this case.
+
+t0="$SECONDS"
+DESCRIPTIONS_ROOT="$iso" FAKE_FIRE=0 "$here/bin/triggering" "${base[@]}" \
+  --skill probe --split all --runs 3 --jobs 1 --json "$work/poll.json" >/dev/null 2>&1
+took="$(( SECONDS - t0 ))"
+ran="$(jq '[.[].valid] | add' "$work/poll.json" 2>/dev/null)"
+[ "$ran" = 6 ] && [ "$took" -lt 12 ] \
+  && ok "six runs of a CLI that exits at once take less than six poll intervals" \
+  || bad "six runs of a CLI that exits at once take less than six poll intervals (${ran:-no} runs scored in ${took}s)"
+
 # --- the non-launching paths -------------------------------------------------
 #
 # A sentinel real CLI stands on PATH: it fails and records that it was
