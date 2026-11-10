@@ -66,7 +66,7 @@ if [ -n "$trig" ]; then
     if length != 1 then error("not one document") else .[0] end
     | (at("metadata") | at("plugin") | at("skill_tree")
        | if . == null then "is null"
-         elif type == "string" and test("^([0-9a-f]{40}|[0-9a-f]{64})$") then empty
+         elif type == "string" and test("\\A([0-9a-f]{40}|[0-9a-f]{64})\\z") then empty
          else "is not a git tree hash" end
        | "it does not say which skill text it scored (metadata.plugin.skill_tree \(.))"),
       (at("splits") | at("validation") | at("queries")

@@ -172,7 +172,7 @@ trefused() { # $1 tag $2 pattern the refusal names — exit 2, nothing copied
   trec "$1"
   [ "$rc" -eq 2 ] && [ ! -e "$work/$1/rec" ] && grep -q "$2" "$work/$1/out"
 }
-for t in tgood tnull tnotree tnoval ttrain temptyval tbad ttwo texists tboth; do mkdir -p "$work/$t"; done
+for t in tgood tnull tnotree tnltree tnoval ttrain temptyval tbad ttwo texists tboth; do mkdir -p "$work/$t"; done
 
 # a failing sheet is data: named, with its validation split, it is recorded
 trig "\"$feed\"" "{\"train\": $val, \"validation\": $val}" > "$work/tgood/sum.json"
@@ -194,6 +194,11 @@ trig '"main"' "{\"validation\": $val}" > "$work/tnotree/sum.json"
 trefused tnotree 'metadata.plugin.skill_tree is not a git tree hash' \
   && ok "a summary whose skill tree is not a tree hash is refused" \
   || bad "a summary whose skill tree is not a tree hash is refused (rc $rc: $(cat "$work/tnotree/out"))"
+# a hash followed by a newline is not the hash a comparison would match
+trig "\"$feed\\n\"" "{\"validation\": $val}" > "$work/tnltree/sum.json"
+trefused tnltree 'metadata.plugin.skill_tree is not a git tree hash' \
+  && ok "a summary whose skill tree has a trailing newline is refused" \
+  || bad "a summary whose skill tree has a trailing newline is refused (rc $rc: $(cat "$work/tnltree/out"))"
 trig "\"$feed\"" '{}' > "$work/tnoval/sum.json"
 trefused tnoval 'validation' \
   && ok "a summary with no split is refused: it has no validation" \
