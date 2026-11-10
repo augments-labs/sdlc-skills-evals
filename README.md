@@ -47,9 +47,10 @@ Prerequisites:
   holding the pinned commit. `--plugin` takes a directory or a ref in that
   checkout and defaults to the inventory's commit. Every `--dry-run` prints
   the pin it resolved; `bin/optimize-description` also records it in
-  `optimization.json`, and `bin/evaluate` records what each arm installed
-  in `identity.json`. `bin/triggering` records none, so note the pin you
-  priced when you start it;
+  `optimization.json`, `bin/evaluate` records what each arm installed in
+  `identity.json`, and `bin/triggering --summary` records what it scored in
+  the summary it writes. Without `--summary`, `bin/triggering` records
+  none, so note the pin you priced when you start it;
 - `git` and `jq` on your `PATH`: `bin/evaluate`, `bin/benchmark`,
   `bin/report`, `bin/triggering` and `bin/optimize-description` exit 3
   without `jq`, and `bin/grade` needs it too.
@@ -112,13 +113,20 @@ bin/report --workspace workspaces/evaluate-yagni/iteration-1 --record results/<d
 ### Optimizing a description
 
 ```bash
-bin/triggering --harness opencode --skill yagni --dry-run
-bin/triggering --harness opencode --skill yagni
+bin/triggering --harness opencode --skill yagni --summary workspaces/yagni-triggering.json --dry-run
+bin/triggering --harness opencode --skill yagni --summary workspaces/yagni-triggering.json
+bin/report --triggering workspaces/yagni-triggering.json --record results/<date>-yagni-opencode-triggering
 bin/optimize-description --harness opencode --skill yagni --plugin ../sdlc-skills --apply --dry-run
 bin/optimize-description --harness opencode --skill yagni --plugin ../sdlc-skills --apply
 ```
 
-`bin/triggering` is the before-number. `bin/optimize-description` scores
+`bin/triggering` is the before-number. `--summary` writes what the run
+scored as one JSON object: which skill text (`plugin.commit`,
+`plugin.skill_tree`), which description (`description_sha256`), the count
+per split, and one row per query. `bin/report --triggering` copies it to
+`results/<date>-<skill>-<harness>-triggering/triggering.json`, and refuses
+a summary that does not name its skill text or its description, or has no
+validation query (`results/README.md`). `bin/optimize-description` scores
 up to `--max-iterations` candidates under
 `workspaces/<campaign>/iteration-<i>/`, shows the reviser only the `train`
 failures, and writes `best-description.txt`, `optimization.json`, and

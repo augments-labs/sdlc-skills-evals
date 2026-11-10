@@ -75,6 +75,11 @@ bin/triggering — score a skill DESCRIPTION against its query set.
   --timeout N       seconds per run                               (default: 120)
   --max-turns N     turns before a run is cut off                 (default: 6)
   --json PATH       write the per-query records as a JSON array
+  --summary PATH    write the run's summary as one JSON object: which skill
+                    text and which description it scored, the count per
+                    split, one row per query. bin/report --triggering copies
+                    it into a record. One skill only (not with --all); PATH
+                    must be writable, which is checked before anything runs.
   --dry-run         print the plan — the pin and the exact command —
                     and call nothing
   --no-fixture      run queries in a bare directory instead of a seeded project
@@ -86,8 +91,38 @@ COST: live sessions against your own harness account. One skill at the defaults
 is 20 queries x 3 runs = 60 calls; --all is every set. Always --dry-run
 first: it prints the exact count.
 
+The summary (--summary):
+  metadata {skill, harness, harness_version, model, plugin: {commit,
+            skill_tree}, description_sha256, runs, threshold}
+  splits   {train|validation|holdout: {queries, passed, failed,
+            inconclusive, pass_rate}}       only the splits a query ran in
+  queries  [{query, should_trigger, split, trigger_rate, verdict}]
+plugin is the full commit and the git tree hash of the skill's directory at
+that commit; both are null when --plugin is a directory whose skill directory
+is not exactly a git work tree's HEAD, before the run and after it, and
+skill_tree alone is null when --plugin is a commit that does not hold the
+skill.
+description_sha256 is the SHA-256 of the exact bytes of the frontmatter line
+that begins `description:` in the skill's `SKILL.md`, without its newline.
+The frontmatter is the block a first line of exactly `---` opens and the
+next line of exactly `---`, or the end of the file, closes; the line is the
+first one in it that begins `description:`, and its newline is the one LF
+byte that ends it. It is null when the installed tree has no such line (a
+file with CRLF line endings has none: its first line is not exactly `---`),
+or when the line changed during the run.
+harness_version and model are null when the adapter reads none; model is
+also null unless every scored run named the same one. pass_rate is passed /
+(passed + failed), null when every query in the split was INCONCLUSIVE;
+trigger_rate is null for an INCONCLUSIVE query. No transcript, stream, or
+observed routing enters it.
+--dry-run with --summary prints the identity a run would record. The plan and
+the run both say when the summary is one bin/report will not record for want
+of a skill tree or of the validation split (--split train or holdout); only
+a run reads the description, so only a run says when it has no hash.
+
 Exit codes: 0 every scored query passed · 1 at least one FAIL
-            2 bad or missing arguments, or harness unrunnable (indeterminate)
+            2 bad or missing arguments, a --summary that could not be
+              written, or harness unrunnable (indeterminate)
             3 jq or the harness CLI is unavailable
 
 Examples:
@@ -95,6 +130,7 @@ Examples:
   bin/triggering --harness opencode --skill yagni
   bin/triggering --harness opencode --skill yagni --split train
   bin/triggering --harness opencode --skill yagni --json out.json
+  bin/triggering --harness opencode --skill yagni --summary workspaces/yagni-triggering.json
 EOF
   _pin_line
 }
@@ -112,7 +148,7 @@ _pin_line() {
 }
 
 harness=""; skill=""; runs=3; split="all"; dry=""; jsonout=""; all=""; fixture="1"; jobs=3
-timeout_s=120; maxturns=6; plugin=""; harnessdir_override=""
+timeout_s=120; maxturns=6; plugin=""; harnessdir_override=""; summary=""
 while [ "$#" -gt 0 ]; do
   case "$1" in
     -h|--help)    usage; exit 0;;
@@ -127,6 +163,12 @@ while [ "$#" -gt 0 ]; do
     --max-turns)  maxturns="$2"; shift 2;;
     --dry-run)    dry="1"; shift;;
     --json)       jsonout="$2"; shift 2;;
+    --summary)    summary="${2:-}"
+                  case "$summary" in
+                    '') echo "--summary needs a path" >&2; exit 2;;
+                    -*) echo "--summary needs a path, and $summary reads as an option (write ./$summary for a file of that name)" >&2; exit 2;;
+                  esac
+                  shift 2;;
     --no-fixture) fixture=""; shift;;
     --harness-dir) harnessdir_override="$2"; shift 2;;
     *) echo "unknown argument: $1" >&2; exit 2;;
@@ -136,6 +178,16 @@ done
 [ -n "$skill" ] || [ -n "$all" ] || { echo "needs --skill NAME or --all" >&2; exit 2; }
 command -v jq >/dev/null 2>&1 || { echo "needs \`jq\`" >&2; exit 3; }
 case "$split" in all|train|validation|holdout) ;; *) echo "--split all|train|validation|holdout" >&2; exit 2;; esac
+# A summary names one skill's text, and it is written after the run is paid
+# for: refuse what cannot be written before anything is launched.
+if [ -n "$summary" ]; then
+  [ -z "$all" ] || { echo "--summary is one skill's record: use --skill, not --all" >&2; exit 2; }
+  sumdir="$(dirname -- "$summary")"
+  [ -d "$sumdir" ] || { echo "--summary $summary: its directory does not exist" >&2; exit 2; }
+  [ ! -d "$summary" ] || { echo "--summary $summary is a directory: it names the file to write" >&2; exit 2; }
+  if [ -e "$summary" ]; then [ -w "$summary" ]; else [ -w "$sumdir" ]; fi \
+    || { echo "--summary $summary cannot be written" >&2; exit 2; }
+fi
 # Counters this script feeds straight to `seq` and to arithmetic. A non-numeric
 # --runs yields an empty `seq`, which scores every query zero-valid and reports a
 # full sheet of INCONCLUSIVE — a wrong measurement that still looks like a
@@ -165,6 +217,37 @@ else
   plugin_note="$(lab_pin_note --plugin "$plugin")"
 fi
 [ -n "$harnessdir_override" ] && harnessdir="$harnessdir_override"
+
+# Which skill text a summary names, and why when it cannot name one.
+identify() { # $1 path|commit — sets id_json ({commit, skill_tree}) and id_why
+  local out
+  out="$(lab_pin_identity "$1" "$skill" 2>&1)"
+  id_json="$(tail -n 1 <<<"$out")"
+  id_why="$(sed '$d' <<<"$out" | head -n 1)"
+  id_why="${id_why#*: }" # the reason, without its "no identity for <tree>: " or "no skill tree for <skill>: "
+}
+identity_line() { # $1 identity json $2 why — one line for the operator
+  if jq -e '.skill_tree != null' <<<"$1" >/dev/null 2>&1; then
+    printf '%s  skill_tree %s\n' "$(jq -r .commit <<<"$1")" "$(jq -r .skill_tree <<<"$1")"
+  else
+    printf 'unidentified (%s) — bin/report will not record this summary\n' "${2:-unknown}"
+  fi
+}
+# A record reports the validation split: say so when this run scores none.
+no_validation_line() {
+  case "$split" in
+    train|holdout) echo "summary  : no validation split (--split $split) — bin/report will not record this summary";;
+  esac
+}
+# The skill's SKILL.md in an installed tree: skills/<skill> or
+# skills/<phase>/<skill>, and only when the tree holds exactly one.
+skill_md_in() { # $1 tree
+  local f hits=()
+  for f in "$1/skills/$skill/SKILL.md" "$1"/skills/*/"$skill"/SKILL.md; do
+    [ -f "$f" ] && hits+=("$f")
+  done
+  [ "${#hits[@]}" -eq 1 ] && printf '%s\n' "${hits[0]}"
+}
 
 # The corpus is flat: one <skill>.json per skill at the root, held-out sets
 # under holdout/. Only those two depths are read — a stray nested set is not
@@ -198,9 +281,15 @@ if [ -n "$dry" ]; then
   plan_cmd="$plan_cmd --plugin $(printf '%q' "$plugin_tree") --runs $runs --jobs $jobs --split $split"
   plan_cmd="$plan_cmd --timeout $timeout_s --max-turns $maxturns"
   [ -n "$jsonout" ] && plan_cmd="$plan_cmd --json $(printf '%q' "$jsonout")"
+  [ -n "$summary" ] && plan_cmd="$plan_cmd --summary $(printf '%q' "$summary")"
   [ -z "$fixture" ] && plan_cmd="$plan_cmd --no-fixture"
   [ -n "$harnessdir_override" ] && plan_cmd="$plan_cmd --harness-dir $(printf '%q' "$harnessdir_override")"
   echo "plugin   : $plugin_tree  ($plugin_note)"
+  if [ -n "$summary" ]; then
+    identify "$plugin_tree"
+    echo "identity : $(identity_line "$id_json" "$id_why")"
+    no_validation_line
+  fi
   echo "harness  : $harness"
   echo "command  : $plan_cmd"
   total=0
@@ -232,6 +321,11 @@ adapter_check || exit 3
 # Conservative on purpose: an adapter that does not implement it is assumed to
 # have run, so no harness silently loses runs from its denominator.
 declare -F adapter_ran >/dev/null 2>&1 || adapter_ran() { return 0; }
+# Optional too: an adapter that binds neither reports no version and no
+# model, and a summary says null. The version is read only for a summary;
+# the model is read from every run's stream.
+declare -F adapter_version >/dev/null 2>&1 || adapter_version() { :; }
+declare -F adapter_session_model >/dev/null 2>&1 || adapter_session_model() { :; }
 
 # --- the observation primitive ------------------------------------------------
 # ONE query, ONE run, emitting one JSON record. Non-deterministic by nature, so a
@@ -327,7 +421,8 @@ observe_once() { # $1 query text  $2 subject skill
   adapter_ran "$stream" || inconclusive="true"
 
   printf '%s\n' "$chain" | jq -cRn --argjson inconclusive "$inconclusive" \
-    '{chain: [inputs | select(length > 0)], inconclusive: $inconclusive}'
+    --arg model "$(adapter_session_model "$stream" 2>/dev/null | head -n 1)" \
+    '{chain: [inputs | select(length > 0)], inconclusive: $inconclusive, model: $model}'
 
   [ -n "$harness_home" ] && rm -rf "$harness_home"
   rm -rf "$workdir"; rm -f "$stream" "$errlog"
@@ -352,6 +447,26 @@ fi
 # The tree this run installs, named in the output: a working tree when the
 # plugin is a directory, the pinned commit when it is a ref.
 printf 'plugin   : %s  (%s)\n' "$plugin_tree" "$plugin_note"
+# What a summary will name: the skill text by commit and tree hash, and the
+# description line by its bytes, both read again after the run. A ref is
+# named by the commit it was pinned to, so a branch that moves cannot be
+# named for a tree the run did not install.
+run_models="" # one line per scored run: the model it named, or empty
+if [ -n "$summary" ]; then
+  id_src="$plugin"
+  [ -z "$pin_dir" ] || id_src="$(cat "$pin_dir/commit.txt")"
+  identify "$id_src"; plugin_id="$id_json"
+  echo "identity : $(identity_line "$plugin_id" "$id_why")"
+  no_validation_line
+  skill_md="$(skill_md_in "$plugin_src")"
+  description_sha256="$(lab_description_sha256 "$skill_md" 2>/dev/null)"
+  if [ -z "$description_sha256" ]; then
+    desc_why="the frontmatter of its SKILL.md has no line that begins description:"
+    [ -n "$skill_md" ] || desc_why="the installed tree does not hold exactly one SKILL.md for $skill"
+    echo "description: unhashed ($desc_why) — bin/report will not record this summary"
+  fi
+  harness_version="$(adapter_version 2>/dev/null | head -n 1)"
+fi
 
 # A skill with no held-out set scores nothing in the holdout split.
 [ "${#sets[@]}" -gt 0 ] || printf '\n  (no queries in this split)\n'
@@ -402,6 +517,7 @@ for f in "${sets[@]}"; do
       jq -e . >/dev/null 2>&1 <<<"$rec" || continue
       [ "$(jq -r '.inconclusive' <<<"$rec")" = "true" ] && continue
       valid=$((valid + 1))
+      run_models="$run_models$(jq -r '.model // ""' <<<"$rec")"$'\n'
       chains="$chains$(jq -r '.chain | join(">")' <<<"$rec")"$'\n'
       jq -e --arg s "$subject" 'any(.chain[]; sub("^sdlc-skills:";"") == $s)' >/dev/null <<<"$rec" &&
         fired=$((fired + 1))
@@ -469,6 +585,37 @@ failed="$(jq -rs '[.[] | select(.verdict == "FAIL")] | length' "$results")"
 [ "$failed" -gt 0 ] && sets_failed=1
 
 [ -n "$jsonout" ] && { jq -s '.' "$results" > "$jsonout"; echo "wrote $jsonout"; }
+
+if [ -n "$summary" ]; then
+  identify "$id_src"
+  if [ "$(jq -cS . <<<"$id_json")" != "$(jq -cS . <<<"$plugin_id")" ]; then
+    echo "identity : $(identity_line '{}' "the tree changed during the run")"
+    plugin_id='{"commit": null, "skill_tree": null}'
+  fi
+  if [ "$(lab_description_sha256 "$(skill_md_in "$plugin_src")" 2>/dev/null)" != "$description_sha256" ]; then
+    echo "description: its line changed during the run — the summary names no description_sha256"
+    description_sha256=""
+  fi
+  model="$(printf '%s' "$run_models" | sort -u)"
+  case "$model" in *$'\n'*) model="";; esac
+  jq -s --arg skill "$skill" --arg harness "$harness" --arg hv "$harness_version" --arg model "$model" \
+    --arg desc "$description_sha256" --argjson plugin "$plugin_id" --argjson runs "$runs" '
+    def known: if . == "" then null else . end;
+    def count(f): map(select(f)) | length;
+    . as $rows
+    | {metadata: {skill: $skill, harness: $harness, harness_version: ($hv | known), model: ($model | known),
+         plugin: $plugin, description_sha256: ($desc | known), runs: $runs, threshold: 0.5},
+       splits: ([("train", "validation", "holdout") as $s
+         | ($rows | map(select(.split == $s))) | select(length > 0)
+         | {queries: length, passed: count(.verdict == "PASS"), failed: count(.verdict == "FAIL"),
+            inconclusive: count(.verdict == "INCONCLUSIVE")}
+         | .pass_rate = (if .passed + .failed > 0 then .passed / (.passed + .failed) else null end)
+         | {key: $s, value: .}] | from_entries),
+       queries: ($rows | map({query, should_trigger, split,
+         trigger_rate: (if .valid > 0 then .fired / .valid else null end), verdict}))}' \
+    "$results" > "$summary" || { echo "could not write --summary $summary" >&2; exit 2; }
+  echo "wrote $summary"
+fi
 
 # Live, non-deterministic runs. A rate is evidence; one eval is not a mandate.
 # Revise against TRAIN failures only — tuning on validation overfits it away.

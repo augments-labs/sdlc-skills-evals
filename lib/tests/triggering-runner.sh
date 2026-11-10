@@ -314,6 +314,376 @@ else
   ok "the header carries no build-only ban"
 fi
 
+# --- a summary for the record ------------------------------------------------
+#
+# --summary PATH writes one JSON object beside the per-query records: which
+# skill text and which description the run scored, the per-split counts, and
+# one row per query. bin/report copies it into a record. It carries no
+# transcript, stream, or observed routing.
+
+sha() { printf '%s' "$1" | sha256sum | cut -d' ' -f1; }
+sumrepo="$work/sumrepo"
+mkdir -p "$sumrepo/skills/common/probe"
+printf -- '---\nname: probe\ndescription: "probe one"\n---\n\nbody\n' > "$sumrepo/skills/common/probe/SKILL.md"
+git -C "$sumrepo" init -q
+git -C "$sumrepo" add -A
+git -C "$sumrepo" -c user.name=t -c user.email=t@example.invalid commit -q -m probe
+sum_commit="$(git -C "$sumrepo" rev-parse HEAD)"
+sum_tree="$(git -C "$sumrepo" rev-parse HEAD:skills/common/probe)"
+sumdesc="$work/sumdesc"
+mkdir -p "$sumdesc/holdout"
+printf '%s\n' '[{"query":"fire a","should_trigger":true,"split":"train"},
+ {"query":"quiet b","should_trigger":false,"split":"train"},
+ {"query":"fire c","should_trigger":true,"split":"validation"},
+ {"query":"quiet d","should_trigger":false,"split":"validation"},
+ {"query":"fire wrongly e","should_trigger":false,"split":"validation"},
+ {"query":"refused f","should_trigger":true,"split":"validation"}]' > "$sumdesc/probe.json"
+printf '%s\n' '[{"query":"fire h","should_trigger":true,"split":"holdout"}]' > "$sumdesc/holdout/probe.json"
+# the session: names its model, fires probe on a "fire" query, and is
+# refused by its provider on a "refused" one
+sumhook="$work/sumhook.sh"
+cat > "$sumhook" <<'HOOK'
+#!/usr/bin/env bash
+case "${SUM_MODELS:-one}" in
+  one) printf 'MODEL model-x\n';;
+  differ) printf 'MODEL model-%s\n' "$(printf '%s' "$2" | cksum | cut -d' ' -f1)";;
+  some) case "$2" in quiet*) ;; *) printf 'MODEL model-x\n';; esac;;
+  none) ;;
+esac
+[ -z "${SUM_DIRTY:-}" ] || printf 'edited\n' >> "$1/skills/common/probe/SKILL.md"
+[ -z "${SUM_DESC_EDIT:-}" ] || sed -i 's/^description: .*/description: "probe two"/' "$1/skills/common/probe/SKILL.md"
+[ -z "${SUM_LOCK:-}" ] || chmod 444 "$SUM_LOCK"
+case "$2" in
+  fire*) printf 'probe\n';;
+  refused*) printf 'usage limit exceeded\n';;
+esac
+HOOK
+chmod +x "$sumhook"
+sumrun() { # $1 tag, rest: arguments — out in $work/$1.out, summary in $work/$1.json;
+  # SUM_ROOT and SUM_HOOK replace the query sets and the session
+  local tag="$1"; shift
+  DESCRIPTIONS_ROOT="${SUM_ROOT:-$sumdesc}" FAKE_ACTIVATION_HOOK="${SUM_HOOK:-$sumhook}" "$here/bin/triggering" \
+    --harness fake --harness-dir "$fake_h" --skill probe --runs 2 --jobs 1 \
+    --summary "$work/$tag.json" "$@" > "$work/$tag.out" 2>&1
+}
+
+FAKE_VERSION=9.8.7 sumrun sum --plugin "$sumrepo" --json "$work/sum-records.json"; rc=$?
+[ "$rc" -eq 1 ] && grep -qF "wrote $work/sum.json" "$work/sum.out" \
+  && ok "--summary writes the summary and keeps the sheet's exit code" \
+  || bad "--summary writes the summary and keeps the sheet's exit code (rc $rc: $(tail -n 3 "$work/sum.out"))"
+jq -e --arg c "$sum_commit" --arg t "$sum_tree" --arg d "$(sha 'description: "probe one"')" '
+  .metadata == {skill: "probe", harness: "fake", harness_version: "9.8.7", model: "model-x",
+    plugin: {commit: $c, skill_tree: $t}, description_sha256: $d, runs: 2, threshold: 0.5}' \
+  "$work/sum.json" >/dev/null 2>&1 \
+  && ok "the metadata names the skill text, the description, the CLI, the model, runs and threshold" \
+  || bad "the metadata names the skill text, the description, the CLI, the model, runs and threshold ($(jq -c .metadata "$work/sum.json" 2>&1))"
+jq -e '
+  .splits == {
+    train: {queries: 2, passed: 2, failed: 0, inconclusive: 0, pass_rate: 1},
+    validation: {queries: 4, passed: 2, failed: 1, inconclusive: 1, pass_rate: (2 / 3)}}' \
+  "$work/sum.json" >/dev/null 2>&1 \
+  && ok "each split scored is counted; the pass rate leaves the inconclusive out" \
+  || bad "each split scored is counted; the pass rate leaves the inconclusive out ($(jq -c .splits "$work/sum.json" 2>&1))"
+jq -e '
+  .queries == [
+    {query: "fire a", should_trigger: true, split: "train", trigger_rate: 1, verdict: "PASS"},
+    {query: "quiet b", should_trigger: false, split: "train", trigger_rate: 0, verdict: "PASS"},
+    {query: "fire c", should_trigger: true, split: "validation", trigger_rate: 1, verdict: "PASS"},
+    {query: "quiet d", should_trigger: false, split: "validation", trigger_rate: 0, verdict: "PASS"},
+    {query: "fire wrongly e", should_trigger: false, split: "validation", trigger_rate: 1, verdict: "FAIL"},
+    {query: "refused f", should_trigger: true, split: "validation", trigger_rate: null, verdict: "INCONCLUSIVE"}]' \
+  "$work/sum.json" >/dev/null 2>&1 \
+  && ok "one row per query, in file order, with its rate and verdict" \
+  || bad "one row per query, in file order, with its rate and verdict ($(jq -c .queries "$work/sum.json" 2>&1))"
+# no transcript, stream, or observed routing enters the summary
+jq -e '(keys == ["metadata", "queries", "splits"])
+  and all(.queries[]; keys == ["query", "should_trigger", "split", "trigger_rate", "verdict"])' \
+  "$work/sum.json" >/dev/null 2>&1 \
+  && ! grep -qE 'observed|usage limit|chain|EDIT ' "$work/sum.json" \
+  && ok "the summary carries no stream, transcript, or observed routing" \
+  || bad "the summary carries no stream, transcript, or observed routing"
+# the per-query records are what they were
+jq -e 'length == 6 and all(.[]; keys == ["fired", "observed", "query", "rate", "should_trigger", "skill", "split", "valid", "verdict"])' \
+  "$work/sum-records.json" >/dev/null 2>&1 \
+  && ok "--json beside --summary writes the same per-query records" \
+  || bad "--json beside --summary writes the same per-query records ($(jq -c '.[0]' "$work/sum-records.json" 2>&1))"
+
+# a model is one every scored run named; anything else is null, never a guess
+SUM_MODELS=differ sumrun sumdiffer --plugin "$sumrepo"
+jq -e '.metadata.model == null and .metadata.harness_version == null' "$work/sumdiffer.json" >/dev/null 2>&1 \
+  && ok "runs that name different models record a null model; no version read is null" \
+  || bad "runs that name different models record a null model; no version read is null ($(jq -c .metadata "$work/sumdiffer.json" 2>&1))"
+SUM_MODELS=some sumrun sumsome --plugin "$sumrepo"
+jq -e '.metadata.model == null' "$work/sumsome.json" >/dev/null 2>&1 \
+  && ok "a model only some scored runs named is null" \
+  || bad "a model only some scored runs named is null ($(jq -c .metadata "$work/sumsome.json" 2>&1))"
+SUM_MODELS=none sumrun sumnone --plugin "$sumrepo"
+jq -e '.metadata.model == null' "$work/sumnone.json" >/dev/null 2>&1 \
+  && ok "no model named is null" || bad "no model named is null ($(jq -c .metadata "$work/sumnone.json" 2>&1))"
+
+# a ref is pinned: the summary names the commit it resolved to
+git -C "$sumrepo" tag sumtag
+SDLC_SKILLS_ROOT="$sumrepo" sumrun sumref --plugin sumtag
+jq -e --arg c "$sum_commit" --arg t "$sum_tree" --arg d "$(sha 'description: "probe one"')" '
+  .metadata.plugin == {commit: $c, skill_tree: $t} and .metadata.description_sha256 == $d' \
+  "$work/sumref.json" >/dev/null 2>&1 \
+  && ok "a ref is named by the full commit it was pinned to" \
+  || bad "a ref is named by the full commit it was pinned to ($(jq -c .metadata "$work/sumref.json" 2>&1): $(tail -n 2 "$work/sumref.out"))"
+
+# skill text that is no commit's: scored all the same, named by nothing
+cp -r "$sumrepo" "$work/sumplain"; rm -rf "$work/sumplain/.git"
+sumrun sumplain --plugin "$work/sumplain"; rc=$?
+[ "$rc" -eq 1 ] && jq -e --arg d "$(sha 'description: "probe one"')" '
+  .metadata.plugin == {commit: null, skill_tree: null} and .metadata.description_sha256 == $d
+  and .splits.validation.queries == 4' "$work/sumplain.json" >/dev/null 2>&1 \
+  && grep -q 'identity *: .*unidentified.*bin/report' "$work/sumplain.out" \
+  && ok "a plugin directory outside git is scored, unnamed, and said so before the run" \
+  || bad "a plugin directory outside git is scored, unnamed, and said so before the run (rc $rc: $(jq -c .metadata "$work/sumplain.json" 2>&1))"
+cp -r "$sumrepo" "$work/sumdirty"
+SUM_DIRTY=1 sumrun sumdirty --plugin "$work/sumdirty"
+jq -e '.metadata.plugin == {commit: null, skill_tree: null}' "$work/sumdirty.json" >/dev/null 2>&1 \
+  && grep -q 'identity *: .*changed during the run' "$work/sumdirty.out" \
+  && ok "a plugin edited during the run ends unidentified" \
+  || bad "a plugin edited during the run ends unidentified ($(jq -c .metadata "$work/sumdirty.json" 2>&1))"
+# a tree with no description for the skill has no description hash
+sumrun sumnoskill --plugin "$standin"
+jq -e '.metadata.description_sha256 == null and .metadata.plugin.skill_tree == null' \
+  "$work/sumnoskill.json" >/dev/null 2>&1 \
+  && ok "a tree without the skill has a null description hash" \
+  || bad "a tree without the skill has a null description hash ($(jq -c .metadata "$work/sumnoskill.json" 2>&1))"
+
+# only the splits that were scored appear
+sumrun sumtrain --plugin "$sumrepo" --split train
+jq -e '(.splits | keys) == ["train"] and (.queries | length) == 2' "$work/sumtrain.json" >/dev/null 2>&1 \
+  && ok "--split train summarizes train alone" \
+  || bad "--split train summarizes train alone ($(jq -c .splits "$work/sumtrain.json" 2>&1))"
+sumrun sumhold --plugin "$sumrepo" --split holdout
+jq -e '.splits == {holdout: {queries: 1, passed: 1, failed: 0, inconclusive: 0, pass_rate: 1}}' \
+  "$work/sumhold.json" >/dev/null 2>&1 \
+  && ok "--split holdout summarizes the holdout alone" \
+  || bad "--split holdout summarizes the holdout alone ($(jq -c .splits "$work/sumhold.json" 2>&1))"
+
+# refused before anything is launched: a summary is one skill's, and its
+# directory must exist before the run is paid for
+sum_launch="$work/sum-launch.log"
+DESCRIPTIONS_ROOT="$sumdesc" FAKE_LAUNCH_LOG="$sum_launch" "$here/bin/triggering" --harness fake \
+  --harness-dir "$fake_h" --plugin "$sumrepo" --all --runs 1 --summary "$work/sumall.json" >"$work/sumall.out" 2>&1; rc=$?
+[ "$rc" -eq 2 ] && [ ! -e "$work/sumall.json" ] && [ ! -e "$sum_launch" ] && grep -q -- '--summary' "$work/sumall.out" \
+  && ok "--summary with --all is refused before any launch" \
+  || bad "--summary with --all is refused before any launch (rc $rc: $(cat "$work/sumall.out"))"
+DESCRIPTIONS_ROOT="$sumdesc" FAKE_LAUNCH_LOG="$sum_launch" "$here/bin/triggering" --harness fake \
+  --harness-dir "$fake_h" --plugin "$sumrepo" --skill probe --runs 1 \
+  --summary "$work/no-such-dir/sum.json" >"$work/sumnodir.out" 2>&1; rc=$?
+[ "$rc" -eq 2 ] && [ ! -e "$sum_launch" ] && grep -q -- '--summary' "$work/sumnodir.out" \
+  && ok "a --summary path in a missing directory is refused before any launch" \
+  || bad "a --summary path in a missing directory is refused before any launch (rc $rc: $(cat "$work/sumnodir.out"))"
+
+# a path that begins with - is an option swallowed by mistake, never a file
+DESCRIPTIONS_ROOT="$sumdesc" FAKE_LAUNCH_LOG="$sum_launch" "$here/bin/triggering" --harness fake \
+  --harness-dir "$fake_h" --plugin "$sumrepo" --skill probe --runs 1 --summary --dry-run >"$work/sumopt.out" 2>&1; rc=$?
+[ "$rc" -eq 2 ] && [ ! -e "$sum_launch" ] && grep -q -- '--summary needs a path' "$work/sumopt.out" \
+  && ok "--summary followed by an option is refused: it needs a path" \
+  || bad "--summary followed by an option is refused: it needs a path (rc $rc: $(cat "$work/sumopt.out"))"
+# what cannot be written is refused before the run, not after it
+mkdir -p "$work/sum-is-a-dir"
+DESCRIPTIONS_ROOT="$sumdesc" FAKE_LAUNCH_LOG="$sum_launch" "$here/bin/triggering" --harness fake \
+  --harness-dir "$fake_h" --plugin "$sumrepo" --skill probe --runs 1 \
+  --summary "$work/sum-is-a-dir" >"$work/sumisdir.out" 2>&1; rc=$?
+[ "$rc" -eq 2 ] && [ ! -e "$sum_launch" ] && grep -q -- '--summary .*is a directory' "$work/sumisdir.out" \
+  && ok "a --summary path that is a directory is refused before any launch" \
+  || bad "a --summary path that is a directory is refused before any launch (rc $rc: $(tail -n 2 "$work/sumisdir.out"))"
+if [ "$(id -u)" -ne 0 ]; then
+  mkdir -p "$work/sum-readonly"; chmod 555 "$work/sum-readonly"
+  DESCRIPTIONS_ROOT="$sumdesc" FAKE_LAUNCH_LOG="$sum_launch" "$here/bin/triggering" --harness fake \
+    --harness-dir "$fake_h" --plugin "$sumrepo" --skill probe --runs 1 \
+    --summary "$work/sum-readonly/sum.json" >"$work/sumro.out" 2>&1; rc=$?
+  chmod 755 "$work/sum-readonly"
+  [ "$rc" -eq 2 ] && [ ! -e "$sum_launch" ] && grep -q -- '--summary .*cannot be written' "$work/sumro.out" \
+    && ok "a --summary path in a read-only directory is refused before any launch" \
+    || bad "a --summary path in a read-only directory is refused before any launch (rc $rc: $(tail -n 2 "$work/sumro.out"))"
+else
+  ok "a --summary path in a read-only directory: not checked as root"
+fi
+
+# a skill whose SKILL.md has no description line: scored, and said to be unrecordable
+sumnodesc="$work/sumnodesc"
+mkdir -p "$sumnodesc/skills/common/probe"
+printf -- '---\nname: probe\n---\n\ndescription: body line\n' > "$sumnodesc/skills/common/probe/SKILL.md"
+git -C "$sumnodesc" init -q
+git -C "$sumnodesc" add -A
+git -C "$sumnodesc" -c user.name=t -c user.email=t@example.invalid commit -q -m probe
+sumrun sumnodesc --plugin "$sumnodesc"
+jq -e '.metadata.description_sha256 == null and (.metadata.plugin.skill_tree | type) == "string"' \
+  "$work/sumnodesc.json" >/dev/null 2>&1 \
+  && grep -q '^description: unhashed (.*) — bin/report will not record this summary$' "$work/sumnodesc.out" \
+  && ok "a SKILL.md with no description line is scored, and the run says the summary cannot be recorded" \
+  || bad "a SKILL.md with no description line is scored, and the run says the summary cannot be recorded ($(jq -c .metadata "$work/sumnodesc.json" 2>&1): $(grep '^description' "$work/sumnodesc.out"))"
+grep -q '^description: ' "$work/sum.out" \
+  && bad "a run that hashed its description prints no description line" \
+  || ok "a run that hashed its description prints no description line"
+
+# the plan names the summary and the identity a run would record
+out="$(DESCRIPTIONS_ROOT="$sumdesc" "$here/bin/triggering" --harness fake --harness-dir "$fake_h" \
+  --skill probe --plugin "$sumrepo" --runs 2 --jobs 1 --split all --timeout 30 --max-turns 4 \
+  --json "$work/plan.json" --summary "$work/plan-sum.json" --no-fixture --dry-run 2>&1)"
+want="bin/triggering --harness fake --skill probe --plugin $sumrepo --runs 2 --jobs 1 --split all --timeout 30 --max-turns 4 --json $work/plan.json --summary $work/plan-sum.json --no-fixture --harness-dir $fake_h"
+[ "$(plan_cmd "$out")" = "$want" ] && [ ! -e "$work/plan-sum.json" ] \
+  && ok "the dry run names --summary in the planned invocation and writes nothing" \
+  || bad "the dry run names --summary in the planned invocation and writes nothing (got '$(plan_cmd "$out")')"
+plan_all="$out"
+printf '%s\n' "$out" | grep -q "^identity : $sum_commit  skill_tree $sum_tree\$" \
+  && ok "the dry run names the skill text a summary would carry" \
+  || bad "the dry run names the skill text a summary would carry (got '$(printf '%s\n' "$out" | grep identity)')"
+out="$(DESCRIPTIONS_ROOT="$sumdesc" "$here/bin/triggering" --harness fake --harness-dir "$fake_h" \
+  --skill probe --plugin "$work/sumplain" --summary "$work/plan-sum.json" --dry-run 2>&1)"
+printf '%s\n' "$out" | grep -q '^identity : unidentified (.*) — bin/report will not record this summary$' \
+  && ok "the dry run says when the summary could not be recorded" \
+  || bad "the dry run says when the summary could not be recorded (got '$(printf '%s\n' "$out" | grep identity)')"
+out="$(DESCRIPTIONS_ROOT="$sumdesc" "$here/bin/triggering" --harness fake --harness-dir "$fake_h" \
+  --skill probe --plugin "$sumrepo" --dry-run 2>&1)"
+printf '%s\n' "$out" | grep -q '^identity ' \
+  && bad "a dry run without --summary prints no identity line" \
+  || ok "a dry run without --summary prints no identity line"
+# a split without validation cannot be recorded: the plan and the run say so
+out="$(DESCRIPTIONS_ROOT="$sumdesc" "$here/bin/triggering" --harness fake --harness-dir "$fake_h" \
+  --skill probe --plugin "$sumrepo" --split train --summary "$work/plan-sum.json" --dry-run 2>&1)"
+printf '%s\n' "$out" | grep -q '^summary  : no validation split (--split train) — bin/report will not record this summary$' \
+  && grep -q '^summary  : no validation split (--split holdout) — bin/report will not record' "$work/sumhold.out" \
+  && ok "a summary of train or holdout alone is said to be unrecordable, in the plan and in the run" \
+  || bad "a summary of train or holdout alone is said to be unrecordable, in the plan and in the run (got '$(printf '%s\n' "$out" | grep '^summary')')"
+{ grep -q '^summary  : ' "$work/sum.out" || grep -q '^summary  : ' <<<"$plan_all"; } \
+  && bad "a summary that includes validation prints no such line" \
+  || ok "a summary that includes validation prints no such line"
+printf '%s\n' "$help_text" | grep -q -- '--summary PATH' \
+  && ok "--help documents --summary" || bad "--help documents --summary"
+
+# the seam: what bin/triggering wrote is what bin/report records or refuses
+"$here/bin/report" --triggering "$work/sum.json" --record "$work/sumrec" >"$work/sumrec.out" 2>&1; rc=$?
+[ "$rc" -eq 0 ] && cmp -s "$work/sum.json" "$work/sumrec/triggering.json" \
+  && ok "bin/report records a named summary with a failing query" \
+  || bad "bin/report records a named summary with a failing query (rc $rc: $(cat "$work/sumrec.out"))"
+for t in sumplain:skill_tree sumdirty:skill_tree sumtrain:validation sumhold:validation sumnodesc:description_sha256; do
+  "$here/bin/report" --triggering "$work/${t%%:*}.json" --record "$work/${t%%:*}-rec" >"$work/${t%%:*}-rec.out" 2>&1; rc=$?
+  [ "$rc" -eq 2 ] && [ ! -e "$work/${t%%:*}-rec" ] && grep -q "${t##*:}" "$work/${t%%:*}-rec.out" \
+    && ok "bin/report refuses the ${t%%:*} summary for its ${t##*:}" \
+    || bad "bin/report refuses the ${t%%:*} summary for its ${t##*:} (rc $rc: $(cat "$work/${t%%:*}-rec.out"))"
+done
+
+# a description line edited during the run: the summary names no description
+cp -r "$sumrepo" "$work/sumdescedit"
+SUM_DESC_EDIT=1 sumrun sumdescedit --plugin "$work/sumdescedit"
+jq -e '.metadata.description_sha256 == null' "$work/sumdescedit.json" >/dev/null 2>&1 \
+  && grep -q '^description: its line changed during the run' "$work/sumdescedit.out" \
+  && ok "a description line edited during the run ends unhashed, and the run says so" \
+  || bad "a description line edited during the run ends unhashed, and the run says so ($(jq -c .metadata "$work/sumdescedit.json" 2>&1): $(grep '^description' "$work/sumdescedit.out"))"
+# ...and an edit that leaves the line alone leaves its hash: the tree changed, the line did not
+jq -e --arg d "$(sha 'description: "probe one"')" '.metadata.description_sha256 == $d' \
+  "$work/sumdirty.json" >/dev/null 2>&1 && ! grep -q '^description: ' "$work/sumdirty.out" \
+  && ok "an edit below the frontmatter leaves the description hash" \
+  || bad "an edit below the frontmatter leaves the description hash ($(jq -c .metadata "$work/sumdirty.json" 2>&1))"
+
+# the skill directory with no phase: skills/<skill>
+sumflat="$work/sumflat"
+mkdir -p "$sumflat/skills/probe"
+printf -- '---\nname: probe\ndescription: "probe flat"\n---\n\nbody\n' > "$sumflat/skills/probe/SKILL.md"
+git -C "$sumflat" init -q
+git -C "$sumflat" add -A
+git -C "$sumflat" -c user.name=t -c user.email=t@example.invalid commit -q -m probe
+sumrun sumflat --plugin "$sumflat"
+jq -e --arg t "$(git -C "$sumflat" rev-parse HEAD:skills/probe)" --arg d "$(sha 'description: "probe flat"')" '
+  .metadata.plugin.skill_tree == $t and .metadata.description_sha256 == $d' "$work/sumflat.json" >/dev/null 2>&1 \
+  && ok "a skill at skills/<skill> is named by that directory's tree and its description" \
+  || bad "a skill at skills/<skill> is named by that directory's tree and its description ($(jq -c .metadata "$work/sumflat.json" 2>&1))"
+# two directories for one skill name: no description is the skill's
+sumtwo="$work/sumtwo"
+cp -r "$sumflat" "$sumtwo"
+mkdir -p "$sumtwo/skills/common/probe"
+printf -- '---\nname: probe\ndescription: "probe phase"\n---\n' > "$sumtwo/skills/common/probe/SKILL.md"
+git -C "$sumtwo" add -A
+git -C "$sumtwo" -c user.name=t -c user.email=t@example.invalid commit -q -m two
+sumrun sumtwo --plugin "$sumtwo"
+jq -e '.metadata.description_sha256 == null' "$work/sumtwo.json" >/dev/null 2>&1 \
+  && grep -q '^description: unhashed (the installed tree does not hold exactly one SKILL.md for probe)' "$work/sumtwo.out" \
+  && ok "a tree with two SKILL.md for the skill has no description hash, and the run says why" \
+  || bad "a tree with two SKILL.md for the skill has no description hash, and the run says why ($(jq -c .metadata "$work/sumtwo.json" 2>&1): $(grep '^description' "$work/sumtwo.out"))"
+
+# rates: exact in the summary, over the conclusive runs, and 0.5 passes neither way
+ratedesc="$work/ratedesc"; ratecount="$work/ratecount"
+mkdir -p "$ratedesc" "$ratecount"
+printf '%s\n' '[{"query":"fire a","should_trigger":true,"split":"train"},
+ {"query":"twothirds b","should_trigger":true,"split":"validation"},
+ {"query":"half c","should_trigger":true,"split":"validation"},
+ {"query":"half d","should_trigger":false,"split":"validation"}]' > "$ratedesc/probe.json"
+# the session counts its runs of each query: "twothirds" fires on the first
+# two; "half" fires on the first, stays quiet on the second, is refused on the third
+ratehook="$work/ratehook.sh"
+cat > "$ratehook" <<'HOOK'
+#!/usr/bin/env bash
+printf 'MODEL model-x\n'
+seen="$RATE_COUNT/$(printf '%s' "$2" | cksum | cut -d' ' -f1)"
+n=$(( $(cat "$seen" 2>/dev/null || echo 0) + 1 ))
+printf '%s\n' "$n" > "$seen"
+case "$2" in
+  fire*) printf 'probe\n';;
+  twothirds*) [ "$n" -gt 2 ] || printf 'probe\n';;
+  half*) case "$n" in 1) printf 'probe\n';; 3) printf 'usage limit exceeded\n';; esac;;
+esac
+exit 0
+HOOK
+chmod +x "$ratehook"
+RATE_COUNT="$ratecount" SUM_ROOT="$ratedesc" SUM_HOOK="$ratehook" sumrun sumrate --plugin "$sumrepo" --runs 3
+jq -e '.metadata.runs == 3
+  and (.queries | map({key: .query, value: [.trigger_rate, .verdict]}) | from_entries) ==
+    {"fire a": [1, "PASS"], "twothirds b": [(2/3), "PASS"], "half c": [0.5, "FAIL"], "half d": [0.5, "FAIL"]}
+  and .splits.validation == {queries: 3, passed: 1, failed: 2, inconclusive: 0, pass_rate: (1/3)}' \
+  "$work/sumrate.json" >/dev/null 2>&1 \
+  && ok "trigger_rate and pass_rate are exact, a refused run leaves the denominator, and 0.5 passes neither way" \
+  || bad "trigger_rate and pass_rate are exact, a refused run leaves the denominator, and 0.5 passes neither way ($(jq -c '[.queries, .splits]' "$work/sumrate.json" 2>&1))"
+
+# a validation split whose every query was refused: no rate, and still a record
+incdesc="$work/incdesc"
+mkdir -p "$incdesc"
+printf '%s\n' '[{"query":"fire a","should_trigger":true,"split":"train"},
+ {"query":"refused b","should_trigger":true,"split":"validation"},
+ {"query":"refused c","should_trigger":false,"split":"validation"}]' > "$incdesc/probe.json"
+SUM_ROOT="$incdesc" sumrun suminc --plugin "$sumrepo"
+jq -e '.splits.validation == {queries: 2, passed: 0, failed: 0, inconclusive: 2, pass_rate: null}
+  and ([.queries[] | select(.split == "validation") | [.trigger_rate, .verdict]] | unique) == [[null, "INCONCLUSIVE"]]' \
+  "$work/suminc.json" >/dev/null 2>&1 \
+  && ok "a split whose every query was refused has a null pass rate and null trigger rates" \
+  || bad "a split whose every query was refused has a null pass rate and null trigger rates ($(jq -c '[.queries, .splits]' "$work/suminc.json" 2>&1))"
+"$here/bin/report" --triggering "$work/suminc.json" --record "$work/suminc-rec" >"$work/suminc-rec.out" 2>&1; rc=$?
+[ "$rc" -eq 0 ] && cmp -s "$work/suminc.json" "$work/suminc-rec/triggering.json" \
+  && ok "bin/report records a summary whose validation split was all inconclusive" \
+  || bad "bin/report records a summary whose validation split was all inconclusive (rc $rc: $(cat "$work/suminc-rec.out"))"
+
+# the summary file: an earlier one is replaced; one that cannot be written is
+# refused before any launch, and said to be lost when it turns so during the run
+printf 'stale\n' > "$work/sumover.json"
+sumrun sumover --plugin "$sumrepo"
+jq -e '.metadata.skill == "probe" and (.queries | length) == 6' "$work/sumover.json" >/dev/null 2>&1 \
+  && ok "an existing --summary file is replaced" \
+  || bad "an existing --summary file is replaced ($(head -c 200 "$work/sumover.json"))"
+if [ "$(id -u)" -ne 0 ]; then
+  printf 'stale\n' > "$work/sumrofile.json"; chmod 444 "$work/sumrofile.json"
+  DESCRIPTIONS_ROOT="$sumdesc" FAKE_LAUNCH_LOG="$sum_launch" "$here/bin/triggering" --harness fake \
+    --harness-dir "$fake_h" --plugin "$sumrepo" --skill probe --runs 1 \
+    --summary "$work/sumrofile.json" >"$work/sumrofile.out" 2>&1; rc=$?
+  [ "$rc" -eq 2 ] && [ ! -e "$sum_launch" ] && grep -q -- '--summary .*cannot be written' "$work/sumrofile.out" \
+    && [ "$(cat "$work/sumrofile.json")" = stale ] \
+    && ok "an existing read-only --summary file is refused before any launch, and left as it was" \
+    || bad "an existing read-only --summary file is refused before any launch, and left as it was (rc $rc: $(tail -n 2 "$work/sumrofile.out"))"
+  printf 'stale\n' > "$work/sumlost.json"
+  SUM_LOCK="$work/sumlost.json" sumrun sumlost --plugin "$sumrepo"; rc=$?
+  [ "$rc" -eq 2 ] && grep -q "^could not write --summary $work/sumlost.json\$" "$work/sumlost.out" \
+    && ! grep -q '^wrote .*sumlost.json' "$work/sumlost.out" && [ "$(cat "$work/sumlost.json")" = stale ] \
+    && ok "a --summary file that turns read-only during the run is said to be unwritten, exit 2" \
+    || bad "a --summary file that turns read-only during the run is said to be unwritten, exit 2 (rc $rc: $(tail -n 3 "$work/sumlost.out"))"
+else
+  ok "an existing read-only --summary file: not checked as root"
+  ok "a --summary file that turns read-only during the run: not checked as root"
+fi
+
 # --- no invented monetary cost ----------------------------------------------
 #
 # The offline paths report the plan, never a price. The pattern is a

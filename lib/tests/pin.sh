@@ -297,4 +297,102 @@ got="$(ident "$(git -C "$idrepo" rev-parse HEAD)" probe)"
   && ok "the skill tree is the same under a different commit" \
   || bad "the skill tree is the same under a different commit (got '$got')"
 
+# --- which description a tree carries -----------------------------------------
+#
+# lab_description_sha256 <SKILL.md> prints the SHA-256 of the exact bytes of
+# the frontmatter line that begins `description:`, without its newline. The
+# plugin's CI computes the same value, so the bytes are pinned here against
+# sha256sum on the literal line.
+
+sha() { printf '%s' "$1" | sha256sum | cut -d' ' -f1; }
+dfile="$idwork/SKILL.md"
+printf -- '---\nname: probe\ndescription: "probe one"\nlicense: x\n---\n\ndescription: body line\n' > "$dfile"
+got="$(lab_description_sha256 "$dfile")"
+[ "$got" = "$(sha 'description: "probe one"')" ] \
+  && ok "the description line is hashed without its newline" \
+  || bad "the description line is hashed without its newline (got '$got')"
+[ "$got" != "$(printf 'description: "probe one"\n' | sha256sum | cut -d' ' -f1)" ] \
+  && ok "the newline is not part of the hash" || bad "the newline is not part of the hash"
+printf -- '---\nname: probe\n---\n\ndescription: body line\n' > "$dfile"
+got="$(lab_description_sha256 "$dfile")"; rc=$?
+[ -z "$got" ] && [ "$rc" -ne 0 ] \
+  && ok "a description: line outside the frontmatter is not the description" \
+  || bad "a description: line outside the frontmatter is not the description (got '$got', rc $rc)"
+printf 'description: no frontmatter\n' > "$dfile"
+got="$(lab_description_sha256 "$dfile")"; rc=$?
+[ -z "$got" ] && [ "$rc" -ne 0 ] \
+  && ok "a file with no frontmatter has no description hash" \
+  || bad "a file with no frontmatter has no description hash (got '$got', rc $rc)"
+printf -- '---\n  description: nested\ndescription: first\ndescription: second\n---\n' > "$dfile"
+got="$(lab_description_sha256 "$dfile")"
+[ "$got" = "$(sha 'description: first')" ] \
+  && ok "the first line that begins description: is the one hashed" \
+  || bad "the first line that begins description: is the one hashed (got '$got')"
+# every byte of the line but its LF counts: trailing spaces and a CR included
+printf -- '---\ndescription: padded  \r\n---\n' > "$dfile"
+got="$(lab_description_sha256 "$dfile")"
+[ "$got" = "$(printf 'description: padded  \r' | sha256sum | cut -d' ' -f1)" ] \
+  && ok "trailing bytes before the newline are hashed as they are" \
+  || bad "trailing bytes before the newline are hashed as they are (got '$got')"
+printf -- '---\ndescription: caf\303\251 \342\200\224 dash\n---\n' > "$dfile"
+got="$(lab_description_sha256 "$dfile")"
+[ "$got" = "$(printf 'description: caf\303\251 \342\200\224 dash' | sha256sum | cut -d' ' -f1)" ] \
+  && ok "non-ASCII bytes are hashed as they are" \
+  || bad "non-ASCII bytes are hashed as they are (got '$got')"
+# the frontmatter delimiters are exactly ---: a file with CRLF line endings
+# opens with "---\r", so it has no frontmatter and no description hash
+printf -- '---\r\ndescription: crlf\r\n---\r\n' > "$dfile"
+got="$(lab_description_sha256 "$dfile")"; rc=$?
+[ -z "$got" ] && [ "$rc" -ne 0 ] && ok "a SKILL.md with CRLF line endings has no description hash" \
+  || bad "a SKILL.md with CRLF line endings has no description hash (got '$got', rc $rc)"
+got="$(lab_description_sha256 "$idwork/no-such-file")"; rc=$?
+[ -z "$got" ] && [ "$rc" -ne 0 ] && ok "a missing SKILL.md has no description hash" \
+  || bad "a missing SKILL.md has no description hash (got '$got', rc $rc)"
+# the end of the file closes a frontmatter block no --- line closes
+printf -- '---\nname: probe\ndescription: unclosed\nbody\n' > "$dfile"
+got="$(lab_description_sha256 "$dfile")"
+[ "$got" = "$(sha 'description: unclosed')" ] \
+  && ok "a frontmatter block that never closes is read to the end of the file" \
+  || bad "a frontmatter block that never closes is read to the end of the file (got '$got')"
+# only the opening --- is tested for a CR: a closing "---\r" changes nothing
+printf -- '---\ndescription: cr\r\n---\r\n' > "$dfile"
+got="$(lab_description_sha256 "$dfile")"
+[ "$got" = "$(printf 'description: cr\r' | sha256sum | cut -d' ' -f1)" ] \
+  && ok "a CR that ends the description line is hashed where the first line ends in LF alone" \
+  || bad "a CR that ends the description line is hashed where the first line ends in LF alone (got '$got')"
+
+# The command results/README.md prints is the one the plugin's CI runs: it
+# must give the function's value for every file the function hashes, and
+# the SHA-256 of nothing for a file it does not.
+recipe="$(sed -n '/^LC_ALL=C awk /,/| sha256sum$/p' "$lab_root/results/README.md")"
+[ "$(printf '%s\n' "$recipe" | wc -l)" -eq 3 ] \
+  && ok "results/README.md prints the description hash as one three-line command" \
+  || bad "results/README.md prints the description hash as one three-line command (found: $recipe)"
+by_hand() { ( cd "$idwork" && bash -c "$recipe" | cut -d' ' -f1 ); }
+same=1
+for content in '---\nname: probe\ndescription: "probe one"\nlicense: x\n---\n\ndescription: body line\n' \
+  '---\n  description: nested\ndescription: first\ndescription: second\n---\n' \
+  '---\ndescription: padded  \r\n---\n' \
+  '---\ndescription: caf\303\251 \342\200\224 dash\n---\n' \
+  '---\nname: probe\ndescription: unclosed\nbody\n' \
+  '---\ndescription: 100%% \\ back\n---\n'; do
+  # shellcheck disable=SC2059 # the fixtures are printf formats on purpose
+  printf -- "$content" > "$dfile"
+  got="$(lab_description_sha256 "$dfile")"
+  [ -n "$got" ] && [ "$got" = "$(by_hand)" ] || { same=0; echo "    differs on: $content (function '$got', by hand '$(by_hand)')"; }
+done
+[ "$same" -eq 1 ] && ok "the documented command gives the function's hash" \
+  || bad "the documented command gives the function's hash"
+empty="$(printf '' | sha256sum | cut -d' ' -f1)"
+none=1
+for content in '---\nname: probe\n---\n\ndescription: body line\n' 'description: no frontmatter\n' \
+  '---\r\ndescription: crlf\r\n---\r\n'; do
+  # shellcheck disable=SC2059 # the fixtures are printf formats on purpose
+  printf -- "$content" > "$dfile"
+  got="$(lab_description_sha256 "$dfile")"
+  [ -z "$got" ] && [ "$(by_hand)" = "$empty" ] || { none=0; echo "    differs on: $content (function '$got', by hand '$(by_hand)')"; }
+done
+[ "$none" -eq 1 ] && ok "where the function has no hash, the documented command hashes nothing" \
+  || bad "where the function has no hash, the documented command hashes nothing"
+
 exit "$fails"

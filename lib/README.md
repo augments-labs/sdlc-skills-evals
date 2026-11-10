@@ -21,6 +21,8 @@ so no test needs a sibling plugin checkout or a live CLI.
   work tree's HEAD, and for a reference the plugin checkout has no commit
   for; a reference whose commit lacks the skill keeps its commit and has a
   null `skill_tree`);
+  `lab_description_sha256 <SKILL.md>` prints the SHA-256 of the frontmatter
+  `description:` line, without its newline;
   `lab_pin_plugin <path|ref> <run-dir>` prints the resolved commit (a
   directory is used as is; a ref becomes a throwaway worktree under the run
   dir) and `lab_pin_cleanup` removes pins. Capture-safe: no caller trap

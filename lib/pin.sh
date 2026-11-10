@@ -243,6 +243,38 @@ lab_pin_identity() {
   _lab_identity_json "$commit" "$tree"
 }
 
+# --- which description a tree carries -----------------------------------------
+#
+# lab_description_sha256 <SKILL.md> — prints the SHA-256 of the exact bytes
+# of the frontmatter line that begins `description:` in the skill's
+# SKILL.md, without its newline. The newline is the one LF byte that ends
+# the line; every other byte of the line is hashed as it is, a trailing
+# space or CR included. The frontmatter is the block a first line of exactly
+# `---` opens and the next line of exactly `---`, or the end of the file,
+# closes; the first line in it that begins `description:` is the one
+# hashed. A file with CRLF line endings therefore has no hash: its first
+# line is `---` and a CR, so it opens no frontmatter. Only that first line
+# is tested so: where it ends in LF alone, a CR that ends the description
+# line is hashed with it. The same value, by hand:
+#
+#   LC_ALL=C awk 'NR == 1 { if ($0 != "---") exit; next }
+#                 $0 == "---" { exit }
+#                 /^description:/ { printf "%s", $0; exit }' SKILL.md | sha256sum
+#
+# Prints nothing and returns 1 when the file has no such line.
+
+lab_description_sha256() {
+  [ "$#" -eq 1 ] || return 127
+  local line
+  [ -r "$1" ] || return 1
+  line="$(LC_ALL=C awk 'NR == 1 { if ($0 != "---") exit; next }
+                        $0 == "---" { exit }
+                        /^description:/ { print; exit }' "$1")" || return 1
+  [ -n "$line" ] || return 1
+  printf '%s' "$line" | sha256sum | cut -d' ' -f1
+}
+
+
 _lab_pin_worktrees=""
 
 _lab_pin_remove() { # $1 worktree path — removes via the owning repo, from any CWD

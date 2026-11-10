@@ -1,6 +1,8 @@
 # results/
 
-Dated records: `results/<date>-<skill>-<harness>/`. A record is committed
+Dated records: `results/<date>-<skill>-<harness>/` for an evaluation and
+`results/<date>-<skill>-<harness>-triggering/` for a triggering run. A
+record is committed
 only when a maintainer deliberately records one; everything under `raw/` and
 every `workspaces/` iteration is ignored and never committed.
 
@@ -58,6 +60,68 @@ installs can differ in bytes from the tree the record names, and the run
 is still identified — from a commit as from a directory, because `git
 archive` converts the same way. A directory that holds a symlink as a
 plain file (`core.symlinks=false`) is identified too.
+
+## What a triggering record is
+
+`bin/triggering --summary <path>` writes one JSON object beside its
+per-query output, and `bin/report --triggering <path> --record
+results/<date>-<skill>-<harness>-triggering` copies it to
+`triggering.json` in the record, and nothing else:
+
+- `metadata` — `skill`, `harness`, `harness_version` and `model` (null
+  under the rules above: `model` is the one every scored run named),
+  `plugin` — `{commit, skill_tree}` as above — `description_sha256`,
+  `runs` (repetitions per query), and `threshold` (0.5: a query that
+  should trigger passes at a trigger rate above 0.5, one that should not
+  passes below it, and a rate of exactly 0.5 fails either way). The
+  verdict is decided on the rate rounded to two decimals, as the sheet
+  prints it, while `trigger_rate` is exact: the two can disagree only for
+  a query with more than 100 conclusive runs.
+- `splits` — for each of `train`, `validation`, and `holdout` a query ran
+  in: `queries`, `passed`, `failed`, `inconclusive`, and `pass_rate`,
+  which is passed / (passed + failed) and null when every query in the
+  split was inconclusive.
+- `queries` — one row per query: `query`, `should_trigger`, `split`,
+  `trigger_rate` (null for an inconclusive query), and `verdict` (`PASS`,
+  `FAIL`, or `INCONCLUSIVE`). `trigger_rate` is over the runs that were
+  conclusive, which can be fewer than `runs`: a run the provider refused,
+  or one whose record could not be read, is left out of the rate, and the
+  row does not say how many were.
+
+`description_sha256` is the SHA-256 of the exact bytes of the frontmatter
+line that begins `description:` in the skill's `SKILL.md`, without its
+newline. The frontmatter is the block a first line of exactly `---` opens
+and the next line of exactly `---`, or the end of the file, closes, and
+the line is the first one in it that begins `description:`. The newline
+is the one LF byte that ends the line; every other byte is hashed as it
+is, a CR that ends the line included. The same value, by hand:
+
+```bash
+LC_ALL=C awk 'NR == 1 { if ($0 != "---") exit; next }
+              $0 == "---" { exit }
+              /^description:/ { printf "%s", $0; exit }' SKILL.md | sha256sum
+```
+
+It is null when the tree has no such line, or the line changed while the
+run was under way; the run says so when it starts or when it ends. A
+`SKILL.md` with CRLF line endings has no such line: its first line is not
+exactly `---`. For a file with no such line the command above hashes
+nothing and prints the SHA-256 of the empty string (`e3b0c442…`), which
+no record carries. The `SKILL.md` is the one at
+`skills/[<phase>/]<name>/` in the tree the run installed.
+
+`bin/report --triggering` refuses — copying nothing — when
+`triggering.json` already exists in the record, when
+`metadata.plugin.skill_tree` is not a git tree hash (the null cases are
+the ones listed above), when `metadata.description_sha256` is not 64
+lowercase hex digits, and when the summary has no validation query: a
+record reports the validation split, so a `--split train` or `--split
+holdout` summary stays in `workspaces/`, and `bin/triggering` says so in
+its plan and when the run starts. A failing or inconclusive query is
+recorded like any other, a validation split whose queries were all
+inconclusive included. No transcript, stream, or log enters the summary.
+
+## Naming the run
 
 Name the `--dry-run` that priced the run in the PR that commits the
 record. A description optimization is not recorded here:
