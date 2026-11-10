@@ -23,8 +23,22 @@
 #   <arm>/run_status.json                   {outcome: ok|indeterminate, reason,
 #                                           exit_status, adapter_ran, skill_chain}
 #   <arm>/grading.json                      bin/grade
-# then benchmark.json and benchmark.md (bin/benchmark) for the iteration,
-# and an empty feedback.json {"reviews": []} for the human review.
+# then, for the iteration, identity.json — what was measured:
+#   {skill, harness, harness_version, model, runs_per_eval,
+#    plugin: {commit, skill_tree}, baseline: {commit, skill_tree} | null}
+# benchmark.json and benchmark.md (bin/benchmark, which copies identity.json
+# into metadata), and an empty feedback.json {"reviews": []} for the human
+# review.
+#
+# plugin names the tree with_skill installed and baseline the one old_skill
+# installed (null for without_skill): the full commit, and the git tree hash
+# of the skill's directory at that commit (lib/pin.sh lab_pin_identity). A
+# directory counts only as a git work tree whose skill directory has nothing
+# uncommitted, before the run and after it; otherwise both are null, the run
+# says so, and bin/report will not record the iteration. harness_version is
+# the adapter's adapter_version and model the one every session named
+# (adapter_session_model): null when the adapter reads none or the sessions
+# disagree, never a guess.
 #
 # An arm that timed out, exited non-zero, was refused by the provider, ran
 # no model turn, or — in without_skill — loaded a skill anyway measured
@@ -66,7 +80,10 @@ Options:
   --harness NAME          harness adapter under harnesses/ (must be runnable here)
   --skill NAME            the skill; its evals are evals/<skill>/evals.json
   --plugin PATH|REF       plugin tree for with_skill: a directory, or a ref in
-                          SDLC_SKILLS_ROOT (default: config/upstream-inventory.json)
+                          SDLC_SKILLS_ROOT (default: config/upstream-inventory.json).
+                          A record names the skill text by commit and tree
+                          hash: a directory has one only as a git work tree
+                          with nothing uncommitted in the skill's directory
   --baseline-plugin P     pair with_skill against old_skill on this tree,
                           instead of without_skill
   --eval-id ID            run only this eval (repeatable; default: every eval)
@@ -83,6 +100,10 @@ Options:
 COST: live sessions against your own harness account — 2 per eval, plus one
 per arm with a prose assertion under --grade-with-harness. Always --dry-run
 first.
+
+The iteration's identity.json says which skill text each arm installed;
+--dry-run prints it. An arm it cannot name still runs and is scored, and
+bin/report will not record that iteration.
 
 Exit codes: 0 every arm ran and was recorded (an indeterminate arm is a
               recorded result, not an error)
@@ -196,6 +217,25 @@ if [ -n "$baseline" ]; then
   baseline_tree="$(lab_pin_tree "$baseline" 2>/dev/null)" || baseline_tree="$baseline"
 fi
 
+# Which skill text each arm installs, and why when it cannot be named.
+identify() { # $1 path|ref — sets id_json ({commit, skill_tree}) and id_why
+  local out
+  out="$(lab_pin_identity "$1" "$skill" 2>&1)"
+  id_json="$(tail -n 1 <<<"$out")"
+  id_why="$(sed '$d' <<<"$out" | head -n 1)"
+  id_why="${id_why#*: }" # the reason, without "no identity for <tree>: "
+}
+identity_line() { # $1 arm $2 identity json $3 why — one line for the operator
+  if jq -e '.skill_tree != null' <<<"$2" >/dev/null 2>&1; then
+    printf '%s %s  skill_tree %s\n' "$1" "$(jq -r .commit <<<"$2")" "$(jq -r .skill_tree <<<"$2")"
+  else
+    printf '%s unidentified (%s) — bin/report will not record this iteration\n' "$1" "${3:-unknown}"
+  fi
+}
+identify "$plugin"; plugin_id="$id_json"; plugin_why="$id_why"
+baseline_id=null; baseline_why=""
+if [ -n "$baseline" ]; then identify "$baseline"; baseline_id="$id_json"; baseline_why="$id_why"; fi
+
 # A prose assertion is one bin/grade cannot check mechanically: the same
 # pattern bin/grade matches, negated.
 selected_json="$(printf '%s\n' "${selected[@]}" | jq -R . | jq -sc .)"
@@ -204,12 +244,14 @@ prose_evals="$(jq --argjson ids "$selected_json" '[.evals[] | select((.id | tost
   "$evals_file")"
 
 if [ -n "$dry" ]; then
-  # The plan, priced: no pin, no checkout, no adapter, no CLI.
+  # The plan, priced: no checkout, no adapter, no CLI.
   arm_calls=$((2 * ${#selected[@]}))
   grader_calls=0
   [ -n "$grade_harness" ] && grader_calls=$((2 * prose_evals))
   echo "plugin   : $plugin_tree  ($plugin_note)"
   [ -n "$baseline" ] && echo "baseline : $baseline_tree  ($baseline_note)"
+  echo "identity : $(identity_line with_skill "$plugin_id" "$plugin_why")"
+  [ -n "$baseline" ] && echo "identity : $(identity_line old_skill "$baseline_id" "$baseline_why")"
   echo "harness  : $harness"
   echo "arms     : with_skill, $second_arm"
   echo "evals    : ${selected[*]}"
@@ -261,6 +303,14 @@ adapter_check || exit 3
 declare -F adapter_ran >/dev/null 2>&1 || adapter_ran() { [ -s "$1" ]; }
 declare -F adapter_chain >/dev/null 2>&1 || adapter_chain() { :; }
 declare -F adapter_usage >/dev/null 2>&1 || adapter_usage() { :; }
+declare -F adapter_version >/dev/null 2>&1 || adapter_version() { :; }
+declare -F adapter_session_model >/dev/null 2>&1 || adapter_session_model() { :; }
+harness_version="$(adapter_version 2>/dev/null | head -n 1)"
+# Said before anything is spent: this run will be scored, and not recordable.
+jq -e '.skill_tree != null' <<<"$plugin_id" >/dev/null 2>&1 \
+  || log "identity: $(identity_line with_skill "$plugin_id" "$plugin_why")"
+[ -z "$baseline" ] || jq -e '.skill_tree != null' <<<"$baseline_id" >/dev/null 2>&1 \
+  || log "identity: $(identity_line old_skill "$baseline_id" "$baseline_why")"
 
 # --- the trees the arms install: a directory as it is, a ref extracted -------
 stage_dir=""
@@ -319,8 +369,9 @@ indeterminate_reason() { # $1 arm $2 exit code $3 stream $4 errlog
 
 ms_now() { date +%s%3N; }
 
+session_models="" # one line per session that named its model
 run_arm() { # $1 eval id $2 arm $3 plugin source ("" for none)
-  local id="$1" arm="$2" src="$3" case_json arm_dir workdir stream rc start end toks reason pairs s d ran chain
+  local id="$1" arm="$2" src="$3" case_json arm_dir workdir stream rc start end toks reason pairs s d ran chain m
   case_json="$(case_of "$id")"
   arm_dir="$it/$id/$arm"
   mkdir -p "$arm_dir" || return 1
@@ -375,6 +426,8 @@ run_arm() { # $1 eval id $2 arm $3 plugin source ("" for none)
   lab_extract_stream_text "$stream" "$harness" > "$arm_dir/outputs/response.txt" 2>/dev/null \
     || : > "$arm_dir/outputs/response.txt"
 
+  m="$(adapter_session_model "$stream" 2>/dev/null | head -n 1)"
+  [ -z "$m" ] || session_models="$session_models$m"$'\n'
   toks="$(adapter_usage "$stream" 2>/dev/null | tr -dc '0-9')"
   jq -n --argjson toks "${toks:-null}" --argjson ms "$((end - start))" \
     '{total_tokens: $toks, duration_ms: $ms}' > "$arm_dir/timing.json"
@@ -404,6 +457,26 @@ for id in "${selected[@]}"; do
   run_arm "$id" with_skill "$with_src" || failed="$failed $id/with_skill"
   run_arm "$id" "$second_arm" "$second_src" || failed="$failed $id/$second_arm"
 done
+
+# What the iteration measured. A tree whose identity is not what it was
+# before the first arm (a work tree edited or committed to mid-run, a ref
+# that moved) was not one skill text for the whole run: it has none.
+recheck() { # $1 arm $2 path|ref $3 identity before — prints the identity to record
+  identify "$2"
+  if [ "$(jq -cS . <<<"$id_json")" = "$(jq -cS . <<<"$3")" ]; then printf '%s\n' "$3"; return 0; fi
+  log "identity: $(identity_line "$1" '{}' "the tree changed during the run")"
+  printf '{"commit": null, "skill_tree": null}\n'
+}
+plugin_id="$(recheck with_skill "$plugin" "$plugin_id")"
+[ -z "$baseline" ] || baseline_id="$(recheck old_skill "$baseline" "$baseline_id")"
+model="$(printf '%s' "$session_models" | sort -u)"
+case "$model" in *$'\n'*) model="";; esac
+jq -n --arg skill "$skill" --arg harness "$harness" --arg hv "$harness_version" --arg model "$model" \
+  --argjson plugin "$plugin_id" --argjson baseline "$baseline_id" '
+  def known: if . == "" then null else . end;
+  {skill: $skill, harness: $harness, harness_version: ($hv | known), model: ($model | known),
+   runs_per_eval: 1, plugin: $plugin, baseline: $baseline}' > "$it/identity.json" \
+  || failed="$failed identity"
 
 "$lab_root/bin/benchmark" "$it" || failed="$failed benchmark"
 [ -e "$it/feedback.json" ] || printf '{"reviews": []}\n' > "$it/feedback.json"

@@ -28,6 +28,9 @@
 #   FAKE_BEHAVIORAL_EXIT=<n>   the launch's exit code (else the hook's)
 # With none of the last five set, a behavioral run is the canned ok run.
 # FAKE_RAN=0 makes adapter_ran report a refusal whatever the stream holds.
+# FAKE_VERSION=<v> is the CLI version adapter_version reports, else none.
+# A "MODEL <name>" line in a stream is the model that session named
+# (adapter_session_model); a stream without one names none.
 #
 # The launch redirects its stderr to "$errlog", exactly as every real
 # adapter does (harnesses/*.sh). The double keeps that contract on
@@ -102,6 +105,14 @@ adapter_ran() { # $1 stream — any line means the (fake) model spoke
 adapter_usage() { # $1 stream
   [ -n "${FAKE_TOKENS:-}" ] || return 0
   printf '42\n'
+}
+
+adapter_version() {
+  [ -z "${FAKE_VERSION:-}" ] || printf '%s\n' "$FAKE_VERSION"
+}
+
+adapter_session_model() { # $1 stream
+  sed -n 's/^MODEL //p' "$1" 2>/dev/null | head -n 1
 }
 
 _fake_emit_ok() { # $1 stream [$2 prompt]
