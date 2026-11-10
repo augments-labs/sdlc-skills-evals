@@ -416,7 +416,31 @@ got="$(SDLC_SKILLS_ROOT="$part" lab_pin_identity "$p_commit" probe "$pex" 2>"$id
   && grep -q 'git cannot list' "$idwork/reason" \
   && ok "a reference whose tree git cannot list to its end has no skill tree" \
   || bad "a reference whose tree git cannot list to its end has no skill tree (got '$got': $(cat "$idwork/reason"))"
-rm -rf "$conv" "$nosym" "$ex" "$exconv" "$nl" "$part" "$pex" "$idwork/reason"
+# a submodule is not read back at all, so a skill tree that holds one names
+# nothing: as a directory (git calls the empty directory clean) and as a
+# reference installed by `git archive`, which leaves an empty directory.
+sm="$idwork/sm"; mkdir -p "$sm/skills/common/probe/sub"
+printf -- '---\nname: probe\ndescription: "probe one"\n---\n' > "$sm/skills/common/probe/SKILL.md"
+git -C "$sm" init -q
+git -C "$sm" update-index --add --cacheinfo "160000,$b_commit,skills/common/probe/sub"
+git -C "$sm" -c user.name=t -c user.email=t@example.invalid add -A \
+  && git -C "$sm" -c user.name=t -c user.email=t@example.invalid commit -q -m one
+sm_commit="$(git -C "$sm" rev-parse HEAD)"
+[ -z "$(git -C "$sm" status --porcelain --ignored 2>&1)" ] \
+  && [ "$(git -C "$sm" ls-tree "$sm_commit:skills/common/probe" sub | cut -d' ' -f1)" = 160000 ] \
+  && ok "control: git calls a directory with an empty submodule clean, and the tree holds a gitlink" \
+  || bad "control: git calls a directory with an empty submodule clean, and the tree holds a gitlink ($(git -C "$sm" status --porcelain --ignored 2>&1))"
+got="$(SDLC_SKILLS_ROOT="$sm" lab_pin_identity "$sm" probe 2>"$idwork/reason" | jq -c . 2>/dev/null)"
+[ "$got" = '{"commit":null,"skill_tree":null}' ] && grep -q 'skills/common/probe/sub is a submodule' "$idwork/reason" \
+  && ok "a directory whose skill tree holds a submodule has no identity" \
+  || bad "a directory whose skill tree holds a submodule has no identity (got '$got': $(cat "$idwork/reason"))"
+smex="$idwork/smex"; mkdir -p "$smex"; git -C "$sm" archive "$sm_commit" | tar -x -C "$smex"
+got="$(SDLC_SKILLS_ROOT="$sm" lab_pin_identity "$sm_commit" probe "$smex" 2>"$idwork/reason" | jq -c . 2>/dev/null)"
+[ "$got" = "$(jq -nc --arg c "$sm_commit" '{commit: $c, skill_tree: null}')" ] \
+  && grep -q 'skills/common/probe/sub is a submodule' "$idwork/reason" \
+  && ok "a reference whose skill tree holds a submodule has no skill tree" \
+  || bad "a reference whose skill tree holds a submodule has no skill tree (got '$got': $(cat "$idwork/reason"))"
+rm -rf "$conv" "$nosym" "$ex" "$exconv" "$nl" "$part" "$pex" "$sm" "$smex" "$idwork/reason"
 
 # --- which description a tree carries -----------------------------------------
 #
