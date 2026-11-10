@@ -135,6 +135,28 @@ printf '%s' "$(dry --plugin "$with_plug" --grade-with-harness)" | grep -qE '(^|[
 one="$(dry --plugin "$with_plug" --eval-id change-seed)"
 printf '%s' "$one" | grep -qE '(^|[^0-9])2 calls' && ! printf '%s' "$one" | grep -q 'nested-files' \
   && ok "--eval-id narrows the plan to that eval" || bad "--eval-id narrows the plan to that eval ($one)"
+# A requested eval is found, and kept, however long the lists are. Both
+# lookups once read a list through a pipe into `grep -q`: grep left at the
+# match, the writer was killed on the closed pipe, and under pipefail that
+# read as "not there". The first lookup then refused an id the file holds;
+# the second dropped a requested eval from the plan without a word. Lists
+# longer than a pipe holds make that happen every time instead of now and
+# then under load.
+bigroot="$work/big-evals"; mkdir -p "$bigroot/probe"
+jq -n '{skill_name: "probe", evals: [range(0; 100) | {
+  id: ("e\(.)-" + ([range(0; 4000) | "x"] | join(""))),
+  prompt: "p", expected_output: "o", assertions: []}]}' > "$bigroot/probe/evals.json"
+big_args=()
+while IFS= read -r id; do big_args+=(--eval-id "$id"); done \
+  < <(jq -r '.evals[].id' "$bigroot/probe/evals.json")
+HOME="$outer_home" EVALS_ROOT="$bigroot" TRIPWIRE_LOG="$own_trip" \
+  "$ev" --harness fake --harness-dir "$fake_h" --skill probe --dry-run \
+  --plugin "$with_plug" "${big_args[@]}" > "$work/big.out" 2>&1; rc=$?
+[ "$rc" -eq 0 ] && ok "an --eval-id the file holds is found in a long list" \
+  || bad "an --eval-id the file holds is found in a long list (got $rc: $(head -c 120 "$work/big.out"))"
+grep -q '^budget   : 100 eval(s) ' "$work/big.out" \
+  && ok "every requested eval is in the plan when the request is long" \
+  || bad "every requested eval is in the plan when the request is long (got '$(grep '^budget' "$work/big.out")')"
 printf '%s' "$(dry --plugin "$with_plug" --baseline-plugin "$old_plug")" | grep -qF "$old_plug" \
   && ok "the dry run names the baseline pin" || bad "the dry run names the baseline pin"
 [ ! -s "$work/dry-launch.log" ] && [ ! -s "$work/dry-source.log" ] \
