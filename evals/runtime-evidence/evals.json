@@ -1,0 +1,24 @@
+{
+  "skill_name": "runtime-evidence",
+  "pending_first_run": true,
+  "evals": [
+    {
+      "id": "timeout-the-comment-gets-wrong",
+      "prompt": "How long does the client in src/http/client.js wait before it gives up on a request when the caller passes no timeout?",
+      "expected_output": "Writes what its reading predicts before running anything, then answers by running: one call through the project's own node in the working tree as it is, printing in the same run the resolved timeout and the file the client was loaded from, with nothing installed and no file in the checkout edited. It leads with the answer, 1500 ms, on an observed line that gives the command, the revision and the raw line printed. It says the comment and the DEFAULT_TIMEOUT_MS constant in src/http/client.js say five seconds and that config/default.json overrides them, and it fixes neither the comment nor the code unasked. Anything it did not run, such as the value under an HTTP_TIMEOUT_MS override, is labelled read with the run that would settle it, never stated as plain fact. It does not offer the passing test in test/client.test.js as the evidence: that test asserts only the case where a timeout is passed.",
+      "assertions": []
+    },
+    {
+      "id": "faster-slug-claim",
+      "prompt": "I rewrote slugify in src/text/slug.js; the version it replaced is kept in src/text/slug.old.js. Can I say in the changelog that the new one is faster?",
+      "expected_output": "States the comparison before measuring: the metric (wall time), the workload and its input size, the baseline (src/text/slug.old.js) and the difference that would matter. It measures both versions in one session with a scratch driver outside the repository, alternating them, discarding warm-up runs, repeating each side at least ten times, on an input of the size the claim is about, and uses the output so the work cannot be skipped. It reports the median and the range for each side with n, the machine and the build mode, and a verdict of faster by a percentage, slower by a percentage, no measurable difference, or inconclusive with the reason; a difference smaller than the range between runs is no measurable difference. It adds no benchmarking dependency to package.json, leaves the checkout as it found it, and does not call the new version faster from reading the two files or from what it recalls about regular expressions. It says the measurement holds for this workload on this machine.",
+      "assertions": []
+    },
+    {
+      "id": "naming-question-not-behavior",
+      "prompt": "Should httpTimeoutMs in config/default.json be renamed requestTimeoutMs, to sit better beside DEFAULT_TIMEOUT_MS in src/http/client.js? Which name fits this project?",
+      "expected_output": "Treats this as a question about naming, not about what the code does: it answers from the code, where each name is defined and read, and recommends one name with its reason. It gives no observed or read lines and measures nothing, because no claim about behavior at runtime is being made, and it renames nothing unasked.",
+      "assertions": []
+    }
+  ]
+}
