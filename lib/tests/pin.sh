@@ -297,4 +297,50 @@ got="$(ident "$(git -C "$idrepo" rev-parse HEAD)" probe)"
   && ok "the skill tree is the same under a different commit" \
   || bad "the skill tree is the same under a different commit (got '$got')"
 
+# --- which description a tree carries -----------------------------------------
+#
+# lab_description_sha256 <SKILL.md> prints the SHA-256 of the exact bytes of
+# the frontmatter line that begins `description:`, without its newline. The
+# plugin's CI computes the same value, so the bytes are pinned here against
+# sha256sum on the literal line.
+
+sha() { printf '%s' "$1" | sha256sum | cut -d' ' -f1; }
+dfile="$idwork/SKILL.md"
+printf -- '---\nname: probe\ndescription: "probe one"\nlicense: x\n---\n\ndescription: body line\n' > "$dfile"
+got="$(lab_description_sha256 "$dfile")"
+[ "$got" = "$(sha 'description: "probe one"')" ] \
+  && ok "the description line is hashed without its newline" \
+  || bad "the description line is hashed without its newline (got '$got')"
+[ "$got" != "$(printf 'description: "probe one"\n' | sha256sum | cut -d' ' -f1)" ] \
+  && ok "the newline is not part of the hash" || bad "the newline is not part of the hash"
+printf -- '---\nname: probe\n---\n\ndescription: body line\n' > "$dfile"
+got="$(lab_description_sha256 "$dfile")"; rc=$?
+[ -z "$got" ] && [ "$rc" -ne 0 ] \
+  && ok "a description: line outside the frontmatter is not the description" \
+  || bad "a description: line outside the frontmatter is not the description (got '$got', rc $rc)"
+printf 'description: no frontmatter\n' > "$dfile"
+got="$(lab_description_sha256 "$dfile")"; rc=$?
+[ -z "$got" ] && [ "$rc" -ne 0 ] \
+  && ok "a file with no frontmatter has no description hash" \
+  || bad "a file with no frontmatter has no description hash (got '$got', rc $rc)"
+printf -- '---\n  description: nested\ndescription: first\ndescription: second\n---\n' > "$dfile"
+got="$(lab_description_sha256 "$dfile")"
+[ "$got" = "$(sha 'description: first')" ] \
+  && ok "the first line that begins description: is the one hashed" \
+  || bad "the first line that begins description: is the one hashed (got '$got')"
+# every byte of the line but its LF counts: trailing spaces and a CR included
+printf -- '---\ndescription: padded  \r\n---\n' > "$dfile"
+got="$(lab_description_sha256 "$dfile")"
+[ "$got" = "$(printf 'description: padded  \r' | sha256sum | cut -d' ' -f1)" ] \
+  && ok "trailing bytes before the newline are hashed as they are" \
+  || bad "trailing bytes before the newline are hashed as they are (got '$got')"
+printf -- '---\ndescription: caf\303\251 \342\200\224 dash\n---\n' > "$dfile"
+got="$(lab_description_sha256 "$dfile")"
+[ "$got" = "$(printf 'description: caf\303\251 \342\200\224 dash' | sha256sum | cut -d' ' -f1)" ] \
+  && ok "non-ASCII bytes are hashed as they are" \
+  || bad "non-ASCII bytes are hashed as they are (got '$got')"
+got="$(lab_description_sha256 "$idwork/no-such-file")"; rc=$?
+[ -z "$got" ] && [ "$rc" -ne 0 ] && ok "a missing SKILL.md has no description hash" \
+  || bad "a missing SKILL.md has no description hash (got '$got', rc $rc)"
+
 exit "$fails"
