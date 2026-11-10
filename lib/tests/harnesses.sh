@@ -48,10 +48,13 @@ for h in "${adapters[@]}"; do
     else bad "$name header carries $field"; fi
   done
   # the header must not claim flags the file never passes (the header
-  # line itself is excluded, so a bare claim cannot satisfy this)
+  # line itself is excluded, so a bare claim cannot satisfy this). The file
+  # is read through a process substitution, not a pipe: `grep -q` leaves at
+  # the match, and under pipefail a writer killed on the closed pipe would
+  # read as "no match".
   flags="$(grep '^permission_flags=' "$hh/$name" | sed 's/^permission_flags=//; s/^"//; s/"$//')"
   if [ -n "$flags" ]; then
-    if grep -v '^permission_flags=' "$hh/$name" | grep -qF -- "$flags"; then ok "$name permission_flags matches a passed flag";
+    if grep -qF -- "$flags" < <(grep -v '^permission_flags=' "$hh/$name"); then ok "$name permission_flags matches a passed flag";
     else bad "$name permission_flags matches a passed flag ($flags)"; fi
   else
     bad "$name permission_flags is non-empty"
@@ -170,7 +173,7 @@ else
     inside { print }
   ' "$readme")"
   for want in 'runnable=yes' 'Runtime status' 'lib/tests/harnesses.sh'; do
-    if printf '%s\n' "$procedure_section" | grep -qF -- "$want"; then
+    if grep -qF -- "$want" <<<"$procedure_section"; then
       ok "the procedure names what a run's evidence changes ($want)"
     else
       bad "the procedure names what a run's evidence changes ($want)"

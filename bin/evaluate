@@ -180,12 +180,17 @@ mapfile -t all_ids < <(jq -r '.evals[].id | tostring' "$evals_file")
 if [ "${#eval_ids[@]}" -eq 0 ]; then
   selected=("${all_ids[@]}")
 else
+  # Each list reaches grep as a here-string, never through a pipe: grep -q
+  # leaves at the first match, and a writer still writing into the closed
+  # pipe is killed, which pipefail reports as "no match".
+  all_ids_list="$(printf '%s\n' "${all_ids[@]}")"
+  eval_ids_list="$(printf '%s\n' "${eval_ids[@]}")"
   for id in "${eval_ids[@]}"; do
-    printf '%s\n' "${all_ids[@]}" | grep -qxF -- "$id" || { echo "no eval '$id' in $evals_file" >&2; exit 2; }
+    grep -qxF -- "$id" <<<"$all_ids_list" || { echo "no eval '$id' in $evals_file" >&2; exit 2; }
   done
   selected=()
   for id in "${all_ids[@]}"; do
-    printf '%s\n' "${eval_ids[@]}" | grep -qxF -- "$id" && selected+=("$id")
+    grep -qxF -- "$id" <<<"$eval_ids_list" && selected+=("$id")
   done
 fi
 [ "${#selected[@]}" -gt 0 ] || { echo "no evals in $evals_file" >&2; exit 2; }
