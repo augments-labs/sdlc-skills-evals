@@ -14,13 +14,30 @@ record, and refuses — copying nothing — if any target already exists:
   or `old_skill`): `pass_rate`, `time_seconds`, and `tokens` as mean ±
   stddev over the scored runs, `indeterminate_count`, and the delta between
   the two configurations. An `indeterminate` arm has a null pass rate and
-  stays out of the mean.
+  stays out of the mean. Its `metadata` says what was measured: `skill`,
+  `harness`, `harness_version` and `model` (null when the adapter reads
+  none; never a guess), `runs_per_eval`, `plugin` — `{commit, skill_tree}`
+  for `with_skill` — and `baseline`, the same pair for `old_skill` and
+  null for `without_skill`.
 - `benchmark.md` — the same table, rendered.
 - `feedback.json` — your review of the outputs (`{"reviews": [...]}`).
 
-Name the plugin commit the run pinned and the `--dry-run` that priced it in
-the PR that commits the record. A description optimization is not recorded
-here: `bin/optimize-description` leaves its iterations, `optimization.json`,
+`commit` is the full commit the arm's tree was archived from. `skill_tree`
+is the git tree hash of the skill's directory at that commit:
+`git rev-parse <commit>:skills/<phase>/<name>`. It identifies the skill
+text by content, so it still matches after a squash merge changes the
+commit.
+
+`bin/report` also refuses — copying nothing — an iteration that cannot say
+which skill text it measured: `plugin.skill_tree` is null, or the second
+arm is `old_skill` and `baseline.skill_tree` is null. That happens when
+`--plugin` or `--baseline-plugin` was a directory that is not a git work
+tree, or one with uncommitted changes in the skill's directory; run it
+from a commit or a clean work tree. What the run scored is never a reason:
+a failing or indeterminate result is recorded like any other.
+
+Name the `--dry-run` that priced the run in the PR that commits the
+record. A description optimization is not recorded here: `bin/optimize-description` leaves its iterations, `optimization.json`,
 and `optimization.md` in `workspaces/`, and the description it selected
 lands in the plugin through `--apply` and the plugin's own review.
 
