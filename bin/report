@@ -7,11 +7,12 @@
 #
 # A record says which skill text it measured, so an iteration that cannot say
 # is refused the same way — exit 2, nothing copied:
-#   metadata.plugin.skill_tree is null: with_skill's skill text is unidentified
-#   metadata.baseline.skill_tree is null and the second arm is old_skill
+#   metadata.plugin.skill_tree is not a git tree hash: with_skill's skill
+#     text is unidentified
+#   metadata.baseline.skill_tree is not one and the second arm is old_skill
 # bin/evaluate leaves them null when --plugin (or --baseline-plugin) is a
-# directory that is not a clean git work tree, or a reference with no such
-# skill. What the run scored is never a reason: a failing or indeterminate
+# directory whose skill directory is not exactly a git work tree's HEAD, or
+# a reference with no such skill. What the run scored is never a reason: a failing or indeterminate
 # result is recorded like any other.
 
 set -uo pipefail
@@ -28,13 +29,22 @@ done
 [ -n "$ws" ] && [ -n "$rec" ] || { echo "needs --workspace and --record" >&2; exit 2; }
 [ -f "$ws/benchmark.json" ] || { echo "no benchmark.json in $ws" >&2; exit 2; }
 command -v jq >/dev/null 2>&1 || { echo "needs \`jq\`" >&2; exit 3; }
-unnamed="$(jq -r '
-  (if .metadata.plugin.skill_tree | type != "string"
-   then "with_skill (metadata.plugin.skill_tree is null)" else empty end),
-  (if .metadata.configurations[1] == "old_skill" and (.metadata.baseline.skill_tree | type != "string")
-   then "old_skill (metadata.baseline.skill_tree is null)" else empty end)' \
-  "$ws/benchmark.json" 2>/dev/null)" \
-  || unnamed="with_skill ($ws/benchmark.json has no readable metadata.plugin.skill_tree)"
+# One line per arm whose skill text is unnamed. A skill tree is a git tree
+# hash, 40 hex digits or 64; anything else names no text. The fallback is for
+# a file that is not one JSON document.
+unnamed="$(jq -rs '
+  def at(k): if type == "object" then .[k] else null end;
+  def unnamed_tree: at("skill_tree")
+    | if . == null then "is null"
+      elif type == "string" and test("^([0-9a-f]{40}|[0-9a-f]{64})$") then empty
+      else "is not a git tree hash" end;
+  if length != 1 then error("not one document") else .[0] end
+  | at("metadata") as $m
+  | ($m | at("plugin") | unnamed_tree | "with_skill (metadata.plugin.skill_tree \(.))"),
+    (if ($m | at("configurations") | if type == "array" then .[1] else null end) == "old_skill"
+     then $m | at("baseline") | unnamed_tree | "old_skill (metadata.baseline.skill_tree \(.))"
+     else empty end)' "$ws/benchmark.json" 2>/dev/null)" \
+  || unnamed="with_skill ($ws/benchmark.json is not one JSON document, so it has no metadata.plugin.skill_tree)"
 if [ -n "$unnamed" ]; then
   while IFS= read -r arm; do
     echo "refusing: $ws does not say which skill text it measured for $arm" >&2

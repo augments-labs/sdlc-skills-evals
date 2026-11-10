@@ -15,14 +15,15 @@ bench() {
   jq -n --arg arm "$1" --argjson tree "$2" --argjson base "$3" --argjson sum "$4" '
     {metadata: {iteration: "iteration-1", configurations: ["with_skill", $arm], eval_ids: ["a"],
        skill: "probe", harness: "fake", harness_version: null, model: null, runs_per_eval: 1,
-       plugin: {commit: (if $tree == null then null else "c0ffee" end), skill_tree: $tree},
+       plugin: {commit: (if $tree == null then null else "c0ffeec0ffeec0ffeec0ffeec0ffeec0ffeec0ff" end), skill_tree: $tree},
        baseline: $base},
      runs: [], run_summary: $sum}'
 }
-named='{"commit": "decaf", "skill_tree": "beef"}'
+feed=feedfeedfeedfeedfeedfeedfeedfeedfeedfeed
+named='{"commit": "decafdecafdecafdecafdecafdecafdecafdecaf", "skill_tree": "beefbeefbeefbeefbeefbeefbeefbeefbeefbeef"}'
 unnamed='{"commit": null, "skill_tree": null}'
 mkdir -p "$work/ws/iteration-1" "$work/rec"
-bench without_skill '"feed"' null '{"delta":{"pass_rate":0.5}}' > "$work/ws/iteration-1/benchmark.json"
+bench without_skill "\"$feed\"" null '{"delta":{"pass_rate":0.5}}' > "$work/ws/iteration-1/benchmark.json"
 "$here/bin/report" --workspace "$work/ws/iteration-1" --record "$work/rec" >/dev/null 2>&1 \
   || { bad "report exits 0"; exit "$fails"; }
 [ -f "$work/rec/benchmark.json" ] || { bad "benchmark.json copied into the record"; exit "$fails"; }
@@ -38,7 +39,7 @@ jq -e '.run_summary.delta.pass_rate == 0.5' "$work/rec/benchmark.json" >/dev/nul
 
 # the human summary and the reviews travel with the benchmark
 mkdir -p "$work/ws/iteration-3" "$work/rec3"
-bench without_skill '"feed"' null '{}' > "$work/ws/iteration-3/benchmark.json"
+bench without_skill "\"$feed\"" null '{}' > "$work/ws/iteration-3/benchmark.json"
 printf '# Benchmark\n' > "$work/ws/iteration-3/benchmark.md"
 printf '{"reviews":[{"eval_id":"a","feedback":"fine"}]}\n' > "$work/ws/iteration-3/feedback.json"
 "$here/bin/report" --workspace "$work/ws/iteration-3" --record "$work/rec3" >/dev/null 2>&1
@@ -78,7 +79,7 @@ printf 'not json' > "$work/notjson/ws/benchmark.json"
 refused notjson 'with_skill' \
   && ok "a benchmark that is not JSON is refused" \
   || bad "a benchmark that is not JSON is refused (rc $rc: $(cat "$work/notjson/out"))"
-bench old_skill '"feed"' "$unnamed" '{}' > "$work/nobase/ws/benchmark.json"
+bench old_skill "\"$feed\"" "$unnamed" '{}' > "$work/nobase/ws/benchmark.json"
 refused nobase 'old_skill' && grep -q 'metadata.baseline' "$work/nobase/out" \
   && ! grep -q 'metadata.plugin' "$work/nobase/out" \
   && ok "old_skill with a null baseline.skill_tree is refused, naming old_skill only" \
@@ -88,21 +89,53 @@ bench old_skill null "$unnamed" '{}' > "$work/neither/ws/benchmark.json"
 refused neither 'with_skill' && grep -q 'old_skill' "$work/neither/out" \
   && ok "both arms unidentified: both are named" \
   || bad "both arms unidentified: both are named (rc $rc: $(cat "$work/neither/out"))"
+# a skill tree that is not a git tree hash names no text: an empty string or a
+# stray word is refused like a null, and so is a record with nothing in it
+mkdir -p "$work/emptytree/ws" "$work/wordtree/ws" "$work/emptybase/ws" "$work/badbase/ws" \
+  "$work/emptyfile/ws" "$work/twodocs/ws" "$work/badmeta/ws"
+bench without_skill '""' null '{}' > "$work/emptytree/ws/benchmark.json"
+refused emptytree 'with_skill' \
+  && ok "an empty-string plugin.skill_tree is refused" \
+  || bad "an empty-string plugin.skill_tree is refused (rc $rc: $(cat "$work/emptytree/out"))"
+bench without_skill '"feed"' null '{}' > "$work/wordtree/ws/benchmark.json"
+refused wordtree 'with_skill' && grep -q 'not a git tree hash' "$work/wordtree/out" \
+  && ok "a plugin.skill_tree that is not a hash is refused, and the message says so" \
+  || bad "a plugin.skill_tree that is not a hash is refused, and the message says so (rc $rc: $(cat "$work/wordtree/out"))"
+bench old_skill "\"$feed\"" '{"commit": "c", "skill_tree": ""}' '{}' > "$work/emptybase/ws/benchmark.json"
+refused emptybase 'old_skill' && ! grep -q 'with_skill' "$work/emptybase/out" \
+  && ok "an empty-string baseline.skill_tree is refused, naming old_skill only" \
+  || bad "an empty-string baseline.skill_tree is refused, naming old_skill only (rc $rc: $(cat "$work/emptybase/out"))"
+bench old_skill "\"$feed\"" '"oops"' '{}' > "$work/badbase/ws/benchmark.json"
+refused badbase 'old_skill' && ! grep -q 'with_skill' "$work/badbase/out" \
+  && ok "a baseline that is not an object is refused, naming old_skill and not with_skill" \
+  || bad "a baseline that is not an object is refused, naming old_skill and not with_skill (rc $rc: $(cat "$work/badbase/out"))"
+: > "$work/emptyfile/ws/benchmark.json"
+refused emptyfile 'with_skill' \
+  && ok "an empty benchmark.json is refused" \
+  || bad "an empty benchmark.json is refused (rc $rc: $(cat "$work/emptyfile/out"))"
+{ bench without_skill "\"$feed\"" null '{}'; bench without_skill "\"$feed\"" null '{}'; } > "$work/twodocs/ws/benchmark.json"
+refused twodocs 'with_skill' \
+  && ok "a benchmark.json holding two documents is refused" \
+  || bad "a benchmark.json holding two documents is refused (rc $rc: $(cat "$work/twodocs/out"))"
+printf '{"metadata": "x"}\n' > "$work/badmeta/ws/benchmark.json"
+refused badmeta 'with_skill' \
+  && ok "metadata that is not an object is refused" \
+  || bad "metadata that is not an object is refused (rc $rc: $(cat "$work/badmeta/out"))"
 
 copied() { # $1 tag — the iteration in $work/$1/ws is recorded byte for byte
   "$here/bin/report" --workspace "$work/$1/ws" --record "$work/$1/rec" >"$work/$1/out" 2>&1; rc=$?
   [ "$rc" -eq 0 ] && cmp -s "$work/$1/ws/benchmark.json" "$work/$1/rec/benchmark.json"
 }
 mkdir -p "$work/old/ws" "$work/nobaseline/ws" "$work/failing/ws"
-bench old_skill '"feed"' "$named" '{}' > "$work/old/ws/benchmark.json"
+bench old_skill "\"$feed\"" "$named" '{}' > "$work/old/ws/benchmark.json"
 copied old && ok "old_skill with both skill trees named is recorded" \
   || bad "old_skill with both skill trees named is recorded (rc $rc: $(cat "$work/old/out"))"
 # without_skill installs no plugin: its null baseline refuses nothing
-bench without_skill '"feed"' null '{}' > "$work/nobaseline/ws/benchmark.json"
+bench without_skill "\"$feed\"" null '{}' > "$work/nobaseline/ws/benchmark.json"
 copied nobaseline && ok "without_skill needs no baseline" \
   || bad "without_skill needs no baseline (rc $rc: $(cat "$work/nobaseline/out"))"
 # a failing or indeterminate result is data: identified, it is recorded
-bench without_skill '"feed"' null '{"with_skill": {"pass_rate": null, "indeterminate_count": 2},
+bench without_skill "\"$feed\"" null '{"with_skill": {"pass_rate": null, "indeterminate_count": 2},
   "without_skill": {"pass_rate": {"mean": 1, "stddev": 0}, "indeterminate_count": 0},
   "delta": {"pass_rate": null}}' > "$work/failing/ws/benchmark.json"
 copied failing && ok "an indeterminate result with a named skill text is recorded" \
