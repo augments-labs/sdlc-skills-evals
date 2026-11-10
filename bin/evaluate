@@ -33,12 +33,12 @@
 # plugin names the tree with_skill installed and baseline the one old_skill
 # installed (null for without_skill): the full commit, and the git tree hash
 # of the skill's directory at that commit (lib/pin.sh lab_pin_identity). A
-# directory counts only as a git work tree whose skill directory has nothing
-# uncommitted, before the run and after it; otherwise both are null, the run
-# says so, and bin/report will not record the iteration. harness_version is
+# directory counts only as the top of a git work tree whose skill directory
+# is exactly HEAD's, before the run and after it; otherwise both are null,
+# the run says so, and bin/report will not record the iteration. harness_version is
 # the adapter's adapter_version and model the one every session named
-# (adapter_session_model): null when the adapter reads none or the sessions
-# disagree, never a guess.
+# (adapter_session_model): null when the adapter reads none, a session named
+# none, or the sessions disagree — never a guess.
 #
 # An arm that timed out, exited non-zero, was refused by the provider, ran
 # no model turn, or — in without_skill — loaded a skill anyway measured
@@ -369,7 +369,7 @@ indeterminate_reason() { # $1 arm $2 exit code $3 stream $4 errlog
 
 ms_now() { date +%s%3N; }
 
-session_models="" # one line per session that named its model
+session_models="" # one line per session: the model it named, or empty
 run_arm() { # $1 eval id $2 arm $3 plugin source ("" for none)
   local id="$1" arm="$2" src="$3" case_json arm_dir workdir stream rc start end toks reason pairs s d ran chain m
   case_json="$(case_of "$id")"
@@ -427,7 +427,7 @@ run_arm() { # $1 eval id $2 arm $3 plugin source ("" for none)
     || : > "$arm_dir/outputs/response.txt"
 
   m="$(adapter_session_model "$stream" 2>/dev/null | head -n 1)"
-  [ -z "$m" ] || session_models="$session_models$m"$'\n'
+  session_models="$session_models$m"$'\n'
   toks="$(adapter_usage "$stream" 2>/dev/null | tr -dc '0-9')"
   jq -n --argjson toks "${toks:-null}" --argjson ms "$((end - start))" \
     '{total_tokens: $toks, duration_ms: $ms}' > "$arm_dir/timing.json"
