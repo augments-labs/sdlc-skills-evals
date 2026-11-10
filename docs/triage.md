@@ -9,7 +9,10 @@ Unobserved is `indeterminate`, never a pass and never a fail.
 Each arm's `run_status.json` says whether it measured anything
 (`outcome: ok | indeterminate`, with `reason`, `exit_status`, `adapter_ran`,
 `skill_chain`). An `indeterminate` arm scores `pass_rate: null`, is counted in
-`benchmark.json`'s `indeterminate_count`, and stays out of the mean.
+`benchmark.json`'s `indeterminate_count`, and stays out of the mean. Under
+`--runs N` above 1 an arm's files are per repetition, in
+`<arm>/run-<k>/`, and `benchmark.json`'s `runs[].run_number` names the
+repetition a row came from.
 
 1. **Unrunnable harness.** `bin/evaluate` exits `2` before any run with
    "harness X is unrunnable here (reason)": its adapter says `runnable=no`.

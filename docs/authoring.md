@@ -48,8 +48,10 @@ gets built?
    the root-cause fix (must pass). A check that cannot tell all three apart
    is decoration.
 7. Grade, benchmark, review `feedback.json`, then revise the skill and run
-   the next iteration. Generalize each fix (`do X because Y causes Z`,
-   never `ALWAYS/NEVER`) and keep the skill lean.
+   the next iteration. One run per eval is enough to write assertions;
+   with one run the stddev means nothing, so a record uses `--runs 3`.
+   Generalize each fix (`do X because Y causes Z`, never `ALWAYS/NEVER`)
+   and keep the skill lean.
 
 Trust note: `command-succeeds` runs a full shell. Eval files are
 lab-authored and reviewed like code; never grade eval files from untrusted

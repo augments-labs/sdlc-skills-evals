@@ -75,6 +75,17 @@ then `identity.json`, `benchmark.json`, `benchmark.md`, and an empty
 `feedback.json` for your review. `--baseline-plugin` pairs the skill
 against an older plugin tree (`old_skill`) instead of no skill.
 
+`--runs N` runs each eval N times per arm (default 1): evals x 2 arms x N
+calls, which the dry run prints. Above 1, each repetition keeps its files
+under `<arm>/run-<k>/`, and each `runs[]` row of `benchmark.json` carries
+its `run_number`. The mean and stddev of a configuration are over all of
+its scored runs. With one run the stddev means nothing; a record uses 3:
+
+```bash
+bin/evaluate --harness opencode --skill yagni --runs 3 --dry-run
+bin/evaluate --harness opencode --skill yagni --runs 3
+```
+
 `identity.json` says what the iteration measured, and `bin/benchmark`
 copies it into `benchmark.json`'s `metadata`: the skill, the harness, its
 CLI version and the model every session named (each null when the adapter
@@ -101,7 +112,8 @@ bin/evaluate --harness opencode --skill yagni --grade-with-harness
 
 After you edit assertions, re-grade an arm offline, re-aggregate, and
 promote the iteration to a record (`--harness` on `bin/grade` is the live
-rubric grader, one call per arm with prose):
+rubric grader, one call per arm run with prose; given an arm that holds
+`run-<k>/` directories, `bin/grade` grades each of them):
 
 ```bash
 bin/grade workspaces/evaluate-yagni/iteration-1/<eval-id>/with_skill
