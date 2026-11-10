@@ -10,6 +10,9 @@
 # fake's FAKE_* switches. Real agent CLIs are unreachable: the tripwire
 # shims stand first on PATH, and a call to one fails and is recorded.
 set -uo pipefail
+# git reads no user or system configuration here: one that converts files
+# (core.autocrlf=true, for example) would change what these cases check out.
+export GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_SYSTEM=/dev/null
 here="$(cd "$(dirname "$0")/../.." && pwd)"
 fake_h="$here/lib/tests/fake-cli"
 export SDLC_SKILLS_EVALS_ROOT="$here"
@@ -465,6 +468,12 @@ if [ -z "${MODEL_ONCE:-}" ] || [ "$(wc -l < "$HOOK_LOG")" -eq 1 ]; then
   printf 'MODEL %s\n' "${MODEL_NAME:-model-$(wc -l < "$HOOK_LOG")}"
 fi
 [ -z "${DIRTY_PLUGIN:-}" ] || printf 'edited mid-run\n' >> "$DIRTY_PLUGIN/skills/testing/probe/SKILL.md"
+# DIRTY_STAGE: the outer TMPDIR, under which a ref was extracted to <dir>/with
+if [ -n "${DIRTY_STAGE:-}" ]; then
+  for staged in "$DIRTY_STAGE"/*/with/skills/testing/probe/SKILL.md; do
+    [ ! -f "$staged" ] || printf 'edited mid-run\n' >> "$staged"
+  done
+fi
 echo "done answer"
 HOOK
 chmod +x "$mhook"
@@ -602,6 +611,30 @@ printf '%s\n' "$dry_id" | grep -q '^identity : with_skill unidentified.*bin/repo
   && [ "$(dry --plugin "$with_plug" --baseline-plugin "$gitplug" | grep -c '^identity :')" -eq 2 ] \
   && ok "the dry run prints one identity line per arm that installs a plugin, none for without_skill" \
   || bad "the dry run prints one identity line per arm that installs a plugin, none for without_skill"
+
+# a commit installed as files that are not its tree's: a plugin checkout set
+# to convert line endings extracts the commit converted, so the arm ran on
+# text no tree names
+convplug="$work/conv-plugin"
+git clone -q "$gitplug" "$convplug" && git -C "$convplug" config core.autocrlf true
+SDLC_SKILLS_ROOT="$convplug" idrun idconv --plugin "$c_two"; rc=$?
+[ "$rc" -eq 0 ] && jq -e --arg c "$c_two" '.plugin == {commit: $c, skill_tree: null}' \
+    "$(idit idconv)/identity.json" >/dev/null 2>&1 \
+  && grep -q 'with_skill unidentified (.*SKILL\.md does not hold the bytes the tree holds.*bin/report' "$work/idconv/out" \
+  && ! grep -q 'the tree changed during the run' "$work/idconv/out" \
+  && ok "a commit installed with converted line endings keeps its commit and names no skill tree, and the run says which file" \
+  || bad "a commit installed with converted line endings keeps its commit and names no skill tree, and the run says which file (rc $rc; $(jq -c . "$(idit idconv)/identity.json" 2>&1): $(grep identity "$work/idconv/out"))"
+# a ref's extracted files edited while the run was under way: the same end
+MODEL_NAME=model-x DIRTY_STAGE="$work/outer-tmp" EV_HOOK="$mhook" SDLC_SKILLS_ROOT="$gitplug" \
+  idrun idrefdirty --plugin "$c_two"; rc=$?
+[ "$rc" -eq 0 ] && jq -e '.plugin == {commit: null, skill_tree: null}' "$(idit idrefdirty)/identity.json" >/dev/null 2>&1 \
+  && grep -q 'with_skill.*unidentified.*changed during the run' "$work/idrefdirty/out" \
+  && ok "a ref whose extracted files were edited during the run ends unidentified" \
+  || bad "a ref whose extracted files were edited during the run ends unidentified (rc $rc; $(jq -c . "$(idit idrefdirty)/identity.json" 2>&1): $(grep identity "$work/idrefdirty/out"))"
+dry_id="$(SDLC_SKILLS_ROOT="$convplug" dry --plugin "$c_two")"
+printf '%s\n' "$dry_id" | grep -q "^identity : with_skill $c_two  skill_tree $t_two\$" \
+  && ok "the dry run installs nothing: it prints the identity the commit names" \
+  || bad "the dry run installs nothing: it prints the identity the commit names (got '$dry_id')"
 
 # --- --runs N: each eval and arm is repeated N times --------------------------
 

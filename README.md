@@ -111,7 +111,11 @@ when it is the top of a git work tree whose skill directory is exactly
 `HEAD` does not hold, and no file marked `assume-unchanged` or
 `skip-worktree`. Otherwise both are null, the
 `--dry-run` and the run say so, and `bin/report` will not record the
-iteration.
+iteration. The files an arm installs are also read back against the tree,
+byte for byte: where git converts one (`core.autocrlf=true`, for example),
+a directory has no identity and a ref keeps its `commit` with a null
+`skill_tree`. Only the run says that of a ref — a `--dry-run` installs
+nothing. See `results/README.md`.
 
 Prose assertions wait as `needs_review` for you. To have a skill-free
 session on the same harness grade them, price the extra calls first —

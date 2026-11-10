@@ -2,6 +2,9 @@
 # Offline test: plugin pinning by path or ref. Builds its own throwaway
 # plugin stand-in, so no sibling checkout is needed. No live run.
 set -uo pipefail
+# git reads no user or system configuration here: one that converts files
+# (core.autocrlf=true, for example) would change what these cases check out.
+export GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_SYSTEM=/dev/null
 here="$(cd "$(dirname "$0")" && pwd)"
 # shellcheck source=../pin.sh
 source "$here/../pin.sh"
@@ -297,12 +300,154 @@ got="$(ident "$(git -C "$idrepo" rev-parse HEAD)" probe)"
   && ok "the skill tree is the same under a different commit" \
   || bad "the skill tree is the same under a different commit (got '$got')"
 
+# --- the files a run installs are the tree's, byte for byte -------------------
+#
+# A tree hash names file contents. A directory git calls clean, or the files a
+# commit was installed as, can still hold other bytes: git converts line
+# endings on checkout where it is set to, and holds a symlink as a plain file
+# where it is told the file system has none. Such files are no tree's, so they
+# are named by none. A reference is checked on the tree it was installed to,
+# the optional third argument.
+
+bytes="$idwork/bytes"; mkdir -p "$bytes/skills/common/probe"
+gb() { git -C "$bytes" -c user.name=t -c user.email=t@example.invalid "$@"; }
+printf -- '---\nname: probe\ndescription: "probe one"\n---\n' > "$bytes/skills/common/probe/SKILL.md"
+printf 'one\ntwo\n' > "$bytes/skills/common/probe/notes.txt"
+ln -s SKILL.md "$bytes/skills/common/probe/link"
+git -C "$bytes" init -q
+gb add -A && gb commit -q -m one
+b_commit="$(git -C "$bytes" rev-parse HEAD)"
+b_tree="$(git -C "$bytes" rev-parse "HEAD:skills/common/probe")"
+b_want="$(jq -nc --arg c "$b_commit" --arg t "$b_tree" '{commit: $c, skill_tree: $t}')"
+b_notree="$(jq -nc --arg c "$b_commit" '{commit: $c, skill_tree: null}')"
+none='{"commit":null,"skill_tree":null}'
+identb() { # $1 path|ref [$2 installed tree] — prints the identity; the reason is in $idwork/reason
+  SDLC_SKILLS_ROOT="$bytes" lab_pin_identity "$1" probe ${2:+"$2"} 2>"$idwork/reason" | jq -c . 2>/dev/null
+}
+
+got="$(identb "$bytes")"
+[ "$got" = "$b_want" ] && ok "a work tree whose files are the tree's, a symlink among them, is identified" \
+  || bad "a work tree whose files are the tree's, a symlink among them, is identified (got '$got': $(cat "$idwork/reason"))"
+# line endings converted on checkout: git status prints nothing, the bytes differ
+conv="$idwork/conv"; git clone -q -c core.autocrlf=true "$bytes" "$conv"
+[ -z "$(git -C "$conv" status --porcelain --ignored)" ] \
+  && [ "$(git -C "$conv" hash-object --no-filters skills/common/probe/notes.txt)" != "$(git -C "$bytes" rev-parse HEAD:skills/common/probe/notes.txt)" ] \
+  && ok "control: under core.autocrlf=true git calls a work tree clean whose bytes are not the tree's" \
+  || bad "control: under core.autocrlf=true git calls a work tree clean whose bytes are not the tree's"
+got="$(identb "$conv")"
+[ "$got" = "$none" ] && grep -q 'does not hold the bytes the tree holds' "$idwork/reason" \
+  && ok "a work tree git converted on checkout has no identity, and says which file" \
+  || bad "a work tree git converted on checkout has no identity, and says which file (got '$got': $(cat "$idwork/reason"))"
+# a symlink held as a plain file: clean to git, not the tree's entry
+nosym="$idwork/nosym"; git clone -q -c core.symlinks=false "$bytes" "$nosym"
+[ -z "$(git -C "$nosym" status --porcelain --ignored)" ] && [ ! -L "$nosym/skills/common/probe/link" ] \
+  && ok "control: under core.symlinks=false git calls a work tree clean that holds a symlink as a file" \
+  || bad "control: under core.symlinks=false git calls a work tree clean that holds a symlink as a file"
+got="$(identb "$nosym")"
+[ "$got" = "$none" ] && grep -q 'link is not a symlink' "$idwork/reason" \
+  && ok "a work tree that holds a symlink as a plain file has no identity, and says which" \
+  || bad "a work tree that holds a symlink as a plain file has no identity, and says which (got '$got': $(cat "$idwork/reason"))"
+# a reference, checked on the files it was installed as
+ex="$idwork/ex"; mkdir -p "$ex"; git -C "$bytes" archive "$b_commit" | tar -x -C "$ex"
+got="$(identb "$b_commit" "$ex")"
+[ "$got" = "$b_want" ] && ok "a reference installed as its tree's files keeps its skill tree" \
+  || bad "a reference installed as its tree's files keeps its skill tree (got '$got': $(cat "$idwork/reason"))"
+# the installed tree may be named by a relative path: its files are found all the same
+got="$( cd "$idwork" && identb "$b_commit" ex )"
+[ "$got" = "$b_want" ] && ok "an installed tree named by a relative path is read where it is" \
+  || bad "an installed tree named by a relative path is read where it is (got '$got': $(cat "$idwork/reason"))"
+exconv="$idwork/exconv"; mkdir -p "$exconv"
+git -C "$bytes" -c core.autocrlf=true archive "$b_commit" | tar -x -C "$exconv"
+got="$(identb "$b_commit" "$exconv")"
+[ "$got" = "$b_notree" ] && grep -q 'does not hold the bytes the tree holds' "$idwork/reason" \
+  && ok "a reference extracted with converted line endings keeps its commit and has no skill tree" \
+  || bad "a reference extracted with converted line endings keeps its commit and has no skill tree (got '$got': $(cat "$idwork/reason"))"
+got="$(identb "$b_commit" "$nosym")"
+[ "$got" = "$b_notree" ] && grep -q 'link is not a symlink' "$idwork/reason" \
+  && ok "a reference installed with a symlink as a plain file has no skill tree" \
+  || bad "a reference installed with a symlink as a plain file has no skill tree (got '$got': $(cat "$idwork/reason"))"
+ln -sfn notes.txt "$ex/skills/common/probe/link"
+got="$(identb "$b_commit" "$ex")"
+[ "$got" = "$b_notree" ] && grep -q 'link does not hold the bytes the tree holds' "$idwork/reason" \
+  && ok "a symlink to another target is not the tree's" \
+  || bad "a symlink to another target is not the tree's (got '$got': $(cat "$idwork/reason"))"
+# a target is compared whole: one more newline at its end is another target
+ln -sfn $'SKILL.md\n' "$ex/skills/common/probe/link"
+got="$(identb "$b_commit" "$ex")"
+[ "$got" = "$b_notree" ] && grep -q 'link does not hold the bytes the tree holds' "$idwork/reason" \
+  && ok "a symlink whose target has a newline the tree's lacks is not the tree's" \
+  || bad "a symlink whose target has a newline the tree's lacks is not the tree's (got '$got': $(cat "$idwork/reason"))"
+nl="$idwork/nl"; mkdir -p "$nl/skills/common/probe"
+printf -- '---\nname: probe\ndescription: "probe one"\n---\n' > "$nl/skills/common/probe/SKILL.md"
+ln -s $'SKILL.md\n' "$nl/skills/common/probe/link"
+git -C "$nl" init -q
+git -C "$nl" -c user.name=t -c user.email=t@example.invalid add -A \
+  && git -C "$nl" -c user.name=t -c user.email=t@example.invalid commit -q -m one
+nl_want="$(jq -nc --arg c "$(git -C "$nl" rev-parse HEAD)" --arg t "$(git -C "$nl" rev-parse HEAD:skills/common/probe)" \
+  '{commit: $c, skill_tree: $t}')"
+got="$(SDLC_SKILLS_ROOT="$nl" lab_pin_identity "$nl" probe 2>"$idwork/reason" | jq -c . 2>/dev/null)"
+[ "$got" = "$nl_want" ] && ok "a symlink whose target ends in a newline, as the tree holds it, is the tree's" \
+  || bad "a symlink whose target ends in a newline, as the tree holds it, is the tree's (got '$got': $(cat "$idwork/reason"))"
+ln -sfn SKILL.md "$ex/skills/common/probe/link"; rm -f "$ex/skills/common/probe/notes.txt"
+got="$(identb "$b_commit" "$ex")"
+[ "$got" = "$b_notree" ] && grep -q 'notes.txt is not a plain file' "$idwork/reason" \
+  && ok "a reference installed without one of the tree's files has no skill tree" \
+  || bad "a reference installed without one of the tree's files has no skill tree (got '$got': $(cat "$idwork/reason"))"
+# a tree git cannot list to its end names nothing: the entries it did not
+# print were not read back. Here a subdirectory's tree object is gone, and
+# the file under it was edited.
+part="$idwork/part"; mkdir -p "$part/skills/common/probe/zz"
+printf -- '---\nname: probe\ndescription: "probe one"\n---\n' > "$part/skills/common/probe/SKILL.md"
+printf 'more\n' > "$part/skills/common/probe/zz/more.txt"
+git -C "$part" init -q
+git -C "$part" -c user.name=t -c user.email=t@example.invalid add -A \
+  && git -C "$part" -c user.name=t -c user.email=t@example.invalid commit -q -m one
+p_commit="$(git -C "$part" rev-parse HEAD)"
+pex="$idwork/pex"; mkdir -p "$pex"; git -C "$part" archive "$p_commit" | tar -x -C "$pex"
+printf 'edited\n' >> "$pex/skills/common/probe/zz/more.txt"
+p_sub="$(git -C "$part" rev-parse HEAD:skills/common/probe/zz)"
+rm -f "$part/.git/objects/${p_sub:0:2}/${p_sub:2}"
+p_listed="$(git -C "$part" ls-tree -r --name-only "$p_commit:skills/common/probe" 2>/dev/null)"; p_rc=$?
+[ "$p_rc" -ne 0 ] && [ "$p_listed" = SKILL.md ] \
+  && ok "control: git lists the entries before the tree it cannot read, and fails" \
+  || bad "control: git lists the entries before the tree it cannot read, and fails (rc $p_rc, listed '$p_listed')"
+got="$(SDLC_SKILLS_ROOT="$part" lab_pin_identity "$p_commit" probe "$pex" 2>"$idwork/reason" | jq -c . 2>/dev/null)"
+[ "$got" = "$(jq -nc --arg c "$p_commit" '{commit: $c, skill_tree: null}')" ] \
+  && grep -q 'git cannot list' "$idwork/reason" \
+  && ok "a reference whose tree git cannot list to its end has no skill tree" \
+  || bad "a reference whose tree git cannot list to its end has no skill tree (got '$got': $(cat "$idwork/reason"))"
+# a submodule is not read back at all, so a skill tree that holds one names
+# nothing: as a directory (git calls the empty directory clean) and as a
+# reference installed by `git archive`, which leaves an empty directory.
+sm="$idwork/sm"; mkdir -p "$sm/skills/common/probe/sub"
+printf -- '---\nname: probe\ndescription: "probe one"\n---\n' > "$sm/skills/common/probe/SKILL.md"
+git -C "$sm" init -q
+git -C "$sm" update-index --add --cacheinfo "160000,$b_commit,skills/common/probe/sub"
+git -C "$sm" -c user.name=t -c user.email=t@example.invalid add -A \
+  && git -C "$sm" -c user.name=t -c user.email=t@example.invalid commit -q -m one
+sm_commit="$(git -C "$sm" rev-parse HEAD)"
+[ -z "$(git -C "$sm" status --porcelain --ignored 2>&1)" ] \
+  && [ "$(git -C "$sm" ls-tree "$sm_commit:skills/common/probe" sub | cut -d' ' -f1)" = 160000 ] \
+  && ok "control: git calls a directory with an empty submodule clean, and the tree holds a gitlink" \
+  || bad "control: git calls a directory with an empty submodule clean, and the tree holds a gitlink ($(git -C "$sm" status --porcelain --ignored 2>&1))"
+got="$(SDLC_SKILLS_ROOT="$sm" lab_pin_identity "$sm" probe 2>"$idwork/reason" | jq -c . 2>/dev/null)"
+[ "$got" = '{"commit":null,"skill_tree":null}' ] && grep -q 'skills/common/probe/sub is a submodule' "$idwork/reason" \
+  && ok "a directory whose skill tree holds a submodule has no identity" \
+  || bad "a directory whose skill tree holds a submodule has no identity (got '$got': $(cat "$idwork/reason"))"
+smex="$idwork/smex"; mkdir -p "$smex"; git -C "$sm" archive "$sm_commit" | tar -x -C "$smex"
+got="$(SDLC_SKILLS_ROOT="$sm" lab_pin_identity "$sm_commit" probe "$smex" 2>"$idwork/reason" | jq -c . 2>/dev/null)"
+[ "$got" = "$(jq -nc --arg c "$sm_commit" '{commit: $c, skill_tree: null}')" ] \
+  && grep -q 'skills/common/probe/sub is a submodule' "$idwork/reason" \
+  && ok "a reference whose skill tree holds a submodule has no skill tree" \
+  || bad "a reference whose skill tree holds a submodule has no skill tree (got '$got': $(cat "$idwork/reason"))"
+rm -rf "$conv" "$nosym" "$ex" "$exconv" "$nl" "$part" "$pex" "$sm" "$smex" "$idwork/reason"
+
 # --- which description a tree carries -----------------------------------------
 #
 # lab_description_sha256 <SKILL.md> prints the SHA-256 of the exact bytes of
-# the frontmatter line that begins `description:`, without its newline. The
-# plugin's CI computes the same value, so the bytes are pinned here against
-# sha256sum on the literal line.
+# the frontmatter line that begins `description:`, without its newline. A
+# reader of a record computes the same value by hand, so the bytes are pinned
+# here against sha256sum on the literal line.
 
 sha() { printf '%s' "$1" | sha256sum | cut -d' ' -f1; }
 dfile="$idwork/SKILL.md"
@@ -348,22 +493,30 @@ got="$(lab_description_sha256 "$dfile")"; rc=$?
 got="$(lab_description_sha256 "$idwork/no-such-file")"; rc=$?
 [ -z "$got" ] && [ "$rc" -ne 0 ] && ok "a missing SKILL.md has no description hash" \
   || bad "a missing SKILL.md has no description hash (got '$got', rc $rc)"
-# the end of the file closes a frontmatter block no --- line closes
+# only a line of exactly --- closes the frontmatter: a block the file ends
+# without closing is no frontmatter, so nothing in it is the description
 printf -- '---\nname: probe\ndescription: unclosed\nbody\n' > "$dfile"
-got="$(lab_description_sha256 "$dfile")"
-[ "$got" = "$(sha 'description: unclosed')" ] \
-  && ok "a frontmatter block that never closes is read to the end of the file" \
-  || bad "a frontmatter block that never closes is read to the end of the file (got '$got')"
-# only the opening --- is tested for a CR: a closing "---\r" changes nothing
-printf -- '---\ndescription: cr\r\n---\r\n' > "$dfile"
+got="$(lab_description_sha256 "$dfile")"; rc=$?
+[ -z "$got" ] && [ "$rc" -ne 0 ] \
+  && ok "a frontmatter block that never closes has no description hash" \
+  || bad "a frontmatter block that never closes has no description hash (got '$got', rc $rc)"
+# only the two --- lines are tested for a CR: one that ends the description
+# line is a byte of it
+printf -- '---\ndescription: cr\r\n---\n' > "$dfile"
 got="$(lab_description_sha256 "$dfile")"
 [ "$got" = "$(printf 'description: cr\r' | sha256sum | cut -d' ' -f1)" ] \
-  && ok "a CR that ends the description line is hashed where the first line ends in LF alone" \
-  || bad "a CR that ends the description line is hashed where the first line ends in LF alone (got '$got')"
+  && ok "a CR that ends the description line is hashed where the --- lines end in LF alone" \
+  || bad "a CR that ends the description line is hashed where the --- lines end in LF alone (got '$got')"
+# a closing "---" and a CR is not a line of exactly ---: it closes nothing
+printf -- '---\ndescription: cr\r\n---\r\n' > "$dfile"
+got="$(lab_description_sha256 "$dfile")"; rc=$?
+[ -z "$got" ] && [ "$rc" -ne 0 ] \
+  && ok "a closing --- that ends in a CR closes no frontmatter, so there is no hash" \
+  || bad "a closing --- that ends in a CR closes no frontmatter, so there is no hash (got '$got', rc $rc)"
 
-# The command results/README.md prints is the one the plugin's CI runs: it
-# must give the function's value for every file the function hashes, and
-# the SHA-256 of nothing for a file it does not.
+# The command results/README.md prints is how a reader checks a record by
+# hand: it must give the function's value for every file the function
+# hashes, and the SHA-256 of nothing for a file it does not.
 recipe="$(sed -n '/^LC_ALL=C awk /,/| sha256sum$/p' "$lab_root/results/README.md")"
 [ "$(printf '%s\n' "$recipe" | wc -l)" -eq 3 ] \
   && ok "results/README.md prints the description hash as one three-line command" \
@@ -374,7 +527,6 @@ for content in '---\nname: probe\ndescription: "probe one"\nlicense: x\n---\n\nd
   '---\n  description: nested\ndescription: first\ndescription: second\n---\n' \
   '---\ndescription: padded  \r\n---\n' \
   '---\ndescription: caf\303\251 \342\200\224 dash\n---\n' \
-  '---\nname: probe\ndescription: unclosed\nbody\n' \
   '---\ndescription: 100%% \\ back\n---\n'; do
   # shellcheck disable=SC2059 # the fixtures are printf formats on purpose
   printf -- "$content" > "$dfile"
@@ -386,7 +538,8 @@ done
 empty="$(printf '' | sha256sum | cut -d' ' -f1)"
 none=1
 for content in '---\nname: probe\n---\n\ndescription: body line\n' 'description: no frontmatter\n' \
-  '---\r\ndescription: crlf\r\n---\r\n'; do
+  '---\r\ndescription: crlf\r\n---\r\n' '---\nname: probe\ndescription: unclosed\nbody\n' \
+  '---\ndescription: cr\r\n---\r\n'; do
   # shellcheck disable=SC2059 # the fixtures are printf formats on purpose
   printf -- "$content" > "$dfile"
   got="$(lab_description_sha256 "$dfile")"
