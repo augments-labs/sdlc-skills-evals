@@ -17,7 +17,8 @@
 # FAKE_ACTIVATION_HOOK=<exe> decides what an activation run fires: it is
 # called as `<exe> <installed plugin dir> <prompt>` and each line it prints
 # becomes a "SKILL <line>" record, so a test can make routing depend on the
-# description the installed tree carries.
+# description the installed tree carries. A line that begins "MODEL " is
+# passed through as it is: the model that session named.
 # Behavioral runs (reviser, paired and grader calls) are scripted by:
 #   FAKE_RECORD_DIR=<dir>      records call-<n>/{prompt.txt,workdir,env}
 #   FAKE_AUTH_FAIL=1           refuses as an unauthenticated CLI (exit 1)
@@ -119,7 +120,7 @@ _fake_emit_ok() { # $1 stream [$2 prompt]
   # FAKE_SUBJECT lets the triggering runner's subject matching hit;
   # FAKE_CHAIN=0 or FAKE_FIRE=0 emits no chain (a clean baseline).
   if [ -n "${FAKE_ACTIVATION_HOOK:-}" ]; then
-    "$FAKE_ACTIVATION_HOOK" "${FAKE_PLUGIN_DIR:-}" "${2:-}" | sed 's/^/SKILL /' >> "$1"
+    "$FAKE_ACTIVATION_HOOK" "${FAKE_PLUGIN_DIR:-}" "${2:-}" | sed '/^MODEL /!s/^/SKILL /' >> "$1"
   elif [ "${FAKE_CHAIN:-1}" != 0 ] && [ "${FAKE_FIRE:-1}" != 0 ]; then
     printf 'SKILL %s\n' "${FAKE_SUBJECT:-fake-subject}" >> "$1"
   fi
