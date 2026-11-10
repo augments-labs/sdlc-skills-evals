@@ -525,6 +525,26 @@ jq -e --arg t "$t_two" '.model == null and .plugin.skill_tree == $t' "$(idit ids
   && ok "a model only some arms named is not recorded for the iteration" \
   || bad "a model only some arms named is not recorded for the iteration ($(jq -c . "$(idit idsome)/identity.json" 2>&1))"
 
+# a session whose outputs could not be copied still ran, so the model it named
+# counts: here it differs from the other arm's, and the iteration names none
+gonehook="$work/gone-hook.sh"
+cat > "$gonehook" <<'HOOK'
+#!/usr/bin/env bash
+echo call >> "$HOOK_LOG"
+n="$(wc -l < "$HOOK_LOG")"
+printf 'MODEL model-%s\n' "$n"
+echo "done answer"
+[ "$n" -eq 1 ] || rm -rf "$1"
+HOOK
+chmod +x "$gonehook"
+EV_HOOK="$gonehook" idrun idgone --plugin "$gitplug"; rc=$?
+[ "$rc" -eq 2 ] && grep -q 'nested-files/without_skill' "$work/idgone/out" \
+  && [ ! -e "$(idit idgone)/nested-files/without_skill/grading.json" ] \
+  && [ "$(grep -h '^MODEL ' "$(idit idgone)"/nested-files/*/stream.txt | sort -u | wc -l)" -eq 2 ] \
+  && jq -e --arg t "$t_two" '.model == null and .plugin.skill_tree == $t' "$(idit idgone)/identity.json" >/dev/null 2>&1 \
+  && ok "an arm whose outputs were lost still counts its session's model" \
+  || bad "an arm whose outputs were lost still counts its session's model (rc $rc; $(jq -c . "$(idit idgone)/identity.json" 2>&1); $(tail -n 3 "$work/idgone/out"))"
+
 # skill text edited while the run was under way: what the arms saw is no commit's
 MODEL_NAME=model-x DIRTY_PLUGIN="$dirtied" EV_HOOK="$mhook" idrun iddirty --plugin "$dirtied"; rc=$?
 [ "$rc" -eq 0 ] && jq -e '.plugin == {commit: null, skill_tree: null}' "$(idit iddirty)/identity.json" >/dev/null 2>&1 \

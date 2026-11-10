@@ -158,8 +158,9 @@ note_base="$(lab_pin_note --base selftest-tag 2>/dev/null)"
 # the tree comes from, and the git tree hash of the skill's directory at that
 # commit. The tree hash names the skill text by content, so it survives a
 # squash merge that changes the commit. A directory is identified only when it
-# is the top of a git work tree whose skill directory is exactly HEAD's;
-# anything else is {null, null}, never a guess.
+# is the top of a git work tree whose skill directory is exactly HEAD's; any
+# other directory is {null, null}, never a guess. A reference whose commit
+# lacks the skill keeps its commit and has a null skill_tree.
 
 gc() { git -C "$idrepo" -c user.name=t -c user.email=t@example.invalid "$@"; }
 mkdir -p "$idrepo/skills/common/probe" "$idrepo/skills/flat" "$idrepo/skills/a/twin" "$idrepo/skills/b/twin" "$idrepo/sub"
@@ -250,6 +251,19 @@ done
 got="$(ident "$idrepo" probe)"
 [ "$got" = "$want" ] && ok "with the file and the flags gone, the work tree is its HEAD again" \
   || bad "with the file and the flags gone, the work tree is its HEAD again (got '$got')"
+# a tree hash covers file modes, so a mode HEAD does not hold is a difference
+# even where git is told not to look at modes
+git -C "$idrepo" config core.fileMode false
+chmod +x "$idrepo/skills/common/probe/SKILL.md"
+got="$(ident "$idrepo" probe "$idwork/reason")"
+[ "$got" = "$none" ] && grep -q 'uncommitted' "$idwork/reason" \
+  && ok "a file mode HEAD does not hold has no identity under core.fileMode=false" \
+  || bad "a file mode HEAD does not hold has no identity under core.fileMode=false (got '$got': $(cat "$idwork/reason" 2>/dev/null))"
+chmod -x "$idrepo/skills/common/probe/SKILL.md"; rm -f "$idwork/reason"
+got="$(ident "$idrepo" probe)"
+[ "$got" = "$want" ] && ok "with HEAD's mode back, the work tree is its HEAD under core.fileMode=false" \
+  || bad "with HEAD's mode back, the work tree is its HEAD under core.fileMode=false (got '$got')"
+git -C "$idrepo" config --unset core.fileMode
 # a work tree git cannot report on is not a clean one, and the reason is git's
 broken="$idwork/broken"; git clone -q "$idrepo" "$broken"
 printf 'not an index\n' > "$broken/.git/index"

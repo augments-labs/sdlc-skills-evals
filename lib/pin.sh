@@ -134,18 +134,21 @@ lab_pin_note() {
 # A ref is resolved in the plugin checkout, and a run installs it with `git
 # archive`: the hash names what the run installed only while no
 # .gitattributes rule (export-ignore, export-subst) makes the archive differ
-# from the tree. The plugin has no such rule at the pinned commit.
+# from the tree. The plugin has no export-ignore or export-subst rule at the
+# pinned commit; re-check its .gitattributes when the pin moves.
 #
 # A directory is identified only when it is the top of a git work tree whose
-# skill directory is exactly HEAD's: `git status --porcelain
-# --untracked-files=all --ignored -- <skill dir>` prints nothing, and no file
-# in it is marked assume-unchanged or skip-worktree. Then it is HEAD and that
-# tree. Any other directory is {null, null} — a run installs the directory as
-# it stands, and naming a commit for text that differs from it would describe
-# content the run never measured. A commit that holds no single directory for
-# the skill keeps its commit and has a null skill_tree. The reason for a null
-# goes to stderr. Always returns 0: an unnamed tree is a fact to record, not
-# an error.
+# skill directory is exactly HEAD's: `git -c core.fileMode=true status
+# --porcelain --untracked-files=all --ignored -- <skill dir>` prints nothing,
+# and no file in it is marked assume-unchanged or skip-worktree. Then it is
+# HEAD and that tree. Any other directory is {null, null} — a run installs the
+# directory as it stands, and naming a commit for text that differs from it
+# would describe content the run never measured. That includes a directory
+# whose HEAD holds no single directory for the skill; a reference whose
+# commit holds none keeps its commit and has a null skill_tree. The reason
+# for a null goes to stderr. Returns 0 for any identity, a null one included
+# (127 only on a wrong argument count): an unnamed tree is a fact to record,
+# not an error.
 
 _lab_skill_dir_at() { # $1 repo $2 commit $3 skill — prints the skill's directory in that commit
   local hits
@@ -184,8 +187,9 @@ lab_pin_identity() {
     fi
     # A run installs the directory as it stands, so the check sees what plain
     # `git status` leaves out: untracked files whatever
-    # status.showUntrackedFiles says, and ignored ones.
-    if ! dirty="$(git -C "$src" status --porcelain --untracked-files=all --ignored -- "$dir" 2>&1)"; then
+    # status.showUntrackedFiles says, ignored ones, and a file mode HEAD does
+    # not hold where core.fileMode is off — the tree hash covers modes.
+    if ! dirty="$(git -C "$src" -c core.fileMode=true status --porcelain --untracked-files=all --ignored -- "$dir" 2>&1)"; then
       printf 'no identity for %s: git status failed on %s (%s)\n' "$src" "$dir" "$(head -n 1 <<<"$dirty")" >&2
       _lab_identity_json "" ""; return 0
     fi

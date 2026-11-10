@@ -223,7 +223,9 @@ identify() { # $1 path|ref — sets id_json ({commit, skill_tree}) and id_why
   out="$(lab_pin_identity "$1" "$skill" 2>&1)"
   id_json="$(tail -n 1 <<<"$out")"
   id_why="$(sed '$d' <<<"$out" | head -n 1)"
-  id_why="${id_why#*: }" # the reason, without "no identity for <tree>: "
+  # the reason, without its "no identity for <tree>: " or "no skill tree for
+  # <skill>: " label (cut at the first ": ")
+  id_why="${id_why#*: }"
 }
 identity_line() { # $1 arm $2 identity json $3 why — one line for the operator
   if jq -e '.skill_tree != null' <<<"$2" >/dev/null 2>&1; then
@@ -412,6 +414,10 @@ run_arm() { # $1 eval id $2 arm $3 plugin source ("" for none)
   )
   rc=$?
   end="$(ms_now)"
+  # Every launched session counts towards the iteration's model, whatever
+  # becomes of its outputs below.
+  m="$(adapter_session_model "$stream" 2>/dev/null | head -n 1)"
+  session_models="$session_models$m"$'\n'
 
   # The change list first: response.txt is the lab's, not the agent's. A list
   # git could not compute (the agent replaced the repository, so the seed is
@@ -426,8 +432,6 @@ run_arm() { # $1 eval id $2 arm $3 plugin source ("" for none)
   lab_extract_stream_text "$stream" "$harness" > "$arm_dir/outputs/response.txt" 2>/dev/null \
     || : > "$arm_dir/outputs/response.txt"
 
-  m="$(adapter_session_model "$stream" 2>/dev/null | head -n 1)"
-  session_models="$session_models$m"$'\n'
   toks="$(adapter_usage "$stream" 2>/dev/null | tr -dc '0-9')"
   jq -n --argjson toks "${toks:-null}" --argjson ms "$((end - start))" \
     '{total_tokens: $toks, duration_ms: $ms}' > "$arm_dir/timing.json"

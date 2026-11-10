@@ -101,6 +101,12 @@ bench without_skill '"feed"' null '{}' > "$work/wordtree/ws/benchmark.json"
 refused wordtree 'with_skill' && grep -q 'not a git tree hash' "$work/wordtree/out" \
   && ok "a plugin.skill_tree that is not a hash is refused, and the message says so" \
   || bad "a plugin.skill_tree that is not a hash is refused, and the message says so (rc $rc: $(cat "$work/wordtree/out"))"
+# a hash followed by a newline is not the hash a comparison would match
+mkdir -p "$work/nltree/ws"
+bench without_skill "\"$feed\\n\"" null '{}' > "$work/nltree/ws/benchmark.json"
+refused nltree 'with_skill' && grep -q 'not a git tree hash' "$work/nltree/out" \
+  && ok "a plugin.skill_tree with a trailing newline is refused" \
+  || bad "a plugin.skill_tree with a trailing newline is refused (rc $rc: $(cat "$work/nltree/out"))"
 bench old_skill "\"$feed\"" '{"commit": "c", "skill_tree": ""}' '{}' > "$work/emptybase/ws/benchmark.json"
 refused emptybase 'old_skill' && ! grep -q 'with_skill' "$work/emptybase/out" \
   && ok "an empty-string baseline.skill_tree is refused, naming old_skill only" \

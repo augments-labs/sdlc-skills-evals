@@ -12,8 +12,10 @@
 #   metadata.baseline.skill_tree is not one and the second arm is old_skill
 # bin/evaluate leaves them null when --plugin (or --baseline-plugin) is a
 # directory whose skill directory is not exactly a git work tree's HEAD, or
-# a reference with no such skill. What the run scored is never a reason: a failing or indeterminate
-# result is recorded like any other.
+# a reference with no such skill. What the run scored is never a reason: a
+# failing or indeterminate result is recorded like any other.
+#
+# Needs jq to read the metadata (exit 3 without it).
 
 set -uo pipefail
 [ "${1:-}" = "-h" ] || [ "${1:-}" = "--help" ] && {
@@ -30,13 +32,14 @@ done
 [ -f "$ws/benchmark.json" ] || { echo "no benchmark.json in $ws" >&2; exit 2; }
 command -v jq >/dev/null 2>&1 || { echo "needs \`jq\`" >&2; exit 3; }
 # One line per arm whose skill text is unnamed. A skill tree is a git tree
-# hash, 40 hex digits or 64; anything else names no text. The fallback is for
-# a file that is not one JSON document.
+# hash, 40 hex digits or 64 and nothing after them (\z: jq's $ would let a
+# final newline through); anything else names no text. The fallback is for a
+# file that is not one JSON document.
 unnamed="$(jq -rs '
   def at(k): if type == "object" then .[k] else null end;
   def unnamed_tree: at("skill_tree")
     | if . == null then "is null"
-      elif type == "string" and test("^([0-9a-f]{40}|[0-9a-f]{64})$") then empty
+      elif type == "string" and test("\\A([0-9a-f]{40}|[0-9a-f]{64})\\z") then empty
       else "is not a git tree hash" end;
   if length != 1 then error("not one document") else .[0] end
   | at("metadata") as $m
