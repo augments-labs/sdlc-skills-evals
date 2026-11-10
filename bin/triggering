@@ -95,26 +95,30 @@ The summary (--summary):
   metadata {skill, harness, harness_version, model, plugin: {commit,
             skill_tree}, description_sha256, runs, threshold}
   splits   {train|validation|holdout: {queries, passed, failed,
-            inconclusive, pass_rate}}       only the splits that were scored
+            inconclusive, pass_rate}}       only the splits a query ran in
   queries  [{query, should_trigger, split, trigger_rate, verdict}]
 plugin is the full commit and the git tree hash of the skill's directory at
 that commit; both are null when --plugin is a directory whose skill directory
-is not exactly a git work tree's HEAD, before the run and after it.
+is not exactly a git work tree's HEAD, before the run and after it, and
+skill_tree alone is null when --plugin is a commit that does not hold the
+skill.
 description_sha256 is the SHA-256 of the exact bytes of the frontmatter line
 that begins `description:` in the skill's `SKILL.md`, without its newline.
 The frontmatter is the block a first line of exactly `---` opens and the
-next line of exactly `---` closes; the line is the first one in it that
-begins `description:`, and its newline is the one LF byte that ends it. It
-is null when the installed tree has no such line (a file with CRLF line
-endings has none: its first line is not exactly `---`), or when the line
-changed during the run.
+next line of exactly `---`, or the end of the file, closes; the line is the
+first one in it that begins `description:`, and its newline is the one LF
+byte that ends it. It is null when the installed tree has no such line (a
+file with CRLF line endings has none: its first line is not exactly `---`),
+or when the line changed during the run.
 harness_version and model are null when the adapter reads none; model is
 also null unless every scored run named the same one. pass_rate is passed /
-(passed + failed), null when nothing was scored; trigger_rate is null for an
-INCONCLUSIVE query. No transcript, stream, or observed routing enters it.
---dry-run with --summary prints the identity a run would record. A run says
-so when its summary is one bin/report will not record: no skill tree, no
-description hash, or a split without validation (--split train or holdout).
+(passed + failed), null when every query in the split was INCONCLUSIVE;
+trigger_rate is null for an INCONCLUSIVE query. No transcript, stream, or
+observed routing enters it.
+--dry-run with --summary prints the identity a run would record. The plan and
+the run both say when the summary is one bin/report will not record for want
+of a skill tree or of the validation split (--split train or holdout); only
+a run reads the description, so only a run says when it has no hash.
 
 Exit codes: 0 every scored query passed · 1 at least one FAIL
             2 bad or missing arguments, a --summary that could not be
@@ -220,7 +224,7 @@ identify() { # $1 path|commit — sets id_json ({commit, skill_tree}) and id_why
   out="$(lab_pin_identity "$1" "$skill" 2>&1)"
   id_json="$(tail -n 1 <<<"$out")"
   id_why="$(sed '$d' <<<"$out" | head -n 1)"
-  id_why="${id_why#*: }" # the reason, without "no identity for <tree>: "
+  id_why="${id_why#*: }" # the reason, without its "no identity for <tree>: " or "no skill tree for <skill>: "
 }
 identity_line() { # $1 identity json $2 why — one line for the operator
   if jq -e '.skill_tree != null' <<<"$1" >/dev/null 2>&1; then
@@ -317,8 +321,9 @@ adapter_check || exit 3
 # Conservative on purpose: an adapter that does not implement it is assumed to
 # have run, so no harness silently loses runs from its denominator.
 declare -F adapter_ran >/dev/null 2>&1 || adapter_ran() { return 0; }
-# Optional too, and read only for a summary: an adapter that binds neither
-# reports no version and no model, and the summary says null.
+# Optional too: an adapter that binds neither reports no version and no
+# model, and a summary says null. The version is read only for a summary;
+# the model is read from every run's stream.
 declare -F adapter_version >/dev/null 2>&1 || adapter_version() { :; }
 declare -F adapter_session_model >/dev/null 2>&1 || adapter_session_model() { :; }
 

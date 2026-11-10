@@ -348,5 +348,51 @@ got="$(lab_description_sha256 "$dfile")"; rc=$?
 got="$(lab_description_sha256 "$idwork/no-such-file")"; rc=$?
 [ -z "$got" ] && [ "$rc" -ne 0 ] && ok "a missing SKILL.md has no description hash" \
   || bad "a missing SKILL.md has no description hash (got '$got', rc $rc)"
+# the end of the file closes a frontmatter block no --- line closes
+printf -- '---\nname: probe\ndescription: unclosed\nbody\n' > "$dfile"
+got="$(lab_description_sha256 "$dfile")"
+[ "$got" = "$(sha 'description: unclosed')" ] \
+  && ok "a frontmatter block that never closes is read to the end of the file" \
+  || bad "a frontmatter block that never closes is read to the end of the file (got '$got')"
+# only the opening --- is tested for a CR: a closing "---\r" changes nothing
+printf -- '---\ndescription: cr\r\n---\r\n' > "$dfile"
+got="$(lab_description_sha256 "$dfile")"
+[ "$got" = "$(printf 'description: cr\r' | sha256sum | cut -d' ' -f1)" ] \
+  && ok "a CR that ends the description line is hashed where the first line ends in LF alone" \
+  || bad "a CR that ends the description line is hashed where the first line ends in LF alone (got '$got')"
+
+# The command results/README.md prints is the one the plugin's CI runs: it
+# must give the function's value for every file the function hashes, and
+# the SHA-256 of nothing for a file it does not.
+recipe="$(sed -n '/^LC_ALL=C awk /,/| sha256sum$/p' "$lab_root/results/README.md")"
+[ "$(printf '%s\n' "$recipe" | wc -l)" -eq 3 ] \
+  && ok "results/README.md prints the description hash as one three-line command" \
+  || bad "results/README.md prints the description hash as one three-line command (found: $recipe)"
+by_hand() { ( cd "$idwork" && bash -c "$recipe" | cut -d' ' -f1 ); }
+same=1
+for content in '---\nname: probe\ndescription: "probe one"\nlicense: x\n---\n\ndescription: body line\n' \
+  '---\n  description: nested\ndescription: first\ndescription: second\n---\n' \
+  '---\ndescription: padded  \r\n---\n' \
+  '---\ndescription: caf\303\251 \342\200\224 dash\n---\n' \
+  '---\nname: probe\ndescription: unclosed\nbody\n' \
+  '---\ndescription: 100%% \\ back\n---\n'; do
+  # shellcheck disable=SC2059 # the fixtures are printf formats on purpose
+  printf -- "$content" > "$dfile"
+  got="$(lab_description_sha256 "$dfile")"
+  [ -n "$got" ] && [ "$got" = "$(by_hand)" ] || { same=0; echo "    differs on: $content (function '$got', by hand '$(by_hand)')"; }
+done
+[ "$same" -eq 1 ] && ok "the documented command gives the function's hash" \
+  || bad "the documented command gives the function's hash"
+empty="$(printf '' | sha256sum | cut -d' ' -f1)"
+none=1
+for content in '---\nname: probe\n---\n\ndescription: body line\n' 'description: no frontmatter\n' \
+  '---\r\ndescription: crlf\r\n---\r\n'; do
+  # shellcheck disable=SC2059 # the fixtures are printf formats on purpose
+  printf -- "$content" > "$dfile"
+  got="$(lab_description_sha256 "$dfile")"
+  [ -z "$got" ] && [ "$(by_hand)" = "$empty" ] || { none=0; echo "    differs on: $content (function '$got', by hand '$(by_hand)')"; }
+done
+[ "$none" -eq 1 ] && ok "where the function has no hash, the documented command hashes nothing" \
+  || bad "where the function has no hash, the documented command hashes nothing"
 
 exit "$fails"

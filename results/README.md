@@ -77,9 +77,10 @@ results/<date>-<skill>-<harness>-triggering` copies it to
   verdict is decided on the rate rounded to two decimals, as the sheet
   prints it, while `trigger_rate` is exact: the two can disagree only for
   a query with more than 100 conclusive runs.
-- `splits` — for each of `train`, `validation`, and `holdout` that was
-  scored: `queries`, `passed`, `failed`, `inconclusive`, and `pass_rate`,
-  which is passed / (passed + failed) and null when nothing was scored.
+- `splits` — for each of `train`, `validation`, and `holdout` a query ran
+  in: `queries`, `passed`, `failed`, `inconclusive`, and `pass_rate`,
+  which is passed / (passed + failed) and null when every query in the
+  split was inconclusive.
 - `queries` — one row per query: `query`, `should_trigger`, `split`,
   `trigger_rate` (null for an inconclusive query), and `verdict` (`PASS`,
   `FAIL`, or `INCONCLUSIVE`). `trigger_rate` is over the runs that were
@@ -90,10 +91,10 @@ results/<date>-<skill>-<harness>-triggering` copies it to
 `description_sha256` is the SHA-256 of the exact bytes of the frontmatter
 line that begins `description:` in the skill's `SKILL.md`, without its
 newline. The frontmatter is the block a first line of exactly `---` opens
-and the next line of exactly `---` closes, and the line is the first one
-in it that begins `description:`. The newline is the one LF byte that
-ends the line; every other byte is hashed as it is. The same value, by
-hand:
+and the next line of exactly `---`, or the end of the file, closes, and
+the line is the first one in it that begins `description:`. The newline
+is the one LF byte that ends the line; every other byte is hashed as it
+is, a CR that ends the line included. The same value, by hand:
 
 ```bash
 LC_ALL=C awk 'NR == 1 { if ($0 != "---") exit; next }
@@ -104,8 +105,10 @@ LC_ALL=C awk 'NR == 1 { if ($0 != "---") exit; next }
 It is null when the tree has no such line, or the line changed while the
 run was under way; the run says so when it starts or when it ends. A
 `SKILL.md` with CRLF line endings has no such line: its first line is not
-exactly `---`. The `SKILL.md` is the one at `skills/[<phase>/]<name>/` in
-the tree the run installed.
+exactly `---`. For a file with no such line the command above hashes
+nothing and prints the SHA-256 of the empty string (`e3b0c442…`), which
+no record carries. The `SKILL.md` is the one at
+`skills/[<phase>/]<name>/` in the tree the run installed.
 
 `bin/report --triggering` refuses — copying nothing — when
 `triggering.json` already exists in the record, when

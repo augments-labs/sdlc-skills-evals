@@ -175,7 +175,7 @@ trefused() { # $1 tag $2 pattern the refusal names — exit 2, nothing copied
   [ "$rc" -eq 2 ] && [ ! -e "$work/$1/rec" ] && grep -q "$2" "$work/$1/out"
 }
 for t in tgood tnull tnotree tnltree tnoval ttrain temptyval tbad ttwo texists tboth \
-  tnodesc tshortdesc tupdesc tnldesc tall tinc; do mkdir -p "$work/$t"; done
+  tnodesc tshortdesc tupdesc tnldesc tall tinc t64 t41; do mkdir -p "$work/$t"; done
 
 # a failing sheet is data: named, with its validation split, it is recorded
 trig "\"$feed\"" "{\"train\": $val, \"validation\": $val}" > "$work/tgood/sum.json"
@@ -197,6 +197,16 @@ trig '"main"' "{\"validation\": $val}" > "$work/tnotree/sum.json"
 trefused tnotree 'metadata.plugin.skill_tree is not a git tree hash' \
   && ok "a summary whose skill tree is not a tree hash is refused" \
   || bad "a summary whose skill tree is not a tree hash is refused (rc $rc: $(cat "$work/tnotree/out"))"
+# a tree hash is 40 hex digits, or 64 in a SHA-256 repository, and nothing between
+trig "\"$feed${feed:0:24}\"" "{\"validation\": $val}" > "$work/t64/sum.json"
+trec t64
+[ "$rc" -eq 0 ] && cmp -s "$work/t64/sum.json" "$work/t64/rec/triggering.json" \
+  && ok "a summary whose skill tree is a 64-digit hash is recorded" \
+  || bad "a summary whose skill tree is a 64-digit hash is recorded (rc $rc: $(cat "$work/t64/out"))"
+trig "\"${feed}f\"" "{\"validation\": $val}" > "$work/t41/sum.json"
+trefused t41 'metadata.plugin.skill_tree is not a git tree hash' \
+  && ok "a summary whose skill tree has 41 digits is refused" \
+  || bad "a summary whose skill tree has 41 digits is refused (rc $rc: $(cat "$work/t41/out"))"
 # a hash followed by a newline is not the hash a comparison would match
 trig "\"$feed\\n\"" "{\"validation\": $val}" > "$work/tnltree/sum.json"
 trefused tnltree 'metadata.plugin.skill_tree is not a git tree hash' \
