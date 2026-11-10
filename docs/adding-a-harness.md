@@ -25,7 +25,10 @@ CLI. Read `harnesses/README.md` for the contract, then:
    `permission_flags` naming exactly the flags the file passes (a header
    naming a flag the file does not pass fails `bin/check`);
    `capabilities` with `run` evidence only for what a real stream
-   showed, `documentation` for the rest.
+   showed, `documentation` for the rest. A record names the skill text
+   as the tree hash of `skills/[<phase>/]<name>`; an adapter that
+   installs another copy of the skill (the `plugins/sdlc-skills` mirror)
+   stays `runnable=no` until it shows that copy is the same text.
 5. Keep the plugin's offline bindings in the plugin: install smoke,
    discovery, and inventory stay where they are; this file is the live
    half only.

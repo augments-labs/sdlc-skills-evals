@@ -73,14 +73,17 @@ against an older plugin tree (`old_skill`) instead of no skill.
 
 `identity.json` says what the iteration measured, and `bin/benchmark`
 copies it into `benchmark.json`'s `metadata`: the skill, the harness, its
-CLI version and the model the sessions named (null when the adapter reads
-none), and for each arm that installed a plugin the full `commit` and the
+CLI version and the model every session named (each null when the adapter
+reads none; the model also when a session named none or two disagreed),
+and for each arm that installed a plugin the full `commit` and the
 `skill_tree` — the git tree hash of the skill's directory at that commit,
 `git rev-parse <commit>:skills/<phase>/<name>`, which names the skill text
 by content. A `--plugin` or `--baseline-plugin` directory is named only
-when it is a git work tree with nothing uncommitted in the skill's
-directory; otherwise both are null, the `--dry-run` and the run say so,
-and `bin/report` will not record the iteration.
+when it is the top of a git work tree whose skill directory is exactly
+`HEAD`'s: no modified, untracked or git-ignored file in it, and none
+marked `assume-unchanged` or `skip-worktree`. Otherwise both are null, the
+`--dry-run` and the run say so, and `bin/report` will not record the
+iteration.
 
 Prose assertions wait as `needs_review` for you. To have a skill-free
 session on the same harness grade them, price the extra calls first —

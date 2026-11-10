@@ -284,6 +284,13 @@ A harness whose run produced no skill record, or whose stream the parser
 could not read, stays `runnable=no` — with the reason naming what the run
 showed instead. The flag is never promoted by a test.
 
+A record names the skill text an arm installed as the git tree hash of
+`skills/[<phase>/]<name>` (`lib/pin.sh` `lab_pin_identity`). An adapter
+that installs another copy of the skill — `antigravity` and `devin`
+install the tree's `plugins/sdlc-skills` mirror — stays `runnable=no`
+until it shows the copy it loads is that same text, or `bin/evaluate`
+records a null identity for it.
+
 ## The adapter tests
 
 - `lib/tests/harnesses.sh` — the contract: the adapter set equals the
