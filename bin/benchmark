@@ -26,14 +26,18 @@
 # was repeated. No live calls.
 #
 # An arm is one run or run-<k>/ directories (k from 1, no leading zero),
-# never both: an arm holding a run's files beside run-<k>/, a run- name
-# that is not run-<k>, or a run-<k> that is not a directory is refused. So
-# is an iteration where an arm directory does not hold exactly runs 1 to
+# never both. Refused: an arm holding eval-case.json, outputs/,
+# run_status.json, grading.json or timing.json beside run-<k>/ (a run's
+# git-changed.txt, stream.txt and stderr.txt are not looked at), a run-
+# name that is not run-<k>, or a run-<k> that is not a directory. Refused
+# too: an iteration where an arm directory does not hold exactly runs 1 to
 # N: N is identity.json's runs_per_eval, else the highest run number the
 # iteration holds. An eval with no directory for an arm has no row for that
-# arm, with one run or with N: that is not refused. A refusal names the
-# arm, writes nothing, and exits 2; a benchmark.json already there stays as
-# it was, and the refusal says it is from an earlier aggregation.
+# arm, with one run or with N: that is not refused. Each of these refusals
+# names the arm, says the iteration is not aggregated, writes nothing, and
+# exits 2; a benchmark.json and benchmark.md already there stay as they
+# were, and the refusal says the benchmark.json is from an earlier
+# aggregation. No other exit says that.
 #
 # The identity fields of metadata are bin/evaluate's <iteration>/identity.json,
 # copied — except that a missing runs_per_eval is the highest run number the
@@ -90,8 +94,9 @@ not_aggregated() { # $1 why, or nothing
   exit 2
 }
 
-# Every arm directory is one run or run-<k>/ directories (lab_arm_runs says
-# which and refuses the rest), or the iteration is not aggregated.
+# Every arm directory is one run or run-<k>/ directories: lab_arm_runs says
+# which. A directory with no run- entry is one run; the ones it refuses
+# (lib/common.sh names them) leave the iteration not aggregated.
 for e in "$iter"/*/; do
   [ -d "$e" ] || continue
   for a in with_skill "$second_arm"; do

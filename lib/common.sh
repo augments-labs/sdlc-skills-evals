@@ -38,9 +38,10 @@ lab_changed_files() { # $1 work tree $2 base commit
 # stderr and nothing on stdout, for a name that begins run- and is not
 # run-<k> (k digits, counted from 1, no leading zero), for a run-<k> that is
 # not a directory (a symlink to one counts as one), and for run-<k>/ beside
-# one of a run's own files: eval-case.json, outputs, run_status.json,
-# grading.json, timing.json. The numbers are text here, never shell
-# arithmetic.
+# any of these five of a run's files: eval-case.json, outputs,
+# run_status.json, grading.json, timing.json. The other three a run writes
+# (git-changed.txt, stream.txt, stderr.txt) are not looked at. The numbers
+# are text here, never shell arithmetic.
 lab_arm_runs() { # $1 arm dir
   local arm="${1%/}" r k f out=""
   for r in "$arm"/run-*; do

@@ -94,7 +94,8 @@ for k in $(seq 1 10); do cp -r "$here/lib/tests/fixtures/grade-run" "$work/ten/r
 rm -rf "$work/ten/run-2/outputs" "$work/ten/run-10/outputs"
 "$here/bin/grade" "$work/ten" >"$work/ten.out" 2>&1
 [ "$(grep -o 'run-[0-9]* was not graded' "$work/ten.out" | tr '\n' ' ')" = "run-2 was not graded run-10 was not graded " ] \
-  && ok "run-10 is graded after run-2" || bad "run-10 is graded after run-2 ($(cat "$work/ten.out"))"
+  && ok "run-2 is tried before run-10: number order, not name order" \
+  || bad "run-2 is tried before run-10: number order, not name order ($(cat "$work/ten.out"))"
 
 # --- the arm measured nothing: indeterminate short-circuits the grade --------
 cp -r "$here/lib/tests/fixtures/grade-run" "$work/indet"

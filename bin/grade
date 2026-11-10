@@ -15,10 +15,12 @@
 # but run-<k>/ directories: given that arm dir, each run-<k>/ is graded, in
 # number order, as its own run dir with the same flags, and nothing is
 # written beside them. The exit is the highest of theirs. A directory that
-# holds a run's files beside run-<k>/, a run- name that is not run-<k> (k
-# from 1, no leading zero), or a run-<k> that is not a directory is refused
-# (exit 2) before anything is graded. A directory with no run- entry at all
-# is graded as one run dir.
+# holds eval-case.json, outputs/, run_status.json, grading.json or
+# timing.json beside run-<k>/ (git-changed.txt, stream.txt and stderr.txt
+# are not looked at), a run- name that is not run-<k> (k from 1, no leading
+# zero), or a run-<k> that is not a directory is refused (exit 2) before
+# anything is graded. A directory with no run- entry at all is graded as
+# one run dir.
 #
 # An arm whose run_status.json says "indeterminate" measured nothing, so it
 # is not scored: its summary carries the reason and a null pass rate, and
@@ -91,9 +93,9 @@ done
 case "$timeout_s" in ''|*[!0-9]*|0) echo "--timeout needs a positive integer" >&2; exit 2;; esac
 
 # A repeated arm: grade each run-<k>/ in number order, and fail if any of
-# them cannot be. A directory lab_arm_runs refuses (a run's files beside
-# run-<k>/, or a bad run- entry) is refused before anything is graded; one
-# with no run- entry is this run dir, graded below.
+# them cannot be. A directory lab_arm_runs refuses (one of the five files
+# it names beside run-<k>/, or a bad run- entry) is refused before anything
+# is graded; one with no run- entry is this run dir, graded below.
 arm_runs="$(lab_arm_runs "$run_dir")" || exit 2
 if [ "$arm_runs" != "1 ${run_dir%/}" ]; then
   rep_flags=(--harness-dir "$harnessdir" --timeout "$timeout_s")

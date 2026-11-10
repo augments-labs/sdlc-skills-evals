@@ -16,9 +16,10 @@ repetition a row came from. `bin/benchmark` exits `2` and writes nothing,
 with "`<eval>/<arm>` holds run(s) 1, 3, not 1 to 3", when an arm directory
 lacks a repetition (a run that was interrupted, a `run-<k>/` that was
 removed): the iteration is not N runs per eval, so run it again as a new
-iteration. A `benchmark.json` already there is the earlier aggregation's,
-and the message says so. An eval whose whole arm directory is gone is not
-refused: `runs[]` has no row for that eval and arm.
+iteration. A `benchmark.json` and `benchmark.md` already there are the
+earlier aggregation's, and the message says so of the `benchmark.json`. An
+eval whose whole arm directory is gone is not refused: `runs[]` has no row
+for that eval and arm.
 
 1. **Unrunnable harness.** `bin/evaluate` exits `2` before any run with
    "harness X is unrunnable here (reason)": its adapter says `runnable=no`.

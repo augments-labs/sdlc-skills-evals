@@ -9,8 +9,9 @@ so no test needs a sibling plugin checkout or a live CLI.
   <arm-dir>`: the arm's runs as `<run number> <dir>` lines (the arm itself
   as run 1 when it holds no `run-` entry, or its `run-<k>/` directories in
   number order), or exit 2 with the reason for a `run-` entry that is not
-  a `run-<k>/` directory (k from 1) or for `run-<k>/` beside a run's own
-  files.
+  a `run-<k>/` directory (k from 1) or for `run-<k>/` beside one of five
+  of a run's files (`eval-case.json`, `outputs/`, `run_status.json`,
+  `grading.json`, `timing.json`).
 - `home-env.sh` — `lab_home_env <run-dir>` prints the per-run `HOME`,
   `XDG_*`, `TMPDIR`, and `LAB_RUN_BASE` assignments (eval them); the home
   lives under `${TMPDIR:-/tmp}/sdlc-skills-evals/<run-id>/`, never under

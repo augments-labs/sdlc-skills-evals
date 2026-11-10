@@ -288,7 +288,7 @@ rm "$work6/gap/eval-b/with_skill/run-2/grading.json"
   && ok "a run with no grading.json is its own indeterminate row, out of the mean" \
   || bad "a run with no grading.json is its own indeterminate row, out of the mean (rc $rc)"
 
-# --- one iteration is N runs of every eval and arm ---------------------------
+# --- one iteration is N runs in every arm directory --------------------------
 # A layout that is not that is refused: nothing is written, the arm is named.
 refused() { # $1 dir $2 text the refusal must carry — the dir holds no benchmark yet
   local out rc
@@ -374,6 +374,32 @@ out="$("$here/bin/benchmark" "$work6/hole" 2>&1 >/dev/null)"; rc=$?
 [ "$rc" -eq 2 ] && ! printf '%s' "$out" | grep -q 'earlier aggregation' \
   && ok "a refusal with no benchmark.json names no earlier one" \
   || bad "a refusal with no benchmark.json names no earlier one (rc $rc: $out)"
+# the other two refusals say it too: a mixed arm, and fewer runs than identity.json says
+earlier_named() { # $1 dir, aggregated once and broken since; $1.json is the earlier benchmark.json
+  local out rc      # the refusal's stderr is kept in $1.err
+  out="$("$here/bin/benchmark" "$1" 2>&1 >/dev/null)"; rc=$?
+  printf '%s\n' "$out" > "$1.err"
+  [ "$rc" -eq 2 ] && cmp -s "$1/benchmark.json" "$1.json" \
+    && printf '%s' "$out" | grep -qF "$1/benchmark.json is from an earlier aggregation and is left as it was" && return 0
+  printf '%s\n' "rc $rc: $out" > "$work6/refused.out"; return 1
+}
+mk_runs "$work6/stale-mixed" 2
+"$here/bin/benchmark" "$work6/stale-mixed" >/dev/null 2>&1; rc1=$?
+cp "$work6/stale-mixed/benchmark.json" "$work6/stale-mixed.json"
+cp "$work6/stale-mixed/eval-b/with_skill/run-1/grading.json" "$work6/stale-mixed/eval-b/with_skill/"
+[ "$rc1" -eq 0 ] && earlier_named "$work6/stale-mixed" \
+  && grep -qF "eval-b/with_skill" "$work6/stale-mixed.err" && ! grep -q 'holds run(s)' "$work6/stale-mixed.err" \
+  && ok "a mixed arm's refusal says an earlier benchmark.json is the earlier one" \
+  || bad "a mixed arm's refusal says an earlier benchmark.json is the earlier one (first rc $rc1; $(why))"
+mk_runs "$work6/stale-id" 2
+jq -n '{skill: "probe", harness: "fake", runs_per_eval: 2}' > "$work6/stale-id/identity.json"
+"$here/bin/benchmark" "$work6/stale-id" >/dev/null 2>&1; rc1=$?
+cp "$work6/stale-id/benchmark.json" "$work6/stale-id.json"
+rm -rf "$work6/stale-id/eval-a/without_skill/run-2"
+[ "$rc1" -eq 0 ] && earlier_named "$work6/stale-id" \
+  && grep -qF "identity.json says runs_per_eval is 2" "$work6/stale-id.err" \
+  && ok "a refusal against identity.json's runs_per_eval says an earlier benchmark.json is the earlier one" \
+  || bad "a refusal against identity.json's runs_per_eval says an earlier benchmark.json is the earlier one (first rc $rc1; $(why))"
 # an arm directory that is not there at all is skipped, as it is with one run
 mk_runs "$work6/lone" 2
 rm -rf "$work6/lone/eval-b/without_skill"
@@ -382,6 +408,13 @@ rm -rf "$work6/lone/eval-b/without_skill"
     == [["eval-a", "with_skill"], ["eval-a", "without_skill"], ["eval-b", "with_skill"]]' "$work6/lone/benchmark.json" >/dev/null 2>&1 \
   && ok "an arm directory that is missing altogether is skipped, not refused" \
   || bad "an arm directory that is missing altogether is skipped, not refused (rc $rc)"
+cp -r "$here/lib/tests/fixtures/bench-iter" "$work6/lone1"
+rm -rf "$work6/lone1/eval-b/without_skill"
+"$here/bin/benchmark" "$work6/lone1" >/dev/null 2>&1; rc=$?
+[ "$rc" -eq 0 ] && jq -e '[.runs[] | [.eval_id, .configuration, .run_number]]
+    == [["eval-a", "with_skill", 1], ["eval-a", "without_skill", 1], ["eval-b", "with_skill", 1]]' "$work6/lone1/benchmark.json" >/dev/null 2>&1 \
+  && ok "with one run too, a missing arm directory is skipped, not refused" \
+  || bad "with one run too, a missing arm directory is skipped, not refused (rc $rc)"
 # a runs_per_eval that is no count names nothing: the identity is null
 notn=""
 for v in '"three"' 0 2.5 -1 true; do

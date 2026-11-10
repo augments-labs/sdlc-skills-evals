@@ -87,14 +87,16 @@ bin/evaluate --harness opencode --skill yagni --runs 3
 ```
 
 An arm is one run or `run-1/` to `run-N/`, never both. `bin/grade` and
-`bin/benchmark` refuse (exit 2, naming it) an arm that holds one of a
-run's files (`eval-case.json`, `outputs/`, `run_status.json`,
-`grading.json`, `timing.json`) beside `run-<k>/`, or a `run-` name
-`bin/evaluate` does not write. `bin/benchmark` also writes nothing unless
-every arm directory in the iteration holds runs 1 to N: N is
-`identity.json`'s `runs_per_eval`, else the highest run number the
-iteration holds. A `benchmark.json` from an earlier aggregation is left as
-it was, and the refusal says so.
+`bin/benchmark` refuse (exit 2, naming it) an arm that holds
+`eval-case.json`, `outputs/`, `run_status.json`, `grading.json` or
+`timing.json` beside `run-<k>/` (a run's `git-changed.txt`, `stream.txt`
+and `stderr.txt` are not looked at), or a `run-` name `bin/evaluate` does
+not write. `bin/benchmark` also writes nothing unless every arm directory
+in the iteration holds runs 1 to N: N is `identity.json`'s `runs_per_eval`,
+else the highest run number the iteration holds. After either refusal a
+`benchmark.json` and `benchmark.md` from an earlier aggregation are left
+as they were, and the refusal says the `benchmark.json` is the earlier
+one.
 
 `identity.json` says what the iteration measured, and `bin/benchmark`
 copies it into `benchmark.json`'s `metadata`: the skill, the harness, its
