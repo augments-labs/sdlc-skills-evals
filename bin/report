@@ -15,22 +15,77 @@
 # a reference with no such skill. What the run scored is never a reason: a
 # failing or indeterminate result is recorded like any other.
 #
+# bin/report --triggering <summary.json> --record <record-dir> copies the
+# summary bin/triggering --summary wrote to <record-dir>/triggering.json, and
+# nothing else, under the same two rules: an existing triggering.json
+# refuses, and so does a summary whose metadata.plugin.skill_tree is not a
+# git tree hash. A record reports the validation split, so a summary that
+# scored none (--split train or holdout) is refused too.
+#
 # Needs jq to read the metadata (exit 3 without it).
 
 set -uo pipefail
 [ "${1:-}" = "-h" ] || [ "${1:-}" = "--help" ] && {
-  echo "usage: bin/report --workspace <iteration-dir> --record <record-dir>"; exit 0; }
-ws=""; rec=""
+  cat <<'EOF'
+usage: bin/report --workspace <iteration-dir> --record <record-dir>
+       bin/report --triggering <summary.json> --record <record-dir>
+
+  --workspace D    an iteration bin/evaluate wrote: its benchmark.json, and
+                   benchmark.md and feedback.json when present, are copied
+  --triggering F   a summary bin/triggering --summary wrote: it is copied
+                   to <record-dir>/triggering.json
+  --record D       the record directory, results/<date>-<skill>-<harness>
+                   for an iteration and
+                   results/<date>-<skill>-<harness>-triggering for a summary
+
+Refuses, copying nothing (exit 2): a target that already exists in the
+record; a source that does not name its skill text by a git tree hash
+(metadata.plugin.skill_tree, and metadata.baseline.skill_tree when the
+second arm is old_skill); a summary with no validation split. A failing or
+inconclusive result is recorded like any other.
+EOF
+  exit 0; }
+ws=""; rec=""; trig=""
 while [ "$#" -gt 0 ]; do
   case "$1" in
     --workspace) ws="${2:-}"; shift 2 || exit 2;;
+    --triggering) trig="${2:-}"; shift 2 || exit 2;;
     --record) rec="${2:-}"; shift 2 || exit 2;;
     *) echo "unknown argument: $1" >&2; exit 2;;
   esac
 done
-[ -n "$ws" ] && [ -n "$rec" ] || { echo "needs --workspace and --record" >&2; exit 2; }
-[ -f "$ws/benchmark.json" ] || { echo "no benchmark.json in $ws" >&2; exit 2; }
+[ -z "$ws" ] || [ -z "$trig" ] || { echo "one record, one source: --workspace or --triggering, not both" >&2; exit 2; }
+[ -n "$ws$trig" ] && [ -n "$rec" ] || { echo "needs --workspace or --triggering, and --record" >&2; exit 2; }
 command -v jq >/dev/null 2>&1 || { echo "needs \`jq\`" >&2; exit 3; }
+
+if [ -n "$trig" ]; then
+  [ -f "$trig" ] || { echo "no summary at $trig" >&2; exit 2; }
+  # One line per reason the summary is not a record.
+  why="$(jq -rs '
+    def at(k): if type == "object" then .[k] else null end;
+    if length != 1 then error("not one document") else .[0] end
+    | (at("metadata") | at("plugin") | at("skill_tree")
+       | if . == null then "is null"
+         elif type == "string" and test("^([0-9a-f]{40}|[0-9a-f]{64})$") then empty
+         else "is not a git tree hash" end
+       | "it does not say which skill text it scored (metadata.plugin.skill_tree \(.))"),
+      (at("splits") | at("validation") | at("queries")
+       | if type == "number" and . > 0 then empty
+         else "it scored no validation query (splits.validation), and a record reports validation" end)' \
+    "$trig" 2>/dev/null)" || why="it is not one JSON document"
+  if [ -n "$why" ]; then
+    while IFS= read -r line; do echo "refusing: $trig: $line" >&2; done <<<"$why"
+    echo "  run bin/triggering --summary with the plugin as a commit, or as a clean git work tree," >&2
+    echo "  and with the validation split (--split all or validation). Nothing was copied." >&2
+    exit 2
+  fi
+  [ -e "$rec/triggering.json" ] && { echo "refusing: $rec/triggering.json exists" >&2; exit 2; }
+  mkdir -p "$rec" || exit 2
+  cp "$trig" "$rec/triggering.json" || exit 2
+  exit 0
+fi
+
+[ -f "$ws/benchmark.json" ] || { echo "no benchmark.json in $ws" >&2; exit 2; }
 # One line per arm whose skill text is unnamed. A skill tree is a git tree
 # hash, 40 hex digits or 64 and nothing after them (\z: jq's $ would let a
 # final newline through); anything else names no text. The fallback is for a

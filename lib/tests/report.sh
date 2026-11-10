@@ -147,4 +147,95 @@ bench without_skill "\"$feed\"" null '{"with_skill": {"pass_rate": null, "indete
 copied failing && ok "an indeterminate result with a named skill text is recorded" \
   || bad "an indeterminate result with a named skill text is recorded (rc $rc: $(cat "$work/failing/out"))"
 
+# --- a triggering summary is a record too ------------------------------------
+#
+# bin/report --triggering <summary.json> --record <dir> copies the summary
+# bin/triggering --summary wrote to <dir>/triggering.json, under the same
+# rules: an existing target refuses, and so does a summary that does not say
+# which skill text it scored. One more: a record reports validation, so a
+# summary without that split is not one.
+
+# trig <plugin skill_tree|null> <splits json> — prints a summary as bin/triggering writes it
+trig() {
+  jq -n --argjson tree "$1" --argjson splits "$2" '
+    {metadata: {skill: "probe", harness: "fake", harness_version: null, model: null,
+       plugin: {commit: (if $tree == null then null else "c0ffeec0ffeec0ffeec0ffeec0ffeec0ffeec0ff" end), skill_tree: $tree},
+       description_sha256: "ab12", runs: 3, threshold: 0.5},
+     splits: $splits,
+     queries: [{query: "q", should_trigger: true, split: "validation", trigger_rate: 0, verdict: "FAIL"}]}'
+}
+val='{"queries": 1, "passed": 0, "failed": 1, "inconclusive": 0, "pass_rate": 0}'
+trec() { # $1 tag — reports $work/$1/sum.json into $work/$1/rec; rc and output kept
+  "$here/bin/report" --triggering "$work/$1/sum.json" --record "$work/$1/rec" >"$work/$1/out" 2>&1; rc=$?
+}
+trefused() { # $1 tag $2 pattern the refusal names — exit 2, nothing copied
+  trec "$1"
+  [ "$rc" -eq 2 ] && [ ! -e "$work/$1/rec" ] && grep -q "$2" "$work/$1/out"
+}
+for t in tgood tnull tnotree tnoval ttrain temptyval tbad ttwo texists tboth; do mkdir -p "$work/$t"; done
+
+# a failing sheet is data: named, with its validation split, it is recorded
+trig "\"$feed\"" "{\"train\": $val, \"validation\": $val}" > "$work/tgood/sum.json"
+trec tgood
+[ "$rc" -eq 0 ] && cmp -s "$work/tgood/sum.json" "$work/tgood/rec/triggering.json" \
+  && [ "$(find "$work/tgood/rec" -type f | wc -l)" -eq 1 ] \
+  && ok "a summary is copied to triggering.json, byte for byte, and nothing else is" \
+  || bad "a summary is copied to triggering.json, byte for byte, and nothing else is (rc $rc: $(cat "$work/tgood/out"))"
+trec tgood
+[ "$rc" -eq 2 ] && grep -q 'triggering.json exists' "$work/tgood/out" \
+  && ok "a second report of a summary refuses" \
+  || bad "a second report of a summary refuses (rc $rc: $(cat "$work/tgood/out"))"
+
+trig null "{\"validation\": $val}" > "$work/tnull/sum.json"
+trefused tnull 'metadata.plugin.skill_tree is null' \
+  && ok "a summary with a null skill tree is refused" \
+  || bad "a summary with a null skill tree is refused (rc $rc: $(cat "$work/tnull/out"))"
+trig '"main"' "{\"validation\": $val}" > "$work/tnotree/sum.json"
+trefused tnotree 'metadata.plugin.skill_tree is not a git tree hash' \
+  && ok "a summary whose skill tree is not a tree hash is refused" \
+  || bad "a summary whose skill tree is not a tree hash is refused (rc $rc: $(cat "$work/tnotree/out"))"
+trig "\"$feed\"" '{}' > "$work/tnoval/sum.json"
+trefused tnoval 'validation' \
+  && ok "a summary with no split is refused: it has no validation" \
+  || bad "a summary with no split is refused: it has no validation (rc $rc: $(cat "$work/tnoval/out"))"
+trig "\"$feed\"" "{\"train\": $val, \"holdout\": $val}" > "$work/ttrain/sum.json"
+trefused ttrain 'validation' && ! grep -q 'skill text' "$work/ttrain/out" \
+  && ok "a summary without the validation split is refused, and the named skill text is not blamed" \
+  || bad "a summary without the validation split is refused, and the named skill text is not blamed (rc $rc: $(cat "$work/ttrain/out"))"
+trig "\"$feed\"" '{"validation": {"queries": 0, "passed": 0, "failed": 0, "inconclusive": 0, "pass_rate": null}}' > "$work/temptyval/sum.json"
+trefused temptyval 'validation' \
+  && ok "a validation split with no query is refused" \
+  || bad "a validation split with no query is refused (rc $rc: $(cat "$work/temptyval/out"))"
+# both reasons are said at once
+trig null '{}' > "$work/tboth/sum.json"
+trefused tboth 'skill_tree is null' && grep -q 'validation' "$work/tboth/out" \
+  && ok "an unnamed summary without validation is told both" \
+  || bad "an unnamed summary without validation is told both (rc $rc: $(cat "$work/tboth/out"))"
+printf 'not json\n' > "$work/tbad/sum.json"
+trefused tbad 'not one JSON document' \
+  && ok "a summary that is not JSON is refused" \
+  || bad "a summary that is not JSON is refused (rc $rc: $(cat "$work/tbad/out"))"
+{ trig "\"$feed\"" "{\"validation\": $val}"; trig "\"$feed\"" "{\"validation\": $val}"; } > "$work/ttwo/sum.json"
+trefused ttwo 'not one JSON document' \
+  && ok "a summary file holding two documents is refused" \
+  || bad "a summary file holding two documents is refused (rc $rc: $(cat "$work/ttwo/out"))"
+"$here/bin/report" --triggering "$work/no-such.json" --record "$work/tnone" >"$work/tnone.out" 2>&1; rc=$?
+[ "$rc" -eq 2 ] && [ ! -e "$work/tnone" ] \
+  && ok "a missing summary errors" || bad "a missing summary errors (rc $rc)"
+# an existing triggering.json is kept
+trig "\"$feed\"" "{\"validation\": $val}" > "$work/texists/sum.json"
+mkdir -p "$work/texists/rec"; printf 'kept\n' > "$work/texists/rec/triggering.json"
+trec texists
+[ "$rc" -eq 2 ] && [ "$(cat "$work/texists/rec/triggering.json")" = kept ] \
+  && ok "an existing triggering.json refuses with exit 2 and is kept" \
+  || bad "an existing triggering.json refuses with exit 2 and is kept (rc $rc)"
+# one record, one source
+"$here/bin/report" --workspace "$work/ws/iteration-3" --triggering "$work/tgood/sum.json" \
+  --record "$work/tmixed" >"$work/tmixed.out" 2>&1; rc=$?
+[ "$rc" -eq 2 ] && [ ! -e "$work/tmixed" ] \
+  && ok "--workspace and --triggering together are refused" \
+  || bad "--workspace and --triggering together are refused (rc $rc)"
+"$here/bin/report" --help 2>&1 | grep -q -- '--triggering' \
+  && ok "--help documents --triggering" || bad "--help documents --triggering"
+
 exit "$fails"
