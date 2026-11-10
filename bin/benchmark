@@ -17,25 +17,26 @@
 # (population) over every scored run of that configuration, plus
 # indeterminate_count. With one run per eval the stddev is the spread
 # between evals and says nothing about run-to-run variance: a record uses
-# 3 runs. A null pass rate — an
-# indeterminate arm, or an eval with no assertions yet — stays out of the
-# mean; an arm with no scored run has a null pass_rate, never zero. Token stats
-# run over the runs that reported tokens. The second arm keeps its own name
+# 3 runs. A null pass rate — an indeterminate arm, or an eval with no
+# assertions yet — stays out of the mean; an arm with no scored run has a
+# null pass_rate, never zero. Token stats run over the runs that reported
+# tokens. The second arm keeps its own name
 # (without_skill or old_skill). benchmark.md is the same data for a human:
 # a Summary table and a Per-Eval Breakdown, with a run column when an arm
 # was repeated. No live calls.
 #
 # The identity fields of metadata are bin/evaluate's <iteration>/identity.json,
-# copied — except that runs_per_eval defaults to 1 and a commit or skill_tree
-# that is not a string becomes null: which skill, on which harness (and CLI
-# version, and the model the sessions named — null when unknown), and which
-# skill text each arm installed. plugin is {commit, skill_tree} for
-# with_skill; baseline is the same pair for old_skill and null for
-# without_skill. skill_tree is the git tree hash of the skill's directory at
-# that commit. An iteration with no identity.json, or an unreadable one, is
-# still benchmarked, unnamed: skill, harness, harness_version and model are
-# null, and plugin (and baseline for old_skill) is {commit: null,
-# skill_tree: null} — bin/report will not record it.
+# copied — except that a missing runs_per_eval is the highest run number the
+# iteration holds (1 for one run per arm) and a commit or skill_tree that is
+# not a string becomes null: which skill, on which harness (and CLI version,
+# and the model the sessions named — null when unknown), and which skill
+# text each arm installed. plugin is {commit, skill_tree} for with_skill;
+# baseline is the same pair for old_skill and null for without_skill.
+# skill_tree is the git tree hash of the skill's directory at that commit.
+# An iteration with no identity.json, or an unreadable one, is still
+# benchmarked, unnamed: skill, harness, harness_version and model are null,
+# and plugin (and baseline for old_skill) is {commit: null, skill_tree: null}
+# — bin/report will not record it.
 #
 # An arm whose grading.json is missing or unreadable, or whose timing.json
 # is unreadable (not an object, or a non-number duration_ms/total_tokens),
