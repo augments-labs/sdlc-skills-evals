@@ -64,9 +64,13 @@ obligation. `bin/check` fails when a task in this table has no verdict.
 Rows E-2, E-4, E-8 and E-10 describe the lab before the behavior runner, its
 scenarios and manifests, `bin/campaign`, `lib/verdict.sh` and
 `lib/prelude.sh` were retired by the agentskills.io alignment, and "46
-skills" in E-5 and E-7 is that pin's count; the inventory holds 48. "The v11
-commit" in E-0 and "the pinned v11 bodies" in E-5 name the pin of that time;
-the pin is now `12.0.0`. The rows stay as written: they are provenance.
+skills" in E-5 and E-7 is that pin's count; the inventory holds 48. E-0's
+"the committed inventory names the v11 commit", E-5's "the pinned v11
+bodies" and E-7's "every skill in the pin now carries a definition" were
+true of the pin of that time, as is each "the v11 body of" cell of the
+corpus audit; the pin is now `12.0.0`, the inventory names its commit, and
+one skill at it has no definition yet (the gaps section below). The rows
+stay as written: they are provenance.
 
 Work after the tasks themselves: the independent review fixes (`5b15240`),
 the pull-request feedback round (`2d15beb`) and the merge of the whole lab
@@ -100,8 +104,11 @@ now in the user's hands.
 `bin/check` prints the three asset lists on every run that reaches the
 pinned-scope section — the last section of the full gate — so a run that
 fails earlier prints none of them; the lists below are their state at this
-commit. The two skill gaps are closed: every skill in the pin carries a
-description set and an output-eval definition. The old evals-coverage gate
+commit. The lists are computed from the inventory, and for it the two skill
+gaps are closed: every skill the inventory holds carries a description set
+and an output-eval definition. The 49th skill at the pin,
+`runtime-evidence`, is not in the inventory yet and has neither; no list
+below names it. The old evals-coverage gate
 was a reported gap list so the initial coverage could be recorded without a
 red cell — the plan's own clause permits it ("Initial coverage may record
 missing assets; V3-CORPORA closes them", `01-inventory.md`) — and the last
@@ -112,13 +119,13 @@ the adapter gap.
 
 ### Skills with no eval definition (0)
 
-None. Every skill in the pin carries an output-eval definition with its own
-fixture tree; the corpus audit below is the row per skill.
+None. Every skill the inventory holds carries an output-eval definition
+with its own fixture tree; the corpus audit below is the row per skill.
 
 ### Skills with no description set (0)
 
-None. Every skill in the pin carries a description set of at least twenty
-balanced queries with fixed `train`/`validation` splits and near-miss
+None. Every skill the inventory holds carries a description set of at least
+twenty balanced queries with fixed `train`/`validation` splits and near-miss
 negatives.
 
 ### Harnesses with no lab adapter (0)
@@ -211,12 +218,14 @@ holdout cannot simply be placed in the corpus before the selection step.
 
 ## The corpus audit — one row per skill
 
-Every skill in the pin carries two corpora: a description set of at least
-twenty balanced queries with fixed `train`/`validation` splits and near-miss
-negatives, and an output-eval definition of two or three cases with its own
-fixture tree. A row is not a name: it links the upstream body the corpus was
+Every skill the inventory holds carries two corpora: a description set of at
+least twenty balanced queries with fixed `train`/`validation` splits and
+near-miss negatives, and an output-eval definition of two or three cases
+with its own fixture tree. A row is not a name: it links the upstream body the corpus was
 written against, the positives, the near misses, the output case that bounds
-the skill, and the inputs the corpus stages for it.
+the skill, and the inputs the corpus stages for it. `12.0.0` changed the
+body of every one of the 48 skills, and no set has been re-checked against
+the new bodies yet.
 
 Two staged-input trees exist, and they are different things. The
 **description-query tree** is what `bin/triggering` seeds each run with

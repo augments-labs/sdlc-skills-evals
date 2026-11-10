@@ -172,7 +172,7 @@ pin="$(jq -r '.upstream.commit' config/upstream-inventory.json)"
 ver="$(jq -r '.upstream.version' config/upstream-inventory.json)"
 check "the inventory pins commit c1e995a0371b11271b1d9a393e89fb2f345b2611 (12.0.0)" \
   test "$pin $ver" = "c1e995a0371b11271b1d9a393e89fb2f345b2611 12.0.0"
-for f in README.md .github/PULL_REQUEST_TEMPLATE.md; do
+for f in README.md CLAUDE.md .github/PULL_REQUEST_TEMPLATE.md; do
   check "$f names the pinned commit $pin" grep -qF -- "$pin" "$f"
 done
 pin_section="$(awk '/^## The pin[[:space:]]*$/ { f = 1; next } f && /^## / { exit } f' docs/upstream-coverage.md)"

@@ -117,9 +117,9 @@ n_skills="$(jq '.skills | length' "$INV")"
 n_desc="$(find descriptions -maxdepth 1 -name '*.json' -type f | wc -l | tr -d ' ')"
 n_evals="$(find evals -mindepth 2 -maxdepth 2 -name evals.json -type f | wc -l | tr -d ' ')"
 if [ "$n_desc" -eq "$n_skills" ] && [ "$n_evals" -eq "$n_skills" ]; then
-  ok "every skill in the pin carries a query set and an eval definition ($n_skills of each)"
+  ok "every skill the inventory holds carries a query set and an eval definition ($n_skills of each)"
 else
-  bad "every skill in the pin carries a query set and an eval definition ($n_desc sets, $n_evals definitions, $n_skills skills)"
+  bad "every skill the inventory holds carries a query set and an eval definition ($n_desc sets, $n_evals definitions, $n_skills skills)"
 fi
 
 # the layout is flat: a set is descriptions/<skill>.json and a definition is
