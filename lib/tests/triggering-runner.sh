@@ -718,6 +718,45 @@ ran="$(jq '[.[].valid] | add' "$work/poll.json" 2>/dev/null)"
   && ok "six runs of a CLI that exits at once take less than six poll intervals" \
   || bad "six runs of a CLI that exits at once take less than six poll intervals (${ran:-no} runs scored in ${took}s)"
 
+# --- a CLI that is still running when its run is scored is stopped ----------
+#
+# The runner leaves the wait as soon as the subject shows up in the chain.
+# The CLI may still be working then: FAKE_MODE=linger emits its chain and
+# stays, and records its pid. The process that stands for the CLI is not
+# the runner's own job but three levels below it, as a real CLI is (the
+# launch subshell, `timeout`, the CLI), so stopping the job alone leaves it
+# running, in a home the runner then removes.
+
+linger_log="$work/linger.pids"
+: > "$linger_log"
+t0="$SECONDS"
+DESCRIPTIONS_ROOT="$iso" FAKE_MODE=linger FAKE_SUBJECT=probe FAKE_LINGER_LOG="$linger_log" \
+  "$here/bin/triggering" "${base[@]}" \
+  --skill probe --split all --runs 1 --jobs 1 --timeout 60 --json "$work/linger.json" >/dev/null 2>&1
+took="$(( SECONDS - t0 ))"
+ran="$(jq '[.[].valid] | add' "$work/linger.json" 2>/dev/null)"
+launched="$(wc -l < "$linger_log" | tr -d ' ')"
+[ "$ran" = 2 ] && [ "$launched" = 2 ] && [ "$took" -lt 30 ] \
+  && ok "a run whose subject fired is scored without waiting for the CLI to end" \
+  || bad "a run whose subject fired is scored without waiting for the CLI to end (${ran:-no} runs scored, ${launched} launched, ${took}s)"
+# A stopped process may take a moment to go: three seconds, read ten times a second.
+left=""
+for _ in $(seq 1 30); do
+  left=""
+  while read -r lpid; do
+    kill -0 "$lpid" 2>/dev/null && left="$left $lpid"
+  done < "$linger_log"
+  [ -z "$left" ] && break
+  sleep 0.1
+done
+if [ -z "$left" ] && [ "$launched" = 2 ]; then
+  ok "no CLI is left running once its run is scored"
+else
+  bad "no CLI is left running once its run is scored (still running:${left:- none}; ${launched} launched)"
+  # shellcheck disable=SC2086
+  [ -z "$left" ] || kill $left 2>/dev/null
+fi
+
 # --- the non-launching paths -------------------------------------------------
 #
 # A sentinel real CLI stands on PATH: it fails and records that it was
