@@ -219,7 +219,7 @@ the skill, and the inputs the corpus stages for it.
 Two staged-input trees exist, and they are different things. The
 **description-query tree** is what `bin/triggering` seeds each run with
 (`fixtures/fixtures.sh`: `fixture_node_api` and `fixture_activation_paths`),
-built from the tracked corpus root `fixtures/corpus/`, so a query that names
+built from the tracked seed root `fixtures/seed/`, so a query that names
 a path finds it real; the "queries name" column lists the roots the skill's
 queries presuppose. The **output-eval tree** is the skill's own `files/`
 directory, copied into the run workdir, so an output case is answerable from

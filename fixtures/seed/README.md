@@ -1,6 +1,9 @@
-# fixtures/corpus/
+# fixtures/seed/
 
-The tracked material the seeded trees are built from.
+Everything here is invented test input: a made-up project, plans and run
+ledgers that the seeded trees are built from. None of it is a record of real
+work done with sdlc-skills; the lab's own plans and run state live in the
+ignored `.sdlc-skills/` directory and are never committed.
 
 `project/` is the project the descriptions runner seeds each query with: the
 source files, the ticket, the session record. `plans/` is the plan material,

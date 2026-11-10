@@ -423,13 +423,13 @@ expect_fail "an entry moved into the holdout role is rejected" \
 # E-4: the staged plan's approval row, and the task file its index names.
 # Each is a required staged input, and the gate refuses without it.
 m14="$work/m14"; copy_repo "$m14"
-rm -f "$m14/fixtures/corpus/plans/2026-10-05-multi-tenancy/00-index.ledger.md"
+rm -f "$m14/fixtures/seed/plans/2026-10-05-multi-tenancy/00-index.ledger.md"
 run_gate "$m14"
 expect_fail "a staged plan with no approval row is rejected" \
   "the staged plan 2026-10-05-multi-tenancy carries no ledger"
 
 m15="$work/m15"; copy_repo "$m15"
-rm -f "$m15/fixtures/corpus/plans/2026-10-05-multi-tenancy/01-tenant-column.md"
+rm -f "$m15/fixtures/seed/plans/2026-10-05-multi-tenancy/01-tenant-column.md"
 run_gate "$m15"
 expect_fail "a staged plan with a missing task file is rejected" \
   "names a task file it does not hold"

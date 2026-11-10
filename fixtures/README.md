@@ -4,5 +4,6 @@ Reusable disposable projects `bin/triggering` and `bin/optimize-description`
 point their queries at. Each fixture is small on purpose: an agent that must
 read 2,000 lines before it can act spends the run reading. These give it
 enough to be wrong in an interesting way, and nothing more. See
-`fixtures.sh` for what each fixture contains. An eval set carries its own
+`fixtures.sh` for what each fixture contains; `seed/` holds the invented
+material they are built from. An eval set carries its own
 project under `evals/<skill>/files/` instead (`evals/README.md`).
