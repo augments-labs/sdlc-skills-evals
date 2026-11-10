@@ -158,7 +158,7 @@ note_base="$(lab_pin_note --base selftest-tag 2>/dev/null)"
 # the tree comes from, and the git tree hash of the skill's directory at that
 # commit. The tree hash names the skill text by content, so it survives a
 # squash merge that changes the commit. A directory is identified only when it
-# is the top of a git work tree whose skill directory has nothing uncommitted;
+# is the top of a git work tree whose skill directory is exactly HEAD's;
 # anything else is {null, null}, never a guess.
 
 gc() { git -C "$idrepo" -c user.name=t -c user.email=t@example.invalid "$@"; }
@@ -220,16 +220,59 @@ printf 'new\n' > "$idrepo/skills/common/probe/notes.md"
 got="$(ident "$idrepo" probe)"
 [ "$got" = "$none" ] && ok "an untracked file in the skill directory has no identity" \
   || bad "an untracked file in the skill directory has no identity (got '$got')"
+# the run installs an untracked file whether or not git is set to list it
+git -C "$idrepo" config status.showUntrackedFiles no
+got="$(ident "$idrepo" probe)"
+[ "$got" = "$none" ] && ok "an untracked file has no identity even when git is set not to list untracked files" \
+  || bad "an untracked file has no identity even when git is set not to list untracked files (got '$got')"
+git -C "$idrepo" config --unset status.showUntrackedFiles
 rm -f "$idrepo/skills/common/probe/notes.md"
+# so does a file git ignores, and a tracked file git is told not to look at:
+# plain `git status` prints nothing for either, and the run installs both
+mkdir -p "$idrepo/.git/info"; printf 'scratch.md\n' >> "$idrepo/.git/info/exclude"
+printf 'new\n' > "$idrepo/skills/common/probe/scratch.md"
+got="$(ident "$idrepo" probe "$idwork/reason")"
+[ "$got" = "$none" ] && grep -q 'ignored' "$idwork/reason" \
+  && ok "an ignored file in the skill directory has no identity, and says why" \
+  || bad "an ignored file in the skill directory has no identity, and says why (got '$got': $(cat "$idwork/reason"))"
+rm -f "$idrepo/skills/common/probe/scratch.md" "$idwork/reason"
+for flag in assume-unchanged skip-worktree; do
+  git -C "$idrepo" update-index "--$flag" skills/common/probe/SKILL.md
+  printf 'edited unseen\n' >> "$idrepo/skills/common/probe/SKILL.md"
+  got="$(ident "$idrepo" probe "$idwork/reason")"
+  [ "$got" = "$none" ] && grep -q "$flag" "$idwork/reason" \
+    && ok "a tracked file edited under --$flag has no identity, and says why" \
+    || bad "a tracked file edited under --$flag has no identity, and says why (got '$got': $(cat "$idwork/reason"))"
+  git -C "$idrepo" update-index "--no-$flag" skills/common/probe/SKILL.md
+  git -C "$idrepo" checkout -q -- skills/common/probe/SKILL.md
+  rm -f "$idwork/reason"
+done
+got="$(ident "$idrepo" probe)"
+[ "$got" = "$want" ] && ok "with the file and the flags gone, the work tree is its HEAD again" \
+  || bad "with the file and the flags gone, the work tree is its HEAD again (got '$got')"
+# a work tree git cannot report on is not a clean one, and the reason is git's
+broken="$idwork/broken"; git clone -q "$idrepo" "$broken"
+printf 'not an index\n' > "$broken/.git/index"
+got="$(ident "$broken" probe "$idwork/reason")"
+[ "$got" = "$none" ] && grep -q 'git status failed' "$idwork/reason" \
+  && ! grep -q 'uncommitted' "$idwork/reason" \
+  && ok "a work tree git status fails on has no identity, and the reason is not 'uncommitted changes'" \
+  || bad "a work tree git status fails on has no identity, and the reason is not 'uncommitted changes' (got '$got': $(cat "$idwork/reason"))"
+rm -rf "$broken" "$idwork/reason"
 # a directory that is not the top of a git work tree is not a commit's tree
-got="$(ident "$idrepo/sub" probe)"
+got="$(ident "$idrepo/sub" probe "$idwork/reason")"
+grep -q 'not the top of a git work tree' "$idwork/reason" \
+  && ok "a subdirectory is told it is not the top of a work tree" \
+  || bad "a subdirectory is told it is not the top of a work tree ($(cat "$idwork/reason"))"
 [ "$got" = "$none" ] && ok "a subdirectory of a work tree has no identity" \
   || bad "a subdirectory of a work tree has no identity (got '$got')"
 plain="$idwork/plain"; mkdir -p "$plain/skills/probe"
 cp "$idrepo/skills/common/probe/SKILL.md" "$plain/skills/probe/SKILL.md"
-got="$(ident "$plain" probe)"
-[ "$got" = "$none" ] && ok "a directory that is no git work tree has no identity" \
-  || bad "a directory that is no git work tree has no identity (got '$got')"
+got="$(GIT_CEILING_DIRECTORIES="$idwork" ident "$plain" probe "$idwork/reason")"
+[ "$got" = "$none" ] && grep -q 'git cannot read it as a work tree' "$idwork/reason" \
+  && grep -qi 'not a git repository' "$idwork/reason" \
+  && ok "a directory that is no git work tree has no identity, and the reason carries git's own" \
+  || bad "a directory that is no git work tree has no identity, and the reason carries git's own (got '$got': $(cat "$idwork/reason"))"
 rm -rf "$plain"
 
 # the same skill text under another commit keeps its tree hash: what a

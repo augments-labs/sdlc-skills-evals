@@ -17,7 +17,7 @@ so no test needs a sibling plugin checkout or a live CLI.
   `lab_pin_tree` and `lab_pin_note` resolve and describe a `--plugin`;
   `lab_pin_identity <path|ref> <skill>` prints `{commit, skill_tree}` for
   the skill text that tree holds (nulls, with the reason on stderr, for a
-  directory that is not a clean git work tree);
+  directory whose skill directory is not exactly a git work tree's HEAD);
   `lab_pin_plugin <path|ref> <run-dir>` prints the resolved commit (a
   directory is used as is; a ref becomes a throwaway worktree under the run
   dir) and `lab_pin_cleanup` removes pins. Capture-safe: no caller trap

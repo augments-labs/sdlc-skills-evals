@@ -131,14 +131,21 @@ lab_pin_note() {
 # skill text by content, so it still matches after a squash merge changes
 # the commit.
 #
-# A ref is resolved in the plugin checkout. A directory is identified only
-# when it is the top of a git work tree and `git status --porcelain --
-# <skill dir>` prints nothing: then it is HEAD and that tree. Any other
-# directory is {null, null} — a working tree with uncommitted skill text is
-# no commit's text, and naming one would describe content the run never
-# measured. A commit that holds no single directory for the skill keeps its
-# commit and has a null skill_tree. The reason for a null goes to stderr.
-# Always returns 0: an unnamed tree is a fact to record, not an error.
+# A ref is resolved in the plugin checkout, and a run installs it with `git
+# archive`: the hash names what the run installed only while no
+# .gitattributes rule (export-ignore, export-subst) makes the archive differ
+# from the tree. The plugin has no such rule at the pinned commit.
+#
+# A directory is identified only when it is the top of a git work tree whose
+# skill directory is exactly HEAD's: `git status --porcelain
+# --untracked-files=all --ignored -- <skill dir>` prints nothing, and no file
+# in it is marked assume-unchanged or skip-worktree. Then it is HEAD and that
+# tree. Any other directory is {null, null} — a run installs the directory as
+# it stands, and naming a commit for text that differs from it would describe
+# content the run never measured. A commit that holds no single directory for
+# the skill keeps its commit and has a null skill_tree. The reason for a null
+# goes to stderr. Always returns 0: an unnamed tree is a fact to record, not
+# an error.
 
 _lab_skill_dir_at() { # $1 repo $2 commit $3 skill — prints the skill's directory in that commit
   local hits
@@ -157,10 +164,13 @@ _lab_identity_json() { # $1 commit ("" = null) $2 skill tree ("" = null)
 
 lab_pin_identity() {
   [ "$#" -eq 2 ] || return 127
-  local src="$1" skill="$2" root commit dir tree dirty
+  local src="$1" skill="$2" root commit dir tree dirty err unseen
   if [ -d "$src" ]; then
-    if ! git -C "$src" rev-parse --show-toplevel >/dev/null 2>&1 \
-       || [ -n "$(git -C "$src" rev-parse --show-prefix 2>/dev/null)" ]; then
+    if ! err="$(git -C "$src" rev-parse --show-toplevel 2>&1 >/dev/null)"; then
+      printf 'no identity for %s: git cannot read it as a work tree (%s)\n' "$src" "$(head -n 1 <<<"$err")" >&2
+      _lab_identity_json "" ""; return 0
+    fi
+    if [ -n "$(git -C "$src" rev-parse --show-prefix 2>/dev/null)" ]; then
       printf 'no identity for %s: not the top of a git work tree\n' "$src" >&2
       _lab_identity_json "" ""; return 0
     fi
@@ -172,8 +182,26 @@ lab_pin_identity() {
       printf 'no identity for %s: HEAD holds no single skills/[<phase>/]%s/SKILL.md\n' "$src" "$skill" >&2
       _lab_identity_json "" ""; return 0
     fi
-    if ! dirty="$(git -C "$src" status --porcelain -- "$dir" 2>/dev/null)" || [ -n "$dirty" ]; then
-      printf "no identity for %s: %s has uncommitted changes, so its text is no commit's\n" "$src" "$dir" >&2
+    # A run installs the directory as it stands, so the check sees what plain
+    # `git status` leaves out: untracked files whatever
+    # status.showUntrackedFiles says, and ignored ones.
+    if ! dirty="$(git -C "$src" status --porcelain --untracked-files=all --ignored -- "$dir" 2>&1)"; then
+      printf 'no identity for %s: git status failed on %s (%s)\n' "$src" "$dir" "$(head -n 1 <<<"$dirty")" >&2
+      _lab_identity_json "" ""; return 0
+    fi
+    if [ -n "$dirty" ]; then
+      printf "no identity for %s: %s has uncommitted, untracked or ignored files, so its text is no commit's\n" "$src" "$dir" >&2
+      _lab_identity_json "" ""; return 0
+    fi
+    # git status does not look at a file marked assume-unchanged or
+    # skip-worktree (any `git ls-files -v` tag but H), so it cannot say that
+    # file is HEAD's.
+    if ! unseen="$(git -C "$src" ls-files -v -- "$dir" 2>&1)"; then
+      printf 'no identity for %s: git ls-files failed on %s (%s)\n' "$src" "$dir" "$(head -n 1 <<<"$unseen")" >&2
+      _lab_identity_json "" ""; return 0
+    fi
+    if grep -qv '^H ' <<<"$unseen"; then
+      printf 'no identity for %s: %s holds a file git status does not check (assume-unchanged or skip-worktree)\n' "$src" "$dir" >&2
       _lab_identity_json "" ""; return 0
     fi
     root="$src"
