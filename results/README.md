@@ -62,13 +62,17 @@ An iteration with no readable `identity.json` has a null identity too. Run
 it from a commit or a clean work tree. What the run scored is never a
 reason: a failing or indeterminate result is recorded like any other.
 
-The identity is exact only where git converts nothing in the skill
-directory on checkout. Where it does (`core.autocrlf=true`, or an
-`eol=crlf`, `filter` or `ident` attribute, for example), the files a run
-installs can differ in bytes from the tree the record names, and the run
-is still identified — from a commit as from a directory, because `git
-archive` converts the same way. A directory that holds a symlink as a
-plain file (`core.symlinks=false`) is identified too.
+The files a run installs must be the tree's by bytes, not by git's word.
+Where git converts a file on checkout (`core.autocrlf=true`, or an
+`eol=crlf`, `filter` or `ident` attribute, for example) or holds a symlink
+as a plain file (`core.symlinks=false`), it calls a directory clean whose
+files are no tree's, and it installs a commit the same way. So a run reads
+each file of the skill's directory back against the tree. Where one
+differs, a directory has no identity, and a commit keeps its `commit` and
+has a null `skill_tree`; the run names the file. A `--dry-run` installs
+nothing, so for a commit it prints the identity the commit names. Two
+things are not read back for a commit: file modes, and files the installed
+directory holds beyond the tree's.
 
 ## What a triggering record is
 
@@ -100,20 +104,21 @@ results/<date>-<skill>-<harness>-triggering` copies it to
 `description_sha256` is the SHA-256 of the exact bytes of the frontmatter
 line that begins `description:` in the skill's `SKILL.md`, without its
 newline. The frontmatter is the block a first line of exactly `---` opens
-and the next line of exactly `---`, or the end of the file, closes, and
-the line is the first one in it that begins `description:`. The newline
-is the one LF byte that ends the line; every other byte is hashed as it
-is, a CR that ends the line included. The same value, by hand:
+and the next line of exactly `---` closes, and the line is the first one
+in it that begins `description:`. The newline is the one LF byte that ends
+the line; every other byte is hashed as it is, a CR that ends the line
+included. The same value, by hand:
 
 ```bash
 LC_ALL=C awk 'NR == 1 { if ($0 != "---") exit; next }
-              $0 == "---" { exit }
-              /^description:/ { printf "%s", $0; exit }' SKILL.md | sha256sum
+              $0 == "---" { printf "%s", d; exit }
+              d == "" && /^description:/ { d = $0 }' SKILL.md | sha256sum
 ```
 
 It is null when the tree has no such line, or the line changed while the
 run was under way; the run says so when it starts or when it ends. A
-`SKILL.md` with CRLF line endings has no such line: its first line is not
+`SKILL.md` whose frontmatter no line of exactly `---` closes has no such
+line, and neither has one with CRLF line endings: its first line is not
 exactly `---`. For a file with no such line the command above hashes
 nothing and prints the SHA-256 of the empty string (`e3b0c442…`), which
 no record carries. The `SKILL.md` is the one at

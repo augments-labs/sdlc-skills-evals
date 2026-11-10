@@ -581,6 +581,23 @@ printf '%s\n' "$dry_id" | grep -q '^identity : with_skill unidentified.*bin/repo
   && ok "the dry run prints one identity line per arm that installs a plugin, none for without_skill" \
   || bad "the dry run prints one identity line per arm that installs a plugin, none for without_skill"
 
+# a commit installed as files that are not its tree's: a plugin checkout set
+# to convert line endings extracts the commit converted, so the arm ran on
+# text no tree names
+convplug="$work/conv-plugin"
+git clone -q "$gitplug" "$convplug" && git -C "$convplug" config core.autocrlf true
+SDLC_SKILLS_ROOT="$convplug" idrun idconv --plugin "$c_two"; rc=$?
+[ "$rc" -eq 0 ] && jq -e --arg c "$c_two" '.plugin == {commit: $c, skill_tree: null}' \
+    "$(idit idconv)/identity.json" >/dev/null 2>&1 \
+  && grep -q 'with_skill unidentified (.*SKILL\.md does not hold the bytes the tree holds.*bin/report' "$work/idconv/out" \
+  && ! grep -q 'the tree changed during the run' "$work/idconv/out" \
+  && ok "a commit installed with converted line endings keeps its commit and names no skill tree, and the run says which file" \
+  || bad "a commit installed with converted line endings keeps its commit and names no skill tree, and the run says which file (rc $rc; $(jq -c . "$(idit idconv)/identity.json" 2>&1): $(grep identity "$work/idconv/out"))"
+dry_id="$(SDLC_SKILLS_ROOT="$convplug" dry --plugin "$c_two")"
+printf '%s\n' "$dry_id" | grep -q "^identity : with_skill $c_two  skill_tree $t_two\$" \
+  && ok "the dry run installs nothing: it prints the identity the commit names" \
+  || bad "the dry run installs nothing: it prints the identity the commit names (got '$dry_id')"
+
 # --- --runs N: each eval and arm is repeated N times --------------------------
 
 dry3="$(dry --plugin "$with_plug" --runs 3)"

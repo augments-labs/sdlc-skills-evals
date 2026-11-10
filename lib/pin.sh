@@ -124,39 +124,51 @@ lab_pin_note() {
 
 # --- which skill text a reference names --------------------------------------
 #
-# lab_pin_identity <path|ref> <skill> — prints {"commit": ..., "skill_tree":
-# ...} for the tree a run installs: the full commit it comes from, and the
-# git tree hash of the skill's directory at that commit
+# lab_pin_identity <path|ref> <skill> [<installed tree>] — prints {"commit":
+# ..., "skill_tree": ...} for the tree a run installs: the full commit it
+# comes from, and the git tree hash of the skill's directory at that commit
 # (git rev-parse <commit>:skills/<phase>/<name>). The tree hash names the
 # skill text by content, so it still matches after a squash merge changes
 # the commit.
 #
-# A ref is resolved in the plugin checkout, and a run installs it with `git
-# archive`: the hash names what the run installed only while the archive
-# equals the tree. An export-ignore or export-subst rule in .gitattributes
-# makes it differ, and so does any conversion git applies on checkout (below):
-# git archive applies the same ones. At the pinned commit the plugin has no
-# export-ignore or export-subst rule, and its other rules (eol=lf, binary)
-# convert nothing; re-check its .gitattributes when the pin moves.
+# A ref is resolved in the plugin checkout, and a run installs it as files:
+# bin/evaluate extracts `git archive`, bin/triggering adds a `git worktree`.
+# The run passes the directory it installed as <installed tree>, and the
+# files of the skill's directory there must be the tree's (below): where one
+# is not, the reference keeps its commit and has a null skill_tree. Without
+# <installed tree> nothing is installed yet (a --dry-run), so the identity
+# is the one the reference names.
 #
 # A directory is identified only when it is the top of a git work tree whose
 # skill directory is exactly HEAD's: `git -c core.fileMode=true status
 # --porcelain --untracked-files=all --ignored -- <skill dir>` prints nothing,
-# and no file in it is marked assume-unchanged or skip-worktree. Then it is
-# HEAD and that tree. Any other directory is {null, null} — a run installs the
-# directory as it stands, and naming a commit for text that differs from it
-# would describe content the run never measured. That includes a directory
-# whose HEAD holds no single directory for the skill; a reference whose
-# commit holds none keeps its commit and has a null skill_tree, and a
-# reference the plugin checkout has no commit for is {null, null}.
+# no file in it is marked assume-unchanged or skip-worktree, and its files
+# are the tree's (below). Then it is HEAD and that tree. Any other directory
+# is {null, null} — a run installs the directory as it stands, and naming a
+# commit for text that differs from it would describe content the run never
+# measured. That includes a directory whose HEAD holds no single directory
+# for the skill; a reference whose commit holds none keeps its commit and
+# has a null skill_tree, and a reference the plugin checkout has no commit
+# for is {null, null}. A directory is checked as it stands: <installed tree>
+# is read for a reference only.
 #
-# The check is git's, so it compares through git's own conversions. Where git
-# converts a file on checkout (core.autocrlf=true, or an eol=crlf, filter or
-# ident attribute, for example), a directory git calls clean can differ in
-# bytes from the tree, and is still identified; so is one that holds a
-# symlink as a plain file (core.symlinks=false). A commit is no way round the
-# conversions, which git archive applies too: the name is exact only where
-# git converts nothing in the skill directory.
+# "The tree's" is by bytes, not by git's word. git status compares through
+# git's own conversions: where git converts a file on checkout
+# (core.autocrlf=true, or an eol=crlf, filter or ident attribute, for
+# example) or holds a symlink as a plain file (core.symlinks=false), it
+# calls a directory clean whose bytes are no tree's. `git archive` and `git
+# worktree add` convert the same way, and `git archive` also leaves out or
+# rewrites what an export-ignore or export-subst attribute names. So each
+# entry of the tree is read back from the files: a file must be a plain
+# file whose blob hash, taken with no conversion (`git hash-object
+# --no-filters`), is the entry's, and a symlink must be a symlink whose
+# target hashes to the entry's. A tree that holds a submodule is not
+# identified.
+#
+# Not checked on an installed reference: file modes (the tree hash covers
+# the executable bit; a directory's modes are checked by the status above)
+# and files the installed directory holds beyond the tree's (both runners
+# install into a directory they have just made).
 #
 # The reason for a null goes to stderr. Returns 0 for any identity, a null
 # one included (127 only on a wrong argument count): an unnamed tree is a
@@ -177,9 +189,37 @@ _lab_identity_json() { # $1 commit ("" = null) $2 skill tree ("" = null)
   printf '{"commit": %s, "skill_tree": %s}\n' "$c" "$t"
 }
 
+# _lab_installed_as_tree <repo> <commit> <skill dir> <installed root> — 0 when
+# every entry of <commit>:<skill dir> is, under <installed root>, the file
+# the tree holds; otherwise prints the first one that is not, and returns 1.
+_lab_installed_as_tree() {
+  local repo="$1" commit="$2" dir="$3" at entry mode oid path f got seen=0
+  at="$(cd "$4" 2>/dev/null && pwd)" || { printf '%s is not a directory' "$4"; return 1; }
+  while IFS= read -r -d '' entry; do
+    seen=1
+    path="${entry#*$'\t'}"; entry="${entry%%$'\t'*}"
+    mode="${entry%% *}"; oid="${entry##* }"
+    f="$at/$dir/$path"
+    case "$mode" in
+      160000) printf '%s/%s is a submodule' "$dir" "$path"; return 1;;
+      120000)
+        [ -L "$f" ] || { printf '%s/%s is not a symlink, which the tree holds there' "$dir" "$path"; return 1; }
+        got="$(printf '%s' "$(readlink "$f")" | git -C "$repo" hash-object --stdin 2>/dev/null)";;
+      *)
+        [ -f "$f" ] && [ ! -L "$f" ] \
+          || { printf '%s/%s is not a plain file, which the tree holds there' "$dir" "$path"; return 1; }
+        got="$(git -C "$repo" hash-object --no-filters -- "$f" 2>/dev/null)";;
+    esac
+    [ "$got" = "$oid" ] || {
+      printf '%s/%s does not hold the bytes the tree holds (git converts a file where its configuration or an attribute says so)' "$dir" "$path"
+      return 1; }
+  done < <(git -C "$repo" ls-tree -r -z "$commit:$dir" 2>/dev/null)
+  [ "$seen" -eq 1 ] || { printf 'git cannot list %s:%s' "$commit" "$dir"; return 1; }
+}
+
 lab_pin_identity() {
-  [ "$#" -eq 2 ] || return 127
-  local src="$1" skill="$2" root commit dir tree dirty err unseen
+  [ "$#" -eq 2 ] || [ "$#" -eq 3 ] || return 127
+  local src="$1" skill="$2" at="${3:-}" root commit dir tree dirty err unseen
   if [ -d "$src" ]; then
     if ! err="$(git -C "$src" rev-parse --show-toplevel 2>&1 >/dev/null)"; then
       printf 'no identity for %s: git cannot read it as a work tree (%s)\n' "$src" "$(head -n 1 <<<"$err")" >&2
@@ -240,6 +280,17 @@ lab_pin_identity() {
     if [ -d "$src" ]; then _lab_identity_json "" ""; else _lab_identity_json "$commit" ""; fi
     return 0
   fi
+  # The files, by bytes: a directory as it stands, a reference where the run
+  # installed it.
+  [ ! -d "$src" ] || at="$src"
+  if [ -n "$at" ] && ! err="$(_lab_installed_as_tree "$root" "$commit" "$dir" "$at")"; then
+    if [ -d "$src" ]; then
+      printf 'no identity for %s: %s\n' "$src" "$err" >&2; _lab_identity_json "" ""
+    else
+      printf 'no skill tree for %s: %s\n' "$skill" "$err" >&2; _lab_identity_json "$commit" ""
+    fi
+    return 0
+  fi
   _lab_identity_json "$commit" "$tree"
 }
 
@@ -250,16 +301,17 @@ lab_pin_identity() {
 # SKILL.md, without its newline. The newline is the one LF byte that ends
 # the line; every other byte of the line is hashed as it is, a trailing
 # space or CR included. The frontmatter is the block a first line of exactly
-# `---` opens and the next line of exactly `---`, or the end of the file,
-# closes; the first line in it that begins `description:` is the one
-# hashed. A file with CRLF line endings therefore has no hash: its first
-# line is `---` and a CR, so it opens no frontmatter. Only that first line
-# is tested so: where it ends in LF alone, a CR that ends the description
-# line is hashed with it. The same value, by hand:
+# `---` opens and the next line of exactly `---` closes; the first line in
+# it that begins `description:` is the one hashed. A block the file ends
+# without closing is no frontmatter, and a file with CRLF line endings has
+# none either: its first line is `---` and a CR, so it opens nothing, and no
+# later line is exactly `---`. Only those two lines are tested so: where
+# they end in LF alone, a CR that ends the description line is hashed with
+# it. The same value, by hand:
 #
 #   LC_ALL=C awk 'NR == 1 { if ($0 != "---") exit; next }
-#                 $0 == "---" { exit }
-#                 /^description:/ { printf "%s", $0; exit }' SKILL.md | sha256sum
+#                 $0 == "---" { printf "%s", d; exit }
+#                 d == "" && /^description:/ { d = $0 }' SKILL.md | sha256sum
 #
 # Prints nothing and returns 1 when the file has no such line.
 
@@ -268,8 +320,8 @@ lab_description_sha256() {
   local line
   [ -r "$1" ] || return 1
   line="$(LC_ALL=C awk 'NR == 1 { if ($0 != "---") exit; next }
-                        $0 == "---" { exit }
-                        /^description:/ { print; exit }' "$1")" || return 1
+                        $0 == "---" { printf "%s", d; exit }
+                        d == "" && /^description:/ { d = $0 }' "$1")" || return 1
   [ -n "$line" ] || return 1
   printf '%s' "$line" | sha256sum | cut -d' ' -f1
 }

@@ -101,21 +101,25 @@ plugin is the full commit and the git tree hash of the skill's directory at
 that commit; both are null when --plugin is a directory whose skill directory
 is not exactly a git work tree's HEAD, before the run and after it, and
 skill_tree alone is null when --plugin is a commit that does not hold the
-skill.
+skill, or one whose files, as the run checked them out, are not its tree's
+byte for byte (git converts on checkout where it is set to).
 description_sha256 is the SHA-256 of the exact bytes of the frontmatter line
 that begins `description:` in the skill's `SKILL.md`, without its newline.
 The frontmatter is the block a first line of exactly `---` opens and the
-next line of exactly `---`, or the end of the file, closes; the line is the
-first one in it that begins `description:`, and its newline is the one LF
-byte that ends it. It is null when the installed tree has no such line (a
-file with CRLF line endings has none: its first line is not exactly `---`),
-or when the line changed during the run.
+next line of exactly `---` closes; the line is the first one in it that
+begins `description:`, and its newline is the one LF byte that ends it. It
+is null when the installed tree has no such line (a file whose frontmatter
+no line of exactly `---` closes has none, and neither has a file with CRLF
+line endings: its first line is not exactly `---`), or when the line
+changed during the run.
 harness_version and model are null when the adapter reads none; model is
 also null unless every scored run named the same one. pass_rate is passed /
 (passed + failed), null when every query in the split was INCONCLUSIVE;
 trigger_rate is null for an INCONCLUSIVE query. No transcript, stream, or
 observed routing enters it.
---dry-run with --summary prints the identity a run would record. The plan and
+--dry-run with --summary prints the identity --plugin names; it installs
+nothing, so only a run says when a commit's installed files are not its
+tree's. The plan and
 the run both say when the summary is one bin/report will not record for want
 of a skill tree or of the validation split (--split train or holdout); only
 a run reads the description, so only a run says when it has no hash.
@@ -219,9 +223,9 @@ fi
 [ -n "$harnessdir_override" ] && harnessdir="$harnessdir_override"
 
 # Which skill text a summary names, and why when it cannot name one.
-identify() { # $1 path|commit — sets id_json ({commit, skill_tree}) and id_why
+identify() { # $1 path|commit [$2 the tree it was installed to] — sets id_json ({commit, skill_tree}) and id_why
   local out
-  out="$(lab_pin_identity "$1" "$skill" 2>&1)"
+  out="$(lab_pin_identity "$1" "$skill" ${2:+"$2"} 2>&1)"
   id_json="$(tail -n 1 <<<"$out")"
   id_why="$(sed '$d' <<<"$out" | head -n 1)"
   id_why="${id_why#*: }" # the reason, without its "no identity for <tree>: " or "no skill tree for <skill>: "
@@ -455,13 +459,13 @@ run_models="" # one line per scored run: the model it named, or empty
 if [ -n "$summary" ]; then
   id_src="$plugin"
   [ -z "$pin_dir" ] || id_src="$(cat "$pin_dir/commit.txt")"
-  identify "$id_src"; plugin_id="$id_json"
+  identify "$id_src" "$plugin_src"; plugin_id="$id_json"
   echo "identity : $(identity_line "$plugin_id" "$id_why")"
   no_validation_line
   skill_md="$(skill_md_in "$plugin_src")"
   description_sha256="$(lab_description_sha256 "$skill_md" 2>/dev/null)"
   if [ -z "$description_sha256" ]; then
-    desc_why="the frontmatter of its SKILL.md has no line that begins description:"
+    desc_why="its SKILL.md has no frontmatter, closed by a line of exactly ---, with a line that begins description:"
     [ -n "$skill_md" ] || desc_why="the installed tree does not hold exactly one SKILL.md for $skill"
     echo "description: unhashed ($desc_why) — bin/report will not record this summary"
   fi
@@ -587,7 +591,7 @@ failed="$(jq -rs '[.[] | select(.verdict == "FAIL")] | length' "$results")"
 [ -n "$jsonout" ] && { jq -s '.' "$results" > "$jsonout"; echo "wrote $jsonout"; }
 
 if [ -n "$summary" ]; then
-  identify "$id_src"
+  identify "$id_src" "$plugin_src"
   if [ "$(jq -cS . <<<"$id_json")" != "$(jq -cS . <<<"$plugin_id")" ]; then
     echo "identity : $(identity_line '{}' "the tree changed during the run")"
     plugin_id='{"commit": null, "skill_tree": null}'

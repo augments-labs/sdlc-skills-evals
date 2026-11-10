@@ -505,6 +505,18 @@ else
   ok "a --summary path in a read-only directory: not checked as root"
 fi
 
+# a commit installed as files that are not its tree's: a plugin checkout set
+# to convert line endings checks the commit out converted, so the run scored
+# text no tree names
+sumconv="$work/sumconv"
+git clone -q "$sumrepo" "$sumconv" && git -C "$sumconv" config core.autocrlf true
+SDLC_SKILLS_ROOT="$sumconv" sumrun sumconv --plugin "$sum_commit"
+jq -e --arg c "$sum_commit" '.metadata.plugin == {commit: $c, skill_tree: null}' "$work/sumconv.json" >/dev/null 2>&1 \
+  && grep -q '^identity : unidentified (.*SKILL\.md does not hold the bytes the tree holds.*bin/report' "$work/sumconv.out" \
+  && ! grep -q 'the tree changed during the run' "$work/sumconv.out" \
+  && ok "a commit installed with converted line endings keeps its commit and names no skill tree, and the run says which file" \
+  || bad "a commit installed with converted line endings keeps its commit and names no skill tree, and the run says which file ($(jq -c .metadata "$work/sumconv.json" 2>&1): $(grep '^identity' "$work/sumconv.out"))"
+
 # a skill whose SKILL.md has no description line: scored, and said to be unrecordable
 sumnodesc="$work/sumnodesc"
 mkdir -p "$sumnodesc/skills/common/probe"

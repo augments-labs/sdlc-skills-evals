@@ -36,11 +36,13 @@
 #
 # plugin names the tree with_skill installed and baseline the one old_skill
 # installed (null for without_skill): the full commit, and the git tree hash
-# of the skill's directory at that commit (lib/pin.sh lab_pin_identity, which
-# also says where git's checkout conversions leave that name inexact). A
+# of the skill's directory at that commit (lib/pin.sh lab_pin_identity). The
+# files an arm installs are read back against that tree, byte for byte. A
 # directory counts only as the top of a git work tree whose skill directory
-# is exactly HEAD's, before the run and after it; otherwise both are null,
-# the run says so, and bin/report will not record the iteration.
+# is exactly HEAD's, before the run and after it; otherwise both are null. A
+# ref whose extracted files are not its tree's (git converts on export as
+# on checkout) keeps its commit and has a null skill_tree. The run says so,
+# and bin/report will not record the iteration.
 # harness_version is the adapter's adapter_version and model the one every
 # session named (adapter_session_model): null when the adapter reads none, a
 # session named none, or the sessions disagree — never a guess.
@@ -110,8 +112,10 @@ COST: live sessions against your own harness account — evals x 2 arms x
 --grade-with-harness. Always --dry-run first.
 
 The iteration's identity.json says which skill text each arm installed;
---dry-run prints it. An arm it cannot name still runs and is scored, and
-bin/report will not record that iteration.
+--dry-run prints it. A dry run installs nothing, so for a ref it prints the
+identity the ref names; only a run reads the installed files back against
+the tree. An arm it cannot name still runs and is scored, and bin/report
+will not record that iteration.
 
 Exit codes: 0 every arm ran and was recorded (an indeterminate arm is a
               recorded result, not an error)
@@ -230,9 +234,9 @@ if [ -n "$baseline" ]; then
 fi
 
 # Which skill text each arm installs, and why when it cannot be named.
-identify() { # $1 path|ref — sets id_json ({commit, skill_tree}) and id_why
+identify() { # $1 path|ref [$2 the tree it was installed to] — sets id_json ({commit, skill_tree}) and id_why
   local out
-  out="$(lab_pin_identity "$1" "$skill" 2>&1)"
+  out="$(lab_pin_identity "$1" "$skill" ${2:+"$2"} 2>&1)"
   id_json="$(tail -n 1 <<<"$out")"
   id_why="$(sed '$d' <<<"$out" | head -n 1)"
   # the reason, without its "no identity for <tree>: " or "no skill tree for
@@ -321,11 +325,6 @@ declare -F adapter_usage >/dev/null 2>&1 || adapter_usage() { :; }
 declare -F adapter_version >/dev/null 2>&1 || adapter_version() { :; }
 declare -F adapter_session_model >/dev/null 2>&1 || adapter_session_model() { :; }
 harness_version="$(adapter_version 2>/dev/null | head -n 1)"
-# Said before anything is spent: this run will be scored, and not recordable.
-jq -e '.skill_tree != null' <<<"$plugin_id" >/dev/null 2>&1 \
-  || log "identity: $(identity_line with_skill "$plugin_id" "$plugin_why")"
-[ -z "$baseline" ] || jq -e '.skill_tree != null' <<<"$baseline_id" >/dev/null 2>&1 \
-  || log "identity: $(identity_line old_skill "$baseline_id" "$baseline_why")"
 
 # --- the trees the arms install: a directory as it is, a ref extracted -------
 stage_dir=""
@@ -364,6 +363,15 @@ if [ -n "$baseline" ]; then
   second_src="$(cat "$it/.tree")"
 fi
 rm -f "$it/.tree"
+# The identity again, now on the files each arm installs: a ref extracted as
+# files that are not its tree's has no skill tree.
+identify "$plugin" "$with_src"; plugin_id="$id_json"; plugin_why="$id_why"
+if [ -n "$baseline" ]; then identify "$baseline" "$second_src"; baseline_id="$id_json"; baseline_why="$id_why"; fi
+# Said before anything is spent: this run will be scored, and not recordable.
+jq -e '.skill_tree != null' <<<"$plugin_id" >/dev/null 2>&1 \
+  || log "identity: $(identity_line with_skill "$plugin_id" "$plugin_why")"
+[ -z "$baseline" ] || jq -e '.skill_tree != null' <<<"$baseline_id" >/dev/null 2>&1 \
+  || log "identity: $(identity_line old_skill "$baseline_id" "$baseline_why")"
 
 # Why an arm measured nothing, or nothing when it measured something.
 indeterminate_reason() { # $1 arm $2 exit code $3 stream $4 errlog
@@ -482,15 +490,16 @@ done
 
 # What the iteration measured. A tree whose identity is not what it was
 # before the first arm (a work tree edited or committed to mid-run, a ref
-# that moved) was not one skill text for the whole run: it has none.
-recheck() { # $1 arm $2 path|ref $3 identity before — prints the identity to record
-  identify "$2"
+# that moved, a ref's extracted files edited mid-run) was not one skill text
+# for the whole run: it has none.
+recheck() { # $1 arm $2 path|ref $3 identity before $4 the tree it was installed to — prints the identity to record
+  identify "$2" "$4"
   if [ "$(jq -cS . <<<"$id_json")" = "$(jq -cS . <<<"$3")" ]; then printf '%s\n' "$3"; return 0; fi
   log "identity: $(identity_line "$1" '{}' "the tree changed during the run")"
   printf '{"commit": null, "skill_tree": null}\n'
 }
-plugin_id="$(recheck with_skill "$plugin" "$plugin_id")"
-[ -z "$baseline" ] || baseline_id="$(recheck old_skill "$baseline" "$baseline_id")"
+plugin_id="$(recheck with_skill "$plugin" "$plugin_id" "$with_src")"
+[ -z "$baseline" ] || baseline_id="$(recheck old_skill "$baseline" "$baseline_id" "$second_src")"
 model="$(printf '%s' "$session_models" | sort -u)"
 case "$model" in *$'\n'*) model="";; esac
 jq -n --arg skill "$skill" --arg harness "$harness" --arg hv "$harness_version" --arg model "$model" \
