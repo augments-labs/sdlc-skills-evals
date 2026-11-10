@@ -35,10 +35,10 @@
 # of the skill's directory at that commit (lib/pin.sh lab_pin_identity). A
 # directory counts only as the top of a git work tree whose skill directory
 # is exactly HEAD's, before the run and after it; otherwise both are null,
-# the run says so, and bin/report will not record the iteration. harness_version is
-# the adapter's adapter_version and model the one every session named
-# (adapter_session_model): null when the adapter reads none, a session named
-# none, or the sessions disagree — never a guess.
+# the run says so, and bin/report will not record the iteration.
+# harness_version is the adapter's adapter_version and model the one every
+# session named (adapter_session_model): null when the adapter reads none, a
+# session named none, or the sessions disagree — never a guess.
 #
 # An arm that timed out, exited non-zero, was refused by the provider, ran
 # no model turn, or — in without_skill — loaded a skill anyway measured

@@ -21,13 +21,15 @@
 #
 # The identity fields of metadata are bin/evaluate's <iteration>/identity.json,
 # copied — except that runs_per_eval defaults to 1 and a commit or skill_tree
-# that is not a string becomes null: which skill, on which harness (and CLI version, and the model the
-# sessions named — null when unknown), and which skill text each arm
-# installed. plugin is {commit, skill_tree} for with_skill; baseline is the
-# same pair for old_skill and null for without_skill. skill_tree is the git
-# tree hash of the skill's directory at that commit. An iteration with no
-# identity.json, or an unreadable one, is still benchmarked: every identity
-# field but runs_per_eval is null — bin/report will not record it.
+# that is not a string becomes null: which skill, on which harness (and CLI
+# version, and the model the sessions named — null when unknown), and which
+# skill text each arm installed. plugin is {commit, skill_tree} for
+# with_skill; baseline is the same pair for old_skill and null for
+# without_skill. skill_tree is the git tree hash of the skill's directory at
+# that commit. An iteration with no identity.json, or an unreadable one, is
+# still benchmarked, unnamed: skill, harness, harness_version and model are
+# null, and plugin (and baseline for old_skill) is {commit: null,
+# skill_tree: null} — bin/report will not record it.
 #
 # An arm whose grading.json is missing or unreadable, or whose timing.json
 # is unreadable (not an object, or a non-number duration_ms/total_tokens),

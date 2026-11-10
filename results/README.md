@@ -48,8 +48,12 @@ says which arm. `bin/evaluate` writes a null there when `--plugin` or
 - a tree whose identity changed while the run was under way.
 
 An iteration with no readable `identity.json` has a null identity too. Run
-it from a commit or a clean work tree. What the run scored is never a
-reason: a failing or indeterminate result is recorded like any other.
+it from a commit or a clean work tree. Prefer the commit where git rewrites
+files on checkout (`core.autocrlf`, an `eol`, `filter` or `ident`
+attribute, `core.symlinks=false`): there a directory git calls clean can
+differ in bytes from the tree, and it is still identified. What the run
+scored is never a reason: a failing or indeterminate result is recorded
+like any other.
 
 Name the `--dry-run` that priced the run in the PR that commits the
 record. A description optimization is not recorded here:

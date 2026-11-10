@@ -50,9 +50,9 @@ Prerequisites:
   `optimization.json`, and `bin/evaluate` records what each arm installed
   in `identity.json`. `bin/triggering` records none, so note the pin you
   priced when you start it;
-- `git` and `jq` on your `PATH`: `bin/evaluate`, `bin/grade`,
-  `bin/benchmark`, `bin/report`, `bin/triggering` and
-  `bin/optimize-description` exit 3 without `jq`.
+- `git` and `jq` on your `PATH`: `bin/evaluate`, `bin/benchmark`,
+  `bin/report`, `bin/triggering` and `bin/optimize-description` exit 3
+  without `jq`, and `bin/grade` needs it too.
 
 Price every live command with its own `--dry-run` first: it prints the pin,
 the selection, and the number of CLI calls, and launches nothing. For

@@ -145,10 +145,18 @@ lab_pin_note() {
 # directory as it stands, and naming a commit for text that differs from it
 # would describe content the run never measured. That includes a directory
 # whose HEAD holds no single directory for the skill; a reference whose
-# commit holds none keeps its commit and has a null skill_tree. The reason
-# for a null goes to stderr. Returns 0 for any identity, a null one included
-# (127 only on a wrong argument count): an unnamed tree is a fact to record,
-# not an error.
+# commit holds none keeps its commit and has a null skill_tree, and a
+# reference the plugin checkout has no commit for is {null, null}.
+#
+# The check is git's, so it compares through git's own conversions. Where git
+# rewrites a file on checkout (core.autocrlf, an eol, filter or ident
+# attribute) or keeps a symlink as a plain file (core.symlinks=false), a
+# directory git calls clean can differ in bytes from the tree, and is still
+# identified. Name a commit there.
+#
+# The reason for a null goes to stderr. Returns 0 for any identity, a null
+# one included (127 only on a wrong argument count): an unnamed tree is a
+# fact to record, not an error.
 
 _lab_skill_dir_at() { # $1 repo $2 commit $3 skill — prints the skill's directory in that commit
   local hits
