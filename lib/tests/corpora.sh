@@ -114,20 +114,50 @@ else
 fi
 
 n_skills="$(jq '.skills | length' "$INV")"
-n_desc="$(find descriptions -name '*.json' -path '*/[a-z]*/*.json' | grep -cv '/holdout/')"
-n_evals="$(find behavior/evals -name evals.json -type f | wc -l | tr -d ' ')"
+n_desc="$(find descriptions -maxdepth 1 -name '*.json' -type f | wc -l | tr -d ' ')"
+n_evals="$(find evals -mindepth 2 -maxdepth 2 -name evals.json -type f | wc -l | tr -d ' ')"
 if [ "$n_desc" -eq "$n_skills" ] && [ "$n_evals" -eq "$n_skills" ]; then
   ok "every skill in the pin carries a query set and an eval definition ($n_skills of each)"
 else
   bad "every skill in the pin carries a query set and an eval definition ($n_desc sets, $n_evals definitions, $n_skills skills)"
 fi
 
+# the layout is flat: a set is descriptions/<skill>.json and a definition is
+# evals/<skill>/evals.json, with no phase directory above either, and the
+# retired scenario tree is gone
+phase_dirs="$(find descriptions -mindepth 1 -maxdepth 1 -type d ! -name holdout | sort | tr '\n' ' ')"
+if [ -z "$phase_dirs" ] && [ ! -e behavior ]; then
+  ok "the corpora are flat, with no phase directory and no behavior/ tree"
+else
+  bad "the corpora are flat, with no phase directory and no behavior/ tree (dirs: ${phase_dirs:-none}; behavior/ $( [ -e behavior ] && echo present || echo absent ))"
+fi
+while IFS= read -r sk; do
+  if [ -f "descriptions/$sk.json" ] && [ -f "evals/$sk/evals.json" ]; then :; else
+    bad "the $sk corpus is at descriptions/$sk.json and evals/$sk/evals.json"
+  fi
+done < <(jq -r '.skills[]' "$INV")
+
+# the two sets v11.2.0 added never name their own skill: a query or a prompt
+# that says the skill's name tests the name, not the description
+for sk in brainstorming eliminating-corrections; do
+  named=0
+  if [ -f "descriptions/$sk.json" ] \
+      && jq -r '.[].query' "descriptions/$sk.json" | grep -qiF "$sk"; then named=1; fi
+  if [ -f "evals/$sk/evals.json" ] \
+      && jq -r '.evals[].prompt' "evals/$sk/evals.json" | grep -qiF "$sk"; then named=1; fi
+  if [ -f "descriptions/$sk.json" ] && [ -f "evals/$sk/evals.json" ] && [ "$named" -eq 0 ]; then
+    ok "no $sk query or prompt names its own skill"
+  else
+    bad "no $sk query or prompt names its own skill"
+  fi
+done
+
 # every set is at least twenty queries and every eval holds two or three
 small_set=0
 while IFS= read -r f; do
   n="$(jq 'length' "$f")"
   [ "$n" -ge 20 ] || { small_set=1; printf '       %s holds %s queries\n' "$f" "$n"; }
-done < <(find descriptions -name '*.json' | grep -v '/holdout/' | sort)
+done < <(find descriptions -maxdepth 1 -name '*.json' -type f | sort)
 if [ "$small_set" -eq 0 ]; then
   ok "every query set holds at least twenty queries"
 else
@@ -138,7 +168,7 @@ small_eval=0
 while IFS= read -r f; do
   n="$(jq '.evals | length' "$f")"
   { [ "$n" -ge 2 ] && [ "$n" -le 3 ]; } || { small_eval=1; printf '       %s holds %s cases\n' "$f" "$n"; }
-done < <(find behavior/evals -name evals.json -type f | sort)
+done < <(find evals -mindepth 2 -maxdepth 2 -name evals.json -type f | sort)
 if [ "$small_eval" -eq 0 ]; then
   ok "every eval definition holds two or three cases"
 else
@@ -150,7 +180,7 @@ missing_files=0
 while IFS= read -r f; do
   d="$(dirname "$f")"
   [ -d "$d/files" ] || { missing_files=1; printf '       %s has no files/ tree\n' "$d"; }
-done < <(find behavior/evals -name evals.json -type f | sort)
+done < <(find evals -mindepth 2 -maxdepth 2 -name evals.json -type f | sort)
 if [ "$missing_files" -eq 0 ]; then
   ok "every eval definition carries its own fixture tree"
 else
@@ -164,134 +194,140 @@ fi
 # 1. a skill is removed: its description set goes, and the coverage list is
 #    no longer closed
 m1="$work/m1"; copy_repo "$m1"
-rm -f "$m1/descriptions/common/yagni.json"
+rm -f "$m1/descriptions/yagni.json"
 run_gate "$m1"
-expect_fail "a removed skill is rejected" "no description set for common/yagni"
+expect_fail "a removed skill is rejected" "no description set for yagni"
 
 # 1b. a skill is removed on the output side
 m1b="$work/m1b"; copy_repo "$m1b"
-rm -f "$m1b/behavior/evals/common/yagni/evals.json"
+rm -f "$m1b/evals/yagni/evals.json"
 run_gate "$m1b"
-expect_fail "a removed eval definition is rejected" "no evals.json for common/yagni"
+expect_fail "a removed eval definition is rejected" "no evals.json for yagni"
 
 # 2. a stale skill: a corpus asset for a skill the pin does not hold
 m2="$work/m2"; copy_repo "$m2"
-mkdir -p "$m2/descriptions/common"
-cp "$m2/descriptions/common/yagni.json" "$m2/descriptions/common/a-skill-that-was-removed.json"
+cp "$m2/descriptions/yagni.json" "$m2/descriptions/a-skill-that-was-removed.json"
 run_gate "$m2"
 expect_fail "a stale skill's query set is rejected" "names a skill the inventory does not hold"
 
 m2b="$work/m2b"; copy_repo "$m2b"
-mkdir -p "$m2b/behavior/evals/common/a-skill-that-was-removed"
-cp "$m2b/behavior/evals/common/yagni/evals.json" \
-   "$m2b/behavior/evals/common/a-skill-that-was-removed/evals.json"
+mkdir -p "$m2b/evals/a-skill-that-was-removed"
+cp "$m2b/evals/yagni/evals.json" \
+   "$m2b/evals/a-skill-that-was-removed/evals.json"
 run_gate "$m2b"
 expect_fail "a stale skill's eval definition is rejected" "names a skill the inventory does not hold"
 
+# 2c. a set under a retired phase directory is read by no runner
+m2c="$work/m2c"; copy_repo "$m2c"
+mkdir -p "$m2c/descriptions/common"
+cp "$m2c/descriptions/yagni.json" "$m2c/descriptions/common/yagni.json"
+run_gate "$m2c"
+expect_fail "a query set under a phase directory is rejected" "descriptions/common/yagni.json is not at"
+
 # 3. a duplicated query inside a set
 m3="$work/m3"; copy_repo "$m3"
-jq '.[1].query = .[0].query' "$m3/descriptions/common/yagni.json" > "$m3/descriptions/common/yagni.json.new"
-mv "$m3/descriptions/common/yagni.json.new" "$m3/descriptions/common/yagni.json"
+jq '.[1].query = .[0].query' "$m3/descriptions/yagni.json" > "$m3/descriptions/yagni.json.new"
+mv "$m3/descriptions/yagni.json.new" "$m3/descriptions/yagni.json"
 run_gate "$m3"
 expect_fail "a duplicated query is rejected" "has duplicate queries"
 
 # 3b. a set too small to decide anything: ten positives and ten near misses
 #     is twenty queries, so a set that loses a near miss loses that too
 m3b="$work/m3b"; copy_repo "$m3b"
-jq 'del(.[19])' "$m3b/descriptions/common/yagni.json" > "$m3b/descriptions/common/yagni.json.new"
-mv "$m3b/descriptions/common/yagni.json.new" "$m3b/descriptions/common/yagni.json"
+jq 'del(.[19])' "$m3b/descriptions/yagni.json" > "$m3b/descriptions/yagni.json.new"
+mv "$m3b/descriptions/yagni.json.new" "$m3b/descriptions/yagni.json"
 run_gate "$m3b"
 expect_fail "a query set holding fewer than ten near misses is rejected" "needs >= 10 negatives"
 
 # 4. validation leaks into the holdout role, and the holdout role leaks
 #    back into a main set
 m4="$work/m4"; copy_repo "$m4"
-mkdir -p "$m4/descriptions/holdout/common"
+mkdir -p "$m4/descriptions/holdout"
 # the holdout file holds five fresh queries and repeats one of the set's
 jq '[range(5) | {query: "a fresh holdout query \(.)", should_trigger: false, split: "holdout", expect: "none"}]
-    + [.[0] | .split = "holdout"]' "$m4/descriptions/common/yagni.json" > "$m4/descriptions/holdout/common/yagni.json"
+    + [.[0] | .split = "holdout"]' "$m4/descriptions/yagni.json" > "$m4/descriptions/holdout/yagni.json"
 run_gate "$m4"
 expect_fail "a holdout that reuses a main set's query is rejected" "reuses queries from"
 
 m4b="$work/m4b"; copy_repo "$m4b"
-mkdir -p "$m4b/descriptions/holdout/common"
+mkdir -p "$m4b/descriptions/holdout"
 jq '[range(5) | {query: "a fresh holdout query \(.)", should_trigger: false, split: "holdout", expect: "none"}]
-    | .[0].split = "validation"' "$m4b/descriptions/common/yagni.json" \
-  > "$m4b/descriptions/holdout/common/yagni.json"
+    | .[0].split = "validation"' "$m4b/descriptions/yagni.json" \
+  > "$m4b/descriptions/holdout/yagni.json"
 run_gate "$m4b"
 expect_fail "a holdout carrying a validation split is rejected" "must carry split=holdout"
 
 m4c="$work/m4c"; copy_repo "$m4c"
-jq '.[0].split = "holdout"' "$m4c/descriptions/common/yagni.json" > "$m4c/descriptions/common/yagni.json.new"
-mv "$m4c/descriptions/common/yagni.json.new" "$m4c/descriptions/common/yagni.json"
+jq '.[0].split = "holdout"' "$m4c/descriptions/yagni.json" > "$m4c/descriptions/yagni.json.new"
+mv "$m4c/descriptions/yagni.json.new" "$m4c/descriptions/yagni.json"
 run_gate "$m4c"
 expect_fail "a main set carrying a holdout entry is rejected" "carries a holdout entry"
 
 # 5. an output case names a file its fixture tree does not hold
 m5="$work/m5"; copy_repo "$m5"
 jq '.evals[0].prompt = "Refactor src/a-file-that-is-not-there.js so it stops re-parsing the auth header."' \
-  "$m5/behavior/evals/common/yagni/evals.json" > "$m5/behavior/evals/common/yagni/evals.json.new"
-mv "$m5/behavior/evals/common/yagni/evals.json.new" "$m5/behavior/evals/common/yagni/evals.json"
+  "$m5/evals/yagni/evals.json" > "$m5/evals/yagni/evals.json.new"
+mv "$m5/evals/yagni/evals.json.new" "$m5/evals/yagni/evals.json"
 run_gate "$m5"
 expect_fail "an output case naming a missing file is rejected" "names a file its fixture tree does not hold"
 
 # 6. a corrupted eval structure
 m6="$work/m6"; copy_repo "$m6"
-jq 'del(.evals[0].expected_output)' "$m6/behavior/evals/common/yagni/evals.json" \
-  > "$m6/behavior/evals/common/yagni/evals.json.new"
-mv "$m6/behavior/evals/common/yagni/evals.json.new" "$m6/behavior/evals/common/yagni/evals.json"
+jq 'del(.evals[0].expected_output)' "$m6/evals/yagni/evals.json" \
+  > "$m6/evals/yagni/evals.json.new"
+mv "$m6/evals/yagni/evals.json.new" "$m6/evals/yagni/evals.json"
 run_gate "$m6"
 expect_fail "an eval with no expected output is rejected" "needs an id, a prompt, an expected output"
 
 m6b="$work/m6b"; copy_repo "$m6b"
-jq '.evals = .evals[0:1]' "$m6b/behavior/evals/common/yagni/evals.json" \
-  > "$m6b/behavior/evals/common/yagni/evals.json.new"
-mv "$m6b/behavior/evals/common/yagni/evals.json.new" "$m6b/behavior/evals/common/yagni/evals.json"
+jq '.evals = .evals[0:1]' "$m6b/evals/yagni/evals.json" \
+  > "$m6b/evals/yagni/evals.json.new"
+mv "$m6b/evals/yagni/evals.json.new" "$m6b/evals/yagni/evals.json"
 run_gate "$m6b"
 expect_fail "an eval holding one case is rejected" "holds 2-3 output cases"
 
 m6c="$work/m6c"; copy_repo "$m6c"
-jq '.skill_name = "some-other-skill"' "$m6c/behavior/evals/common/yagni/evals.json" \
-  > "$m6c/behavior/evals/common/yagni/evals.json.new"
-mv "$m6c/behavior/evals/common/yagni/evals.json.new" "$m6c/behavior/evals/common/yagni/evals.json"
+jq '.skill_name = "some-other-skill"' "$m6c/evals/yagni/evals.json" \
+  > "$m6c/evals/yagni/evals.json.new"
+mv "$m6c/evals/yagni/evals.json.new" "$m6c/evals/yagni/evals.json"
 run_gate "$m6c"
 expect_fail "an eval naming another skill is rejected" "names a skill that is not its own"
 
 m6d="$work/m6d"; copy_repo "$m6d"
 jq '.pending_first_run = true | .evals[0].assertions = ["[check:file-exists src/server.js]"]' \
-  "$m6d/behavior/evals/common/yagni/evals.json" > "$m6d/behavior/evals/common/yagni/evals.json.new"
-mv "$m6d/behavior/evals/common/yagni/evals.json.new" "$m6d/behavior/evals/common/yagni/evals.json"
+  "$m6d/evals/yagni/evals.json" > "$m6d/evals/yagni/evals.json.new"
+mv "$m6d/evals/yagni/evals.json.new" "$m6d/evals/yagni/evals.json"
 run_gate "$m6d"
 expect_fail "an unobserved case carrying an assertion is rejected" "must carry empty assertions"
 
 m6e="$work/m6e"; copy_repo "$m6e"
 jq '.evals[0].prompt = "In ~/work/billing-api the toggle command is done. Call this done."' \
-  "$m6e/behavior/evals/common/yagni/evals.json" > "$m6e/behavior/evals/common/yagni/evals.json.new"
-mv "$m6e/behavior/evals/common/yagni/evals.json.new" "$m6e/behavior/evals/common/yagni/evals.json"
+  "$m6e/evals/yagni/evals.json" > "$m6e/evals/yagni/evals.json.new"
+mv "$m6e/evals/yagni/evals.json.new" "$m6e/evals/yagni/evals.json"
 run_gate "$m6e"
 expect_fail "an output case naming a project outside the workdir is rejected" "names a project outside the run workdir"
 
 # 7. a near miss that routes to a skill the pin does not hold
 m7c="$work/m7c"; copy_repo "$m7c"
-jq '.[10].expect = "a-skill-that-does-not-exist"' "$m7c/descriptions/common/yagni.json" \
-  > "$m7c/descriptions/common/yagni.json.new"
-mv "$m7c/descriptions/common/yagni.json.new" "$m7c/descriptions/common/yagni.json"
+jq '.[10].expect = "a-skill-that-does-not-exist"' "$m7c/descriptions/yagni.json" \
+  > "$m7c/descriptions/yagni.json.new"
+mv "$m7c/descriptions/yagni.json.new" "$m7c/descriptions/yagni.json"
 run_gate "$m7c"
 expect_fail "a near miss routing to an unknown skill is rejected" "names a route that is not a skill"
 
 # 8. an eval definition with no fixture tree
 m8="$work/m8"; copy_repo "$m8"
-rm -rf "$m8/behavior/evals/common/yagni/files"
+rm -rf "$m8/evals/yagni/files"
 run_gate "$m8"
 expect_fail "an eval definition with no fixture tree is rejected" "has no files/ tree"
 
 # 9. the seams the gate reads: the holdout cross-check follows the
 #    descriptions root, and the docs rule follows the docs root
 m9="$work/m9"; copy_repo "$m9"
-mkdir -p "$m9/seam-descriptions/common" "$m9/seam-descriptions/holdout/common"
-cp "$m9/descriptions/common/yagni.json" "$m9/seam-descriptions/common/yagni.json"
+mkdir -p "$m9/seam-descriptions/holdout"
+cp "$m9/descriptions/yagni.json" "$m9/seam-descriptions/yagni.json"
 jq '[range(5) | {query: "a fresh holdout query \(.)", should_trigger: false, split: "holdout", expect: "none"}]
-    + [.[0] | .split = "holdout"]' "$m9/seam-descriptions/common/yagni.json" > "$m9/seam-descriptions/holdout/common/yagni.json"
+    + [.[0] | .split = "holdout"]' "$m9/seam-descriptions/yagni.json" > "$m9/seam-descriptions/holdout/yagni.json"
 check_out="$(cd "$m9" && DESCRIPTIONS_ROOT=seam-descriptions bash bin/check 2>&1)"
 check_rc=$?
 expect_fail "the holdout cross-check follows the descriptions root seam" "reuses queries from"
@@ -305,6 +341,39 @@ check_out="$(cd "$m9b" && DOCS_ROOT=seam-docs bash bin/check 2>&1)"
 check_rc=$?
 expect_fail "the docs no-exec-bit rule follows the docs root seam" "executable under docs/"
 
+# the eval definitions follow their own root: a case broken only under the
+# moved root is caught, so the gate reads that root and not evals/
+m9c="$work/m9c"; copy_repo "$m9c"
+cp -a "$m9c/evals" "$m9c/seam-evals"
+jq 'del(.evals[0].expected_output)' "$m9c/seam-evals/yagni/evals.json" \
+  > "$m9c/seam-evals/yagni/evals.json.new"
+mv "$m9c/seam-evals/yagni/evals.json.new" "$m9c/seam-evals/yagni/evals.json"
+check_out="$(cd "$m9c" && EVALS_ROOT=seam-evals bash bin/check 2>&1)"
+check_rc=$?
+expect_fail "the eval definitions follow the evals root seam" "needs an id, a prompt, an expected output"
+
+# --- bin/ holds executable bash scripts only ----------------------------------
+#
+# Every file under bin/ is a tool a user runs by path. A file there that is
+# not executable, or that names another interpreter, is a tool that does not
+# run the way its neighbours do.
+m9d="$work/m9d"; copy_repo "$m9d"
+printf '#!/usr/bin/env bash\necho a tool\n' > "$m9d/bin/not-executable"
+chmod -x "$m9d/bin/not-executable"
+run_gate "$m9d"
+expect_fail "a bin/ file that is not executable is rejected" "bin/not-executable is not executable"
+
+m9e="$work/m9e"; copy_repo "$m9e"
+printf '#!/bin/sh\necho a tool\n' > "$m9e/bin/another-shell"
+chmod +x "$m9e/bin/another-shell"
+run_gate "$m9e"
+expect_fail "a bin/ file without the bash shebang is rejected" "bin/another-shell does not start with #!/usr/bin/env bash"
+
+m9f="$work/m9f"; copy_repo "$m9f"
+printf '# notes about the tools\n' > "$m9f/bin/NOTES.md"
+run_gate "$m9f"
+expect_fail "a non-script file under bin/ is rejected" "bin/NOTES.md is not executable"
+
 # --- the corpus state the gate holds against ---------------------------------
 #
 # The gate reads the coverage record: the frozen per-entry split assignment,
@@ -316,8 +385,8 @@ expect_fail "the docs no-exec-bit rule follows the docs root seam" "executable u
 # from, and a fabricated one would be graded against a real run.
 m10="$work/m10"; copy_repo "$m10"
 jq 'del(.pending_first_run) | .evals[0].assertions = ["[check:file-exists src/server.js]"]' \
-  "$m10/behavior/evals/common/yagni/evals.json" > "$m10/behavior/evals/common/yagni/evals.json.new"
-mv "$m10/behavior/evals/common/yagni/evals.json.new" "$m10/behavior/evals/common/yagni/evals.json"
+  "$m10/evals/yagni/evals.json" > "$m10/evals/yagni/evals.json.new"
+mv "$m10/evals/yagni/evals.json.new" "$m10/evals/yagni/evals.json"
 run_gate "$m10"
 expect_fail "a case with an assertion and no observation state is rejected" \
   "carries an assertion but records no observation state"
@@ -326,8 +395,8 @@ expect_fail "a case with an assertion and no observation state is rejected" \
 # pending its first run. A different message, because the fault is different.
 m11="$work/m11"; copy_repo "$m11"
 jq '.evals[0].assertions = ["[check:file-exists src/server.js]"]' \
-  "$m11/behavior/evals/common/yagni/evals.json" > "$m11/behavior/evals/common/yagni/evals.json.new"
-mv "$m11/behavior/evals/common/yagni/evals.json.new" "$m11/behavior/evals/common/yagni/evals.json"
+  "$m11/evals/yagni/evals.json" > "$m11/evals/yagni/evals.json.new"
+mv "$m11/evals/yagni/evals.json.new" "$m11/evals/yagni/evals.json"
 run_gate "$m11"
 expect_fail "a case with an assertion while pending its first run is rejected" \
   "is pending its first run and must carry empty assertions"
@@ -336,17 +405,17 @@ expect_fail "a case with an assertion while pending its first run is rejected" \
 # reads stay the same, so only the frozen assignment catches it.
 m12="$work/m12"; copy_repo "$m12"
 jq '.[0].split = "validation" | .[5].split = "train"' \
-  "$m12/descriptions/common/yagni.json" > "$m12/descriptions/common/yagni.json.new"
-mv "$m12/descriptions/common/yagni.json.new" "$m12/descriptions/common/yagni.json"
+  "$m12/descriptions/yagni.json" > "$m12/descriptions/yagni.json.new"
+mv "$m12/descriptions/yagni.json.new" "$m12/descriptions/yagni.json"
 run_gate "$m12"
 expect_fail "an entry that moves between splits is rejected" \
   "does not hold the frozen split assignment"
 
 # E-2, second direction: an entry moves into the holdout role.
 m13="$work/m13"; copy_repo "$m13"
-jq '.[0].split = "holdout"' "$m13/descriptions/common/yagni.json" \
-  > "$m13/descriptions/common/yagni.json.new"
-mv "$m13/descriptions/common/yagni.json.new" "$m13/descriptions/common/yagni.json"
+jq '.[0].split = "holdout"' "$m13/descriptions/yagni.json" \
+  > "$m13/descriptions/yagni.json.new"
+mv "$m13/descriptions/yagni.json.new" "$m13/descriptions/yagni.json"
 run_gate "$m13"
 expect_fail "an entry moved into the holdout role is rejected" \
   "carries a holdout entry"
@@ -368,7 +437,7 @@ expect_fail "a staged plan with a missing task file is rejected" \
 # E-5: the corpus audit's own numbers. A row that no longer recomputes is a
 # false claim in the record.
 m16="$work/m16"; copy_repo "$m16"
-sed -i 's#| `common/yagni` | `skills/common/yagni/SKILL.md` | 10 | 10 |#| `common/yagni` | `skills/common/yagni/SKILL.md` | 9 | 10 |#' \
+sed -i 's#| `yagni` | `skills/common/yagni/SKILL.md` | 10 | 10 |#| `yagni` | `skills/common/yagni/SKILL.md` | 9 | 10 |#' \
   "$m16/docs/upstream-coverage.md"
 run_gate "$m16"
 expect_fail "a corpus audit row whose numbers no longer recompute is rejected" \
@@ -377,9 +446,9 @@ expect_fail "a corpus audit row whose numbers no longer recompute is rejected" \
 # E-6: a holdout file placed in the corpus before the selection step. It is
 # a falsely untouched test set, and the gate refuses it.
 m17="$work/m17"; copy_repo "$m17"
-mkdir -p "$m17/descriptions/holdout/common"
+mkdir -p "$m17/descriptions/holdout"
 jq -n '[range(5) | {query: "a fresh holdout query \(.)", should_trigger: false, split: "holdout", expect: "none"}]' \
-  > "$m17/descriptions/holdout/common/yagni.json"
+  > "$m17/descriptions/holdout/yagni.json"
 run_gate "$m17"
 expect_fail "a holdout placed before the selection step is rejected" \
   "names no recorded selection"
@@ -416,7 +485,7 @@ adapter_run_activation() {
 }
 ADAPTER
 
-probe_desc="$work/probe-descriptions/common"
+probe_desc="$work/probe-descriptions"
 mkdir -p "$probe_desc"
 printf '%s\n' '[{"query":"probe","should_trigger":true,"split":"train","expect":"probe"}]' \
   >"$probe_desc/probe.json"
@@ -524,8 +593,8 @@ if [ -d "$snapshot" ]; then
   seam_desc="$work/seam-descriptions"
   rm -rf "$seam_desc"; cp -a "$here/descriptions" "$seam_desc"
   jq '.[0].query = "Edit skills/testing/security-audits/SKILL.md — the body is too long and rambles."' \
-    "$seam_desc/common/writing-skills.json" > "$seam_desc/common/writing-skills.json.new"
-  mv "$seam_desc/common/writing-skills.json.new" "$seam_desc/common/writing-skills.json"
+    "$seam_desc/writing-skills.json" > "$seam_desc/writing-skills.json.new"
+  mv "$seam_desc/writing-skills.json.new" "$seam_desc/writing-skills.json"
   seam_missing=0
   while IFS= read -r tok; do
     [ -n "$tok" ] || continue
@@ -543,7 +612,7 @@ if [ -d "$snapshot" ]; then
   # does not match measures nothing, so the paths the case names are read
   # back out of the transcript itself.
   transcript="$snapshot/.agent/sessions/2026-10-14-charge-flow.ndjson"
-  diag_case="$here/behavior/evals/maintenance/diagnosing-a-session/evals.json"
+  diag_case="$here/evals/diagnosing-a-session/evals.json"
   graded=0
   graded_missing=0
   for tok in $(jq -r '.evals[] | select(.id == "why-did-it-change-tax") | .expected_output' \
@@ -551,7 +620,7 @@ if [ -d "$snapshot" ]; then
       | tr ' \t' '\n\n' | tr -d "\'" \
       | awk '{ gsub(/[`",;:!?()\[\]{}<>]/, ""); sub(/\.$/, ""); print }' \
       | grep -E '^[A-Za-z0-9_.@-]+(/[A-Za-z0-9_.@-]+)+$' | sort -u); do
-    [ -e "$here/behavior/evals/maintenance/diagnosing-a-session/files/$tok" ] || continue
+    [ -e "$here/evals/diagnosing-a-session/files/$tok" ] || continue
     graded=$((graded + 1))
     # The path has to be the one the EDIT landed on, not merely one the
     # transcript mentions: a transcript whose edit lands on another file

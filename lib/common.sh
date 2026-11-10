@@ -19,6 +19,18 @@ lab_run_dir() { # $1 prefix — creates a run dir under TMPDIR and prints it
   printf '%s\n' "$d"
 }
 
+# The paths changed in a git work tree since a base commit, one per line,
+# sorted: added (tracked or not, ignored files aside), modified, deleted,
+# and a rename git detected by its destination. Committed and uncommitted
+# changes both count. Paths are read NUL-separated, so a space or a quote
+# stays part of its path. Returns non-zero, its output then incomplete, when
+# git cannot compute the list (no repository, or a base it does not hold).
+lab_changed_files() { # $1 work tree $2 base commit
+  ( set -o pipefail
+    cd "$1" && { git diff --name-only -z -M "$2" -- && git ls-files -o --exclude-standard -z; } \
+      | tr '\0' '\n' | LC_ALL=C sort -u )
+}
+
 lab_root() {
   # SDLC_SKILLS_EVALS_ROOT wins so every bin/* command works from any
   # working directory; otherwise the directory above lib/ (this file's

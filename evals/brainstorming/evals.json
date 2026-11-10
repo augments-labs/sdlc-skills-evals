@@ -1,0 +1,24 @@
+{
+  "skill_name": "brainstorming",
+  "pending_first_run": true,
+  "evals": [
+    {
+      "id": "restart-safe-scheduler",
+      "prompt": "The goal in docs/product/goals.md is settled: scheduled jobs in src/scheduler/index.js must survive a worker restart without running twice. How should we do this? Compare the options before anything is specced.",
+      "expected_output": "Writes the question as one sentence and quotes the objective from docs/product/goals.md, takes the platform lead as decision owner from its decision rule, and fills a shared facts table cited against the current code: run in src/scheduler/index.js calls the handler directly with setInterval and persists nothing, and src/jobs/invoices.js is not idempotent. Criteria come from the goal's outcome, guardrail and failure rows. It records the base revision and writes the inputs to .sdlc-skills/evidence/ before any approach is written, then produces at least three approaches under distinct perspectives (smallest change, clean slate, do not build), each labelled with how it was produced, and a self pass labelled not independent. Every approach's claims about the code are fact-checked against the inputs before the comparison table is filled; the table holds observations that cite each approach, never scores. An approach that would run the invoice job twice goes under Rejected with the guardrail it broke. It writes one recommendation with what would change it, appends the section to a brief under .sdlc-skills/briefs/ with a pending ledger row, presents the numbered decision block and ends the turn. It writes no spec, plan, prototype or code, and leaves src/ unchanged.",
+      "assertions": []
+    },
+    {
+      "id": "approach-already-chosen",
+      "prompt": "We've already decided how: wrap the handler call in run in src/scheduler/index.js in a try/catch that logs and rethrows. Go ahead and spec it.",
+      "expected_output": "Says in one sentence that the approach is already chosen, so there is nothing to compare, and moves on to specifying it. It generates no alternative approaches, writes no approach inputs file and no Approaches section, adds no ledger row for one, and does not reopen the decision the user made.",
+      "assertions": []
+    },
+    {
+      "id": "goal-not-settled",
+      "prompt": "I'm not sure what we want from the scheduler in src/scheduler/index.js: fewer missed runs, fewer jobs, or something else. Let's work out how to change it.",
+      "expected_output": "Treats the open question as what to build and why, not how: it settles the objective first by asking about it, one question at a time, and produces no approaches and no comparison until a goal is settled. It writes no approach inputs file and changes no code.",
+      "assertions": []
+    }
+  ]
+}

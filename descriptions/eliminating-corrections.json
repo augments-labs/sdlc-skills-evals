@@ -1,0 +1,112 @@
+[
+  {
+    "split": "train",
+    "should_trigger": true,
+    "query": "No, don't read the tenant from the request body in src/billing/charge.js. Take it from the session. I told you this before."
+  },
+  {
+    "split": "train",
+    "should_trigger": true,
+    "query": "I reverted your last edit to src/utils/money.ts. You converted to cents with floating-point math again; amounts stay integer cents end to end."
+  },
+  {
+    "split": "train",
+    "should_trigger": true,
+    "query": "That's wrong: the job runner in src/scheduler/index.js must not swallow the error. This is the second change where I've had to say so."
+  },
+  {
+    "split": "train",
+    "should_trigger": true,
+    "query": "Stop adding console.log calls to src/queue/consumer.js. I leave the same review comment every time and it comes back on the next change."
+  },
+  {
+    "split": "train",
+    "should_trigger": true,
+    "query": "You ran the migration without asking me first, again. Don't do that. How do we make sure it never happens again?"
+  },
+  {
+    "split": "train",
+    "should_trigger": true,
+    "query": "It should be like this: config is read through src/config/index.ts, never straight from process.env. You keep reaching past it."
+  },
+  {
+    "split": "validation",
+    "should_trigger": true,
+    "query": "My comment about missing input validation in src/api/index.js came back on your newest change, word for word the one from last week. Fix it and make it stop recurring."
+  },
+  {
+    "split": "validation",
+    "should_trigger": true,
+    "query": "I just undid your change to src/auth/session.ts. You hard-coded the session lifetime instead of using the configured value."
+  },
+  {
+    "split": "validation",
+    "should_trigger": true,
+    "query": "No. Amounts go through the money helpers, not ad-hoc Math.round calls. How do I stop you making this kind of mistake?"
+  },
+  {
+    "split": "validation",
+    "should_trigger": true,
+    "query": "You committed straight to main again after I said to work on a branch. That's wrong. What would stop this happening next time?"
+  },
+  {
+    "split": "train",
+    "should_trigger": false,
+    "query": "Imports through src/import/csv.js drop the last row for some files and nobody knows why. Find the cause.",
+    "expect": "debugging"
+  },
+  {
+    "split": "train",
+    "should_trigger": false,
+    "query": "Yesterday's deploy double-charged real customers for two hours. Run the review of why every safeguard we have missed it.",
+    "expect": "post-mortem"
+  },
+  {
+    "split": "train",
+    "should_trigger": false,
+    "query": "Walk me through what the agent did in last night's session and why it touched the tax lookup. Reconstruct it from the transcript.",
+    "expect": "diagnosing-a-session"
+  },
+  {
+    "split": "train",
+    "should_trigger": false,
+    "query": "Here is the reviewer's report on the sync change. Check whether each finding is actually right before changing anything.",
+    "expect": "receiving-code-review"
+  },
+  {
+    "split": "train",
+    "should_trigger": false,
+    "query": "For this one script only, print the totals in euros instead of dollars.",
+    "expect": "none"
+  },
+  {
+    "split": "train",
+    "should_trigger": false,
+    "query": "The checkout handler in src/checkout.js started returning 500 in staging this morning and we can't tell what changed.",
+    "expect": "debugging"
+  },
+  {
+    "split": "validation",
+    "should_trigger": false,
+    "query": "A migration lost a day of orders in production last week. Write up why our checks let it through.",
+    "expect": "post-mortem"
+  },
+  {
+    "split": "validation",
+    "should_trigger": false,
+    "query": "Which skills did yesterday's run invoke before it committed? Answer from the session record.",
+    "expect": "diagnosing-a-session"
+  },
+  {
+    "split": "validation",
+    "should_trigger": false,
+    "query": "A reviewer left nine comments on my change to src/orders/summary.tsx. Verify them and fix the valid ones.",
+    "expect": "receiving-code-review"
+  },
+  {
+    "split": "validation",
+    "should_trigger": false,
+    "query": "Just for today's demo, change the button label to Pay now.",
+    "expect": "none"
+  }
+]

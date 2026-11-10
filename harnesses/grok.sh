@@ -227,10 +227,10 @@ adapter_run_behavioral() { # $1 workdir  $2 opening file  $3 stream
 # message id, not a session id, and grok's `--continue` would pick a session
 # by directory rather than by evidence from the prior stream — which the
 # contract forbids ("resume from structured session evidence, never a fresh
-# session"). A scenario with follow-up turns is refused by the runner on this
-# adapter rather than answered by a session the run did not prove.
+# session"). A runner that makes a multi-turn run must refuse it on this
+# adapter rather than answer it from a session the run did not prove.
 #
 # NO adapter_model: grok's `--model` takes a model id and its own catalogue;
-# no official small/medium/large mapping exists. A scenario that asks for a
-# tier is refused by the runner rather than run on the default model and
-# called that tier.
+# no official small/medium/large mapping exists. A runner that sets a tier
+# must refuse the run on this adapter rather than run the default model and
+# call it that tier.

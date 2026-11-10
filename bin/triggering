@@ -4,8 +4,8 @@
 # isolated opencode config); referenced indirectly, never in this file.
 # Trigger eval — scores a DESCRIPTION, not a run.
 #
-# THIS IS AN OPTIMIZATION INSTRUMENT, NOT A TEST. It lives under
-# descriptions/ for that reason. It implements the standard's
+# THIS IS AN OPTIMIZATION INSTRUMENT, NOT A TEST: its query sets live under
+# descriptions/, apart from the evals. It implements the standard's
 # description-tuning loop: score, revise against TRAIN failures, repeat,
 # then select the iteration with the best VALIDATION rate. Both splits are
 # consumed by that loop, so neither is a held-out result and a red sheet
@@ -13,13 +13,11 @@
 #
 # ============================ THIS COSTS REAL MONEY ============================
 # Every query is a live session against your own harness account, and the default
-# is 20 queries x 3 runs = 60 CALLS PER SKILL. `--all` is 34 skills — roughly
-# 2,000 calls, hours of wall time, and enough usage to exhaust a plan's quota.
+# is 20 queries x 3 runs = 60 CALLS PER SKILL. `--all` runs every set under
+# DESCRIPTIONS_ROOT: thousands of calls, hours of wall time, and enough usage
+# to exhaust a plan's quota.
 #
 # Price any selection first:  --dry-run  prints the budget and calls nothing.
-#
-# BUILD-ONLY LAB: kept working and priced, but no selection run ever starts
-# from here.
 # ==============================================================================
 #
 # A description's job is to fire on the openings it should and stay quiet on the
@@ -33,7 +31,8 @@
 # separates a tuned description from a greedy one is the query that shares its
 # vocabulary and needs a different skill.
 #
-# Query sets live under DESCRIPTIONS_ROOT at <phase>/<skill>.json — an array of
+# Query sets live under DESCRIPTIONS_ROOT at <skill>.json (held-out sets at
+# holdout/<skill>.json) — an array of
 #   { "query": TEXT, "should_trigger": BOOL, "split": "train"|"validation"|"holdout",
 #     "expect": SKILL|"none" }   # `expect` = the correct route, diagnostic only
 # `should_trigger` is about THIS skill. `expect` records where a negative should
@@ -63,7 +62,8 @@ usage() {
   cat <<'EOF'
 bin/triggering — score a skill DESCRIPTION against its query set.
 
-  --harness NAME    opencode | claude-code | codex | kimi-code   (required)
+  --harness NAME    a harness adapter under harnesses/ whose header says
+                    runnable=yes (see harnesses/README.md)       (required)
   --skill NAME      the skill to score                            (or --all)
   --plugin P        path or git ref of the plugin tree under test
                     (default: the pinned upstream commit, a commit and
@@ -83,13 +83,12 @@ bin/triggering — score a skill DESCRIPTION against its query set.
   --help            this text
 
 COST: live sessions against your own harness account. One skill at the defaults
-is 20 queries x 3 runs = 60 calls; --all is ~2,000. Always --dry-run first.
-
-BUILD-ONLY LAB: this runner is kept working and priced, but no selection
-run ever starts from here.
+is 20 queries x 3 runs = 60 calls; --all is every set. Always --dry-run
+first: it prints the exact count.
 
 Exit codes: 0 every scored query passed · 1 at least one FAIL
             2 bad or missing arguments, or harness unrunnable (indeterminate)
+            3 jq or the harness CLI is unavailable
 
 Examples:
   bin/triggering --harness opencode --skill yagni --dry-run
@@ -133,7 +132,7 @@ while [ "$#" -gt 0 ]; do
     *) echo "unknown argument: $1" >&2; exit 2;;
   esac
 done
-[ -n "$harness" ] || { echo "needs --harness opencode|claude-code|codex|kimi-code" >&2; exit 2; }
+[ -n "$harness" ] || { echo "needs --harness NAME" >&2; exit 2; }
 [ -n "$skill" ] || [ -n "$all" ] || { echo "needs --skill NAME or --all" >&2; exit 2; }
 command -v jq >/dev/null 2>&1 || { echo "needs \`jq\`" >&2; exit 3; }
 case "$split" in all|train|validation|holdout) ;; *) echo "--split all|train|validation|holdout" >&2; exit 2;; esac
@@ -167,14 +166,21 @@ else
 fi
 [ -n "$harnessdir_override" ] && harnessdir="$harnessdir_override"
 
+# The corpus is flat: one <skill>.json per skill at the root, held-out sets
+# under holdout/. Only those two depths are read — a stray nested set is not
+# a query set, so it can never be scored by accident.
 sets=()
+setdir="$descroot"
+[ "$split" = holdout ] && setdir="$descroot/holdout"
 if [ -n "$all" ]; then
-  while IFS= read -r f; do sets+=("$f"); done \
-    < <(find "$descroot" -name '*.json' -type f | sort)
+  if [ -d "$setdir" ]; then
+    while IFS= read -r f; do sets+=("$f"); done \
+      < <(find "$setdir" -mindepth 1 -maxdepth 1 -name '*.json' -type f | sort)
+  fi
 else
-  while IFS= read -r f; do sets+=("$f"); done \
-    < <(find "$descroot" -name "$skill.json" -type f | sort)
-  [ "${#sets[@]}" -gt 0 ] || { echo "no query set for skill: $skill" >&2; exit 2; }
+  [ -f "$descroot/$skill.json" ] || [ -f "$descroot/holdout/$skill.json" ] \
+    || { echo "no query set for skill: $skill" >&2; exit 2; }
+  [ -f "$setdir/$skill.json" ] && sets+=("$setdir/$skill.json")
 fi
 
 # jq filter selecting the queries this invocation runs.
@@ -342,6 +348,8 @@ fi
 # plugin is a directory, the pinned commit when it is a ref.
 printf 'plugin   : %s  (%s)\n' "$plugin_tree" "$plugin_note"
 
+# A skill with no held-out set scores nothing in the holdout split.
+[ "${#sets[@]}" -gt 0 ] || printf '\n  (no queries in this split)\n'
 for f in "${sets[@]}"; do
   subject="$(basename "$f" .json)"
   printf '\n=== %s (%s split, %d run(s) per query) ===\n' "$subject" "$split" "$runs"

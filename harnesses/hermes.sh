@@ -214,6 +214,6 @@ adapter_continue_behavioral() { # $1 workdir  $2 prompt  $3 new stream  $4 prior
 }
 
 # NO adapter_model: hermes binds a model per provider and its own reasoning
-# levels; no official small/medium/large mapping exists. A scenario that asks
-# for a tier is refused by the runner rather than run on the default model
-# and called that tier.
+# levels; no official small/medium/large mapping exists. A runner that sets a
+# tier must refuse the run on this adapter rather than run the default model
+# and call it that tier.

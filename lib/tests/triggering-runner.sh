@@ -95,9 +95,9 @@ fi
 # the --all branch names every option the live path honours: the
 # expectation is the whole option set, not the subset this call passes
 all_desc="$work/desc-all"
-mkdir -p "$all_desc/common"
+mkdir -p "$all_desc"
 printf '%s\n' '[{"query":"probe","should_trigger":true,"split":"train","expect":"probe"}]' \
-  >"$all_desc/common/probe.json"
+  >"$all_desc/probe.json"
 out="$(DESCRIPTIONS_ROOT="$all_desc" "$here/bin/triggering" --harness fake --harness-dir "$fake_h" \
   --all --runs 2 --jobs 1 --split train --timeout 30 --max-turns 4 \
   --json "$work/out-all.json" --no-fixture --dry-run 2>&1)"
@@ -143,7 +143,7 @@ esac
 
 # a one-query set, so a live run costs one observation and not a whole
 # sheet
-desc_work="$work/descriptions/common"
+desc_work="$work/descriptions"
 mkdir -p "$desc_work"
 printf '%s\n' '[{"query":"probe","should_trigger":true,"split":"train","expect":"probe"}]' \
   >"$desc_work/probe.json"
@@ -232,6 +232,87 @@ out2="$( cd "$here" && SDLC_SKILLS_ROOT="$tagrepo" DESCRIPTIONS_ROOT="$work/desc
 printf '%s' "$out2" | grep -qF "plugin   : $tag_one" \
   && ok "the planned command still installs the commit the plan froze" \
   || bad "the planned command still installs the commit the plan froze (got '$(printf '%s' "$out2" | sed -n 's/^plugin   : //p')')"
+
+# --- flat sets, and the holdout kept apart ----------------------------------
+#
+# A set is <root>/<skill>.json; its holdout is <root>/holdout/<skill>.json,
+# written after selection. The main splits read the set alone and the
+# holdout split reads the holdout alone, under --skill and --all both: a
+# holdout read during selection is no longer untouched. A set nested one
+# level down is not a set at all.
+
+iso="$work/desc-iso"
+mkdir -p "$iso/holdout" "$iso/legacy"
+printf '%s\n' '[{"query":"main train q","should_trigger":true,"split":"train"},
+ {"query":"main validation q","should_trigger":false,"split":"validation"}]' >"$iso/probe.json"
+printf '%s\n' '[{"query":"holdout q","should_trigger":true,"split":"holdout"}]' >"$iso/holdout/probe.json"
+printf '%s\n' '[{"query":"nested legacy q","should_trigger":true,"split":"train"}]' >"$iso/legacy/other.json"
+
+queries_of() { # $1 json results — the sorted queries it scored, one per line
+  jq -r '.[].query' "$1" 2>/dev/null | sort | paste -sd'|' -
+}
+iso_run() { # $1 out json, rest: selection args
+  local out="$1"; shift
+  DESCRIPTIONS_ROOT="$iso" FAKE_FIRE=1 FAKE_SUBJECT=probe "$here/bin/triggering" \
+    "${base[@]}" "$@" --runs 1 --jobs 1 --json "$out" >/dev/null 2>&1
+}
+
+iso_run "$work/iso-skill-all.json" --skill probe --split all
+got="$(queries_of "$work/iso-skill-all.json")"
+[ "$got" = "main train q|main validation q" ] \
+  && ok "--skill --split all reads the flat set and not its holdout" \
+  || bad "--skill --split all reads the flat set and not its holdout (scored '$got')"
+
+iso_run "$work/iso-skill-train.json" --skill probe --split train
+got="$(queries_of "$work/iso-skill-train.json")"
+[ "$got" = "main train q" ] \
+  && ok "--skill --split train reads the set's train split alone" \
+  || bad "--skill --split train reads the set's train split alone (scored '$got')"
+
+iso_run "$work/iso-skill-holdout.json" --skill probe --split holdout
+got="$(queries_of "$work/iso-skill-holdout.json")"
+[ "$got" = "holdout q" ] \
+  && ok "--skill --split holdout reads the holdout alone" \
+  || bad "--skill --split holdout reads the holdout alone (scored '$got')"
+
+iso_run "$work/iso-all-all.json" --all --split all
+got="$(queries_of "$work/iso-all-all.json")"
+[ "$got" = "main train q|main validation q" ] \
+  && ok "--all --split all reads depth-1 sets, no holdout, no nested set" \
+  || bad "--all --split all reads depth-1 sets, no holdout, no nested set (scored '$got')"
+
+iso_run "$work/iso-all-holdout.json" --all --split holdout
+got="$(queries_of "$work/iso-all-holdout.json")"
+[ "$got" = "holdout q" ] \
+  && ok "--all --split holdout reads the holdouts alone" \
+  || bad "--all --split holdout reads the holdouts alone (scored '$got')"
+
+# a set that only exists nested is not found under --skill
+DESCRIPTIONS_ROOT="$iso" "$here/bin/triggering" "${base[@]}" --skill other \
+  --split train --runs 1 >/dev/null 2>&1
+rc="$?"
+[ "$rc" -eq 2 ] && ok "a nested set is not a set (--skill exits 2)" \
+  || bad "a nested set is not a set (--skill exits 2, got $rc)"
+
+# the dry run prices the same queries the run would score
+out="$(DESCRIPTIONS_ROOT="$iso" "$here/bin/triggering" --harness fake --harness-dir "$fake_h" \
+  --skill probe --split all --runs 3 --dry-run 2>&1)"
+printf '%s' "$out" | grep -qE '(^|[^0-9])6 (calls|invocations)' \
+  && ok "the dry run prices the flat set alone (2 queries x 3 runs)" \
+  || bad "the dry run prices the flat set alone (2 queries x 3 runs; got '$(printf '%s' "$out" | grep -E 'calls|invocations')')"
+
+# the selection loop is the lab's to run now: the build-only ban is gone
+help_text="$("$here/bin/triggering" --help 2>&1)"
+case "$help_text" in
+  *"no selection run ever starts from here"*|*BUILD-ONLY*)
+    bad "the help carries no build-only ban";;
+  *) ok "the help carries no build-only ban";;
+esac
+if grep -qE 'no selection run ever starts from here|BUILD-ONLY' "$here/bin/triggering"; then
+  bad "the header carries no build-only ban"
+else
+  ok "the header carries no build-only ban"
+fi
 
 # --- no invented monetary cost ----------------------------------------------
 #

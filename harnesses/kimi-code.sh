@@ -165,7 +165,7 @@ adapter_run_behavioral() { # $1 workdir  $2 opening file  $3 stream
 
 # Continue a multi-turn behavioural session through Kimi's structured resume
 # hint. An absent id is an adapter failure; starting fresh would invalidate any
-# approval/version handoff the scenario is meant to observe.
+# approval/version handoff the run is meant to observe.
 adapter_continue_behavioral() { # $1 workdir  $2 prompt  $3 new stream  $4 prior stream
   local wd="$1" prompt="$2" out="$3" prior="$4" session_id
   session_id="$(jq -r 'select(.role == "meta" and .type == "session.resume_hint")

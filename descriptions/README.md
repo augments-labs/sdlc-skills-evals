@@ -1,22 +1,24 @@
-# tests/optimizing/
+# descriptions/
 
 Measurements, not gates. Nothing here has a correct answer known in advance —
 you get a number, compare it to the number the previous iteration got, and
 exercise judgement. **A red sheet here is not a regression.** That is what
-separates this directory from the gates beside it in `tests/`, where red does
-mean something broke, and it is why the two do not share a runner.
+separates this directory from `bin/check` and `lib/tests/`, where red does
+mean something broke.
 
-What lives here is the Agent Skills standard's description-tuning loop: score a
-description against a set of queries, revise it against the failures, score it
-again, and keep the iteration that did best. The corpora are its input, not a
-test suite that happens to be written in JSON.
+What lives here is the input to the Agent Skills standard's
+description-optimization loop: score a description against a set of queries,
+revise it against the failures, score it again, and keep the iteration that
+did best. `bin/triggering` scores one description; `bin/optimize-description`
+runs the whole loop. The corpora are their input, not a test suite that
+happens to be written in JSON.
 
 ## Layout
 
 ```
 descriptions/
-  <phase>/<skill>.json            at least 20 balanced positive/near-miss queries
-  holdout/<phase>/<skill>.json    5-10 fresh queries, written after selection (see holdout/README.md)
+  <skill>.json              at least 20 balanced positive/near-miss queries
+  holdout/<skill>.json      5-10 fresh queries, written after selection (see holdout/README.md)
 ```
 
 The runner is self-contained: it opens a session per query repetition, points it
@@ -24,42 +26,46 @@ at a seeded project from `fixtures/fixtures.sh`, and reads which skills fired fr
 the CLI's own stream through `harnesses/<name>.sh`.
 
 ```bash
-bin/triggering --harness opencode --all --dry-run
+bin/triggering --harness opencode --skill yagni --dry-run
 bin/triggering --harness opencode --skill yagni
-bin/triggering --harness opencode --skill yagni --split validation
+bin/optimize-description --harness opencode --skill yagni --dry-run
+bin/optimize-description --harness opencode --skill yagni
 ```
 
-`--help` covers the flags. This file covers what the flags cannot say.
+`--help` covers the flags, and `README.md` `## Running it yourself` walks the
+loop end to end (including `--apply`). This file covers what the flags cannot
+say.
 
-## Build-only lab
+## User-run only
 
-The runner is kept working and priced, but **no selection run ever starts
-from here**. `--dry-run` prices; the live tuning loop runs nowhere in this
-repository. Query sets are maintained (renamed with skills, completed for
-new ones) so they stay runnable elsewhere; the shape check below is what
-keeps them honest while they wait.
+Both tools are shipped working and priced, and **only the user starts a live
+run**, from their own terminal, after its `--dry-run`. No agent working on
+this repository launches one, and CI runs the offline suites only
+(`CLAUDE.md`). Query sets are maintained (renamed with skills, completed for
+new ones); the shape check below is what keeps them honest between runs.
 
 ## Anyone can run this, and it spends your own quota
 
 **A 20-query set at the defaults is 60 CLI invocations** — each repeated 3 times —
-billed to whatever account your harness CLI is logged into, and `--all` is
-roughly 2,000. Nothing about it is free and nothing about it runs in CI.
+billed to whatever account your harness CLI is logged into, and `--all` runs
+every set. Nothing about it is free and nothing about it runs in CI.
 
 Always price a selection with `--dry-run` first; it prints the exact call count
 and calls nothing. Runtime varies with the harness, query, and stopping limit.
 
 ## A trigger rate is not a pass mark
 
-The standard describes three roles for query data, and this repository
-implements two of them:
+The standard describes three roles for query data:
 
 1. **train** — the failures you are allowed to revise against.
 2. **validation** — the split that *selects* which iteration you keep.
 3. **a fresh held-out set, written after selection** — the only one the standard
    calls a test.
 
-Role 3 does not exist here. That is the honest limit, and it has a consequence
-people get wrong: because validation is what selection is performed on, repeated
+Roles 1 and 2 live in `descriptions/<skill>.json`. Role 3 is
+`descriptions/holdout/<skill>.json`, and no such file exists until a real
+selection has happened (`holdout/README.md`). Until then the honest limit has
+a consequence people get wrong: because validation is what selection is performed on, repeated
 selection burns it too. Tune against train and the holdout stays meaningful for
 a while; tune against validation and you have overfitted away the only thing
 that was telling you the truth. Either way, **neither split is a held-out
@@ -72,15 +78,20 @@ are.
 
 Practical consequences:
 
-- Revise on **train** failures only.
+- Revise on **train** failures only — `bin/optimize-description` shows its
+  reviser nothing else.
 - Keep the iteration with the best **validation** rate, which is very often not
-  the last one you tried.
+  the last one you tried — `bin/optimize-description` writes that one to
+  `best-description.txt`. When no iteration has a validation rate (every
+  validation run inconclusive), it selects nothing, records the outcome as
+  `indeterminate`, and exits 2.
 - Report the real numbers, including inconclusive and failing ones, and say how
   many runs produced them.
 
 ## The query sets
 
-Drop a JSON array at `descriptions/<phase>/<skill>.json`. The filename is the
+Drop a JSON array at `descriptions/<skill>.json`, named for the skill's
+directory under the pinned plugin's `skills/`. The filename is the
 contract — no registration, no code change. Each entry needs `query`,
 `should_trigger`, and `split`; every negative also needs `expect`, naming the
 expected neighbouring activity (`"none"` if there is none). This field is
@@ -95,10 +106,9 @@ quarter and a half of the set with the same positive-to-negative proportion
 as train, and no query shared between a set and its holdout. Ten of each is
 twenty queries: a set that cannot decide anything is not worth the money it
 costs to run. A main set may not carry a `holdout` entry — that role belongs
-to the holdout file, which is written after the selection. A set is only
-worth the money it costs to run if it can actually decide something: twenty
-happy-path positives will pass every eval they are ever run through and
-prove nothing.
+to the holdout file, which is written after the selection. Twenty
+happy-path positives decide nothing either: they pass every eval they are
+ever run through and prove nothing.
 
 **The near-misses are the point.** A description firing on its own happy-path
 opening proves nothing, because every description does that. The runner observes the subject anywhere in the bounded skill chain, including
@@ -145,26 +155,27 @@ that the skill would never fire.
 
 ## The sibling loop, and why it is not here
 
-Output behavior is a different question from activation. Use the smallest
-relevant `bin/behavior` scenario or a temporary controlled probe.
-`--arm none` observes the bare agent; `--arm red --base REV` observes the prior
-library; `--arm green --plugin REF` observes the current library. Installed arms normally
-expose the whole library, so disclose a probe that instead loads only its
-intended skill. A passing bare or prior-library sample does not erase a
-reported failure or a source contradiction.
+Output behavior is a different question from activation, and it has its own
+workflow: `bin/evaluate` runs a skill's `evals/<skill>/evals.json` with the
+skill (`with_skill`) and without it (`without_skill`), or against an older
+plugin tree (`old_skill`, `--baseline-plugin`). Installed arms expose the
+whole library, so a sibling skill can fire in `with_skill`; a control arm
+that loads any skill is `indeterminate`, not a baseline. A passing control
+does not erase a reported failure or a source contradiction.
 
-Freeze fixture, evaluator, skill sources, and allowed effects before comparing
-arms. Evaluate the actual artifact or side effect mechanically where possible;
-use a controlled rubric where the claim needs judgment. Neither an exit code
-nor an agent's assurance alone proves that the intended behavior was observed.
-`docs/testing.md` owns the behavioral workflow and its limits.
+Freeze the eval files, assertions, skill sources, and harness before
+comparing arms. Assertions are checked mechanically on produced files where
+possible (`[check:`), and judged by you or a controlled rubric grader where
+the claim needs judgment. Neither an exit code nor an agent's assurance alone
+proves that the intended behavior was observed. `evals/README.md` and
+`docs/authoring.md` own that workflow and its limits.
 
 ## Honest limits
 
 Live runs cost tokens and are **not deterministic**: the same query fires and
 does not fire across runs, and coverage is selective by design. So these are
-manual tools, never CI, and no result is committed as a record — re-run for
-current truth.
+user-run tools, never CI, and no triggering result is committed as a
+record — re-run for current truth.
 
 A single green run is weak evidence. Say how many runs you did and what the
 spread was; the runner prints `(fired/valid)` beside every rate for exactly that

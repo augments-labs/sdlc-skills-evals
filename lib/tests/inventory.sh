@@ -32,9 +32,9 @@ run_check_full() { # $1 inventory path, $2 docs root — the whole gate, no --in
 }
 
 run_check_ci() { # the gate exactly as CI runs it: no environment override at
-  # all: the three roots are unset for the child, so an environment that
+  # all: the four roots are unset for the child, so an environment that
   # exports them cannot redirect the run at another artifact
-  check_out="$(env -u INVENTORY_PATH -u DOCS_ROOT -u DESCRIPTIONS_ROOT bash bin/check 2>&1)" \
+  check_out="$(env -u INVENTORY_PATH -u DOCS_ROOT -u DESCRIPTIONS_ROOT -u EVALS_ROOT bash bin/check 2>&1)" \
     && check_rc=0 || check_rc=$?
 }
 
@@ -103,6 +103,35 @@ else
   bad "the coverage record is committed ($DOC)"
 fi
 
+# --- the committed inventory is the v11.2.0 pin ----------------------------
+#
+# The pin is read off the committed file, not off the gate: a gate and an
+# inventory that agree on a stale commit would both pass the gate.
+
+PIN_COMMIT="40f8ff4c532da29b286b4d06ecf4516a4a093a7d"
+PIN_VERSION="11.2.0"
+if jq -e --arg c "$PIN_COMMIT" --arg v "$PIN_VERSION" \
+    '.upstream.commit == $c and .upstream.version == $v' "$INV" >/dev/null 2>&1; then
+  ok "the inventory pins $PIN_COMMIT ($PIN_VERSION)"
+else
+  bad "the inventory pins $PIN_COMMIT ($PIN_VERSION) (has $(jq -r '.upstream.commit + " " + .upstream.version' "$INV" 2>/dev/null))"
+fi
+if jq -e '(.skills | length) == 48 and all(.skills[]; test("^[a-z0-9][a-z0-9-]*$"))' "$INV" >/dev/null 2>&1; then
+  ok "the inventory holds 48 bare skill names"
+else
+  bad "the inventory holds 48 bare skill names (has $(jq '.skills | length' "$INV" 2>/dev/null), first $(jq -r '.skills[0]' "$INV" 2>/dev/null))"
+fi
+if jq -e '(.skills | index("brainstorming")) != null and (.skills | index("eliminating-corrections")) != null' "$INV" >/dev/null 2>&1; then
+  ok "the inventory holds the two skills v11.2.0 added"
+else
+  bad "the inventory holds the two skills v11.2.0 added (brainstorming, eliminating-corrections)"
+fi
+if jq -e '(.harnesses | length) == 11' "$INV" >/dev/null 2>&1; then
+  ok "the inventory holds the 11 upstream harnesses"
+else
+  bad "the inventory holds the 11 upstream harnesses"
+fi
+
 # --- the gate refuses what it cannot trust ---------------------------------
 
 run_check "$work/there-is-no-such-inventory.json" docs
@@ -147,7 +176,7 @@ fi
 
 # The CI-shaped run is the invocation CI performs, so an environment that
 # exports a root override must not redirect it at another artifact. The
-# probe exports three overrides that point nowhere and runs the helper in
+# probe exports four overrides that point nowhere and runs the helper in
 # a subshell, so the probe's own exports never reach the rest of the
 # suite and never reach the run that follows it.
 probe_rc_file="$work/ci-probe.rc"
@@ -156,6 +185,7 @@ probe_out_file="$work/ci-probe.out"
   export INVENTORY_PATH="$work/there-is-no-such-inventory.json"
   export DOCS_ROOT="$work/there-are-no-docs"
   export DESCRIPTIONS_ROOT="$work/there-are-no-descriptions"
+  export EVALS_ROOT="$work/there-are-no-evals"
   run_check_ci
   printf '%s\n' "$check_rc" >"$probe_rc_file"
   printf '%s\n' "$check_out" >"$probe_out_file"
@@ -169,11 +199,17 @@ fi
 
 # --- drift against a tree built from the inventory --------------------------
 
+# The canonical upstream tree keeps a phase directory above every skill
+# (skills/<phase>/<skill>/SKILL.md); the inventory holds the bare name, so
+# the gate compares the skill directory's basename. The phases below are
+# arbitrary: the basename is what is compared, whatever sits above it.
 tree="$work/tree"
 mkdir -p "$tree/skills" "$tree/tests/harnesses"
+i=0
 while IFS= read -r sk; do
-  mkdir -p "$tree/skills/$sk"
-  : >"$tree/skills/$sk/SKILL.md"
+  phase="phase-$((i % 3))"; i=$((i + 1))
+  mkdir -p "$tree/skills/$phase/$sk"
+  : >"$tree/skills/$phase/$sk/SKILL.md"
 done < <(jq -r '.skills[]' "$INV")
 while IFS= read -r h; do
   : >"$tree/tests/harnesses/$h.sh"
@@ -197,12 +233,46 @@ mirror="$work/mirror-tree"
 cp -r "$tree" "$mirror"
 mkdir -p "$mirror/plugins/sdlc-skills/skills"
 while IFS= read -r sk; do
-  name="$(basename "$sk")"
-  mkdir -p "$mirror/plugins/sdlc-skills/skills/$name"
-  : >"$mirror/plugins/sdlc-skills/skills/$name/SKILL.md"
+  mkdir -p "$mirror/plugins/sdlc-skills/skills/$sk"
+  : >"$mirror/plugins/sdlc-skills/skills/$sk/SKILL.md"
 done < <(jq -r '.skills[]' "$INV")
 run_check "$INV" docs --plugin "$mirror"
 expect_pass "a packaged mirror is not counted as a canonical skill"
+
+# a packaged flat plugin (an installed mirror: skills/<skill>/SKILL.md and no
+# tests/harnesses/) is a tree the gate accepts, and it says on stdout that
+# harness membership was not present to compare
+flat="$work/flat-tree"
+mkdir -p "$flat/skills"
+while IFS= read -r sk; do
+  mkdir -p "$flat/skills/$sk"
+  : >"$flat/skills/$sk/SKILL.md"
+done < <(jq -r '.skills[]' "$INV")
+flat_stdout="$(INVENTORY_PATH="$INV" DOCS_ROOT=docs bash bin/check --inventory --plugin "$flat" 2>/dev/null)" \
+  && check_rc=0 || check_rc=$?
+check_out="$flat_stdout"
+expect_pass "a packaged flat plugin tree is accepted"
+if printf '%s\n' "$flat_stdout" | grep -q "tests/harnesses/ is absent"; then
+  ok "a flat tree's run says on stdout that harness membership was not compared"
+else
+  bad "a flat tree's run says on stdout that harness membership was not compared"
+fi
+
+# the flat tree is still compared: a flat tree that lost a skill is drift
+flat_drift="$work/flat-drift"
+cp -r "$flat" "$flat_drift"
+rm -rf "$flat_drift/skills/$(jq -r '.skills[0]' "$INV")"
+run_check "$INV" docs --plugin "$flat_drift"
+expect_fail "a flat tree that lost a skill is rejected" "absent from the supplied tree"
+
+# two skill directories sharing a basename are ambiguous: the bare name
+# cannot say which one is the skill
+dup_skill_tree="$work/dup-skill-tree"
+cp -r "$tree" "$dup_skill_tree"
+mkdir -p "$dup_skill_tree/skills/another-phase/$(jq -r '.skills[0]' "$INV")"
+: >"$dup_skill_tree/skills/another-phase/$(jq -r '.skills[0]' "$INV")/SKILL.md"
+run_check "$INV" docs --plugin "$dup_skill_tree"
+expect_fail "a tree with two skills sharing a basename is rejected" "share the skill basename"
 
 # the upstream tree carries a README.md beside its harnesses: it is not a
 # harness, at any depth
@@ -234,13 +304,13 @@ if mutate '.harnesses += [.harnesses[0]]' "$work/m.json"; then
   run_check "$work/m.json" docs
   expect_fail "a duplicate harness member is rejected" "harness rows must be unique"
 fi
-if mutate '.skills |= map(if . == "analysis/working-from-a-ticket" then "analysis/working-from-ticket" else . end)' "$work/m.json"; then
+if mutate '.skills |= map(if . == "working-from-a-ticket" then "working-from-ticket" else . end) | .skills |= sort' "$work/m.json"; then
   run_check "$work/m.json" docs --plugin "$tree"
-  expect_fail "a mismatched canonical skill name is rejected" "absent from the supplied tree"
+  expect_fail "a mismatched skill name is rejected" "absent from the supplied tree"
 fi
-if mutate '.skills |= map(if . == "analysis/working-from-a-ticket" then "working-from-a-ticket" else . end)' "$work/m.json"; then
+if mutate '.skills |= map(if . == "working-from-a-ticket" then "analysis/working-from-a-ticket" else . end)' "$work/m.json"; then
   run_check "$work/m.json" docs
-  expect_fail "a skill row that is not a canonical path is rejected" "skill rows must be canonical paths"
+  expect_fail "a <phase>/<skill> row is rejected" "skill rows must be bare skill names"
 fi
 if mutate '.skills |= reverse' "$work/m.json"; then
   run_check "$work/m.json" docs
@@ -250,13 +320,17 @@ if mutate '.upstream.commit = "0000000000000000000000000000000000000000"' "$work
   run_check "$work/m.json" docs
   expect_fail "a rewritten upstream commit is rejected" "does not pin"
 fi
-if mutate '.upstream.commit = "v11.0.0"' "$work/m.json"; then
+if mutate '.upstream.commit = "v11.2.0"' "$work/m.json"; then
   run_check "$work/m.json" docs
   expect_fail "a version tag instead of a commit is rejected" "does not pin"
 fi
 if mutate '.upstream.version = "10.2.1"' "$work/m.json"; then
   run_check "$work/m.json" docs
   expect_fail "a wrong package version is rejected" "does not pin"
+fi
+if mutate '.upstream.commit = "638040d407eae2834414968478792be99b3ff0cf" | .upstream.version = "11.0.0"' "$work/m.json"; then
+  run_check "$work/m.json" docs
+  expect_fail "the superseded v11.0.0 pin is rejected" "does not pin"
 fi
 if mutate '.upstream.url = "https://example.invalid/sdlc-skills"' "$work/m.json"; then
   run_check "$work/m.json" docs
@@ -271,7 +345,7 @@ fi
 
 drift_tree="$work/drift-tree"
 cp -r "$tree" "$drift_tree"
-rm -rf "$drift_tree/skills/$(jq -r '.skills[0]' "$INV")"
+rm -rf "$drift_tree/skills/phase-0/$(jq -r '.skills[0]' "$INV")"
 run_check "$INV" docs --plugin "$drift_tree"
 expect_fail "a tree that lost a skill is rejected" "absent from the supplied tree"
 
@@ -294,14 +368,14 @@ cp -r "$tree" "$drift_tree4"
 run_check "$INV" docs --plugin "$drift_tree4"
 expect_fail "a tree that gained a harness is rejected" "absent from the inventory"
 
-# a member of a supplied tree is never invisible: a skill outside the
-# canonical two-level shape is drift, not a path to discard
+# a member of a supplied tree is never invisible: a skill at any depth is
+# compared by its basename, so a new one deep in the tree is drift
 drift_tree5="$work/drift-tree5"
 cp -r "$tree" "$drift_tree5"
 mkdir -p "$drift_tree5/skills/design/newphase/newskill"
 : >"$drift_tree5/skills/design/newphase/newskill/SKILL.md"
 run_check "$INV" docs --plugin "$drift_tree5"
-expect_fail "a tree skill outside the canonical shape is rejected" "absent from the inventory"
+expect_fail "a tree skill at another depth is compared by basename" "absent from the inventory"
 
 # the same rule for harnesses: a harness outside the flat
 # tests/harnesses/*.sh shape is drift too
@@ -469,11 +543,40 @@ if [ -f "$DOC" ]; then
   fi
 fi
 
+# --- R-09: the active docs carry the re-pin --------------------------------
+# The coverage record above counts the documented pin rows that still name
+# the old tag. Once the re-pin is everywhere, that count is zero and the
+# docs a contributor follows name no retired runner or scenario path. The
+# full active-doc audit is lib/tests/docs-alignment.sh; this is the
+# inventory's own half: the pin rows it counts, and the files R-09 names.
+
+r09_docs=(CLAUDE.md README.md SECURITY.md descriptions/README.md docs/authoring.md
+  docs/triage.md results/README.md .github/PULL_REQUEST_TEMPLATE.md)
+r09_stale="$(grep -nHE 'v10\.2\.1|bin/behavior|bin/campaign|behavior/scenarios' "${r09_docs[@]}" 2>/dev/null)"
+if [ -z "$r09_stale" ]; then
+  ok "no R-09 doc names v10.2.1, bin/behavior, bin/campaign, or behavior/scenarios"
+else
+  bad "no R-09 doc names v10.2.1, bin/behavior, bin/campaign, or behavior/scenarios ($(grep -c . <<<"$r09_stale") line(s))"
+  head -8 <<<"$r09_stale" | sed 's/^/        /'
+fi
+r09_count="$(sed -n 's/^### Documented pin rows that still name the v10\.2\.1 tag (\([0-9][0-9]*\))$/\1/p' "$DOC")"
+if [ "$r09_count" = 0 ]; then
+  ok "the coverage record counts zero documented pin rows on the old tag"
+else
+  bad "the coverage record counts zero documented pin rows on the old tag (count: ${r09_count:-absent})"
+fi
+r09_pin="$(jq -r '.upstream.commit' "$INV")"
+if grep -qF -- "$r09_pin" README.md && grep -qF -- "$r09_pin" "$DOC"; then
+  ok "README.md and the coverage record name the inventory's commit"
+else
+  bad "README.md and the coverage record name the inventory's commit"
+fi
+
 # --- the reported gaps match the assets on disk -----------------------------
 
 run_check "$INV" docs
 expected_eval_gaps="$(while IFS= read -r s; do
-  [ -f "behavior/evals/$s/evals.json" ] || printf '%s\n' "$s"
+  [ -f "evals/$s/evals.json" ] || printf '%s\n' "$s"
 done < <(jq -r '.skills[]' "$INV") | sort)"
 reported_eval_gaps="$(printf '%s\n' "$check_out" | sed -n 's/^check: gap: no evals.json for //p' | sort)"
 if [ "$expected_eval_gaps" = "$reported_eval_gaps" ]; then
@@ -525,7 +628,7 @@ fi
 # the coverage line is printed even when there is nothing to report: an
 # empty result is an explicit zero, not the absence of a scan
 zero_inv="$work/zero-gap-inventory.json"
-jq '.skills = ["common/yagni"] | .harnesses = ["opencode"]' "$INV" >"$zero_inv"
+jq '.skills = ["yagni"] | .harnesses = ["opencode"]' "$INV" >"$zero_inv"
 run_check "$zero_inv" docs
 if printf '%s\n' "$check_out" \
     | grep -q "coverage checked: 0 skills without an eval definition, 0 without a description set, 0 without a lab adapter"; then
@@ -636,7 +739,7 @@ fi
 
 # a comment naming a skill path is not an exclusion
 cp bin/check "$work/check-with-comment"
-printf '# the implementation/subagent-driven-development scenario is authored by E-12\n' \
+printf '# the subagent-driven-development scenario is authored by E-12\n' \
   >>"$work/check-with-comment"
 if [ -z "$(skill_paths_named_in "$work/check-with-comment")" ]; then
   ok "a comment naming a skill path is not an exclusion"
@@ -679,7 +782,7 @@ if mutate '.harnesses[0] = "tests/harnesses/x.sh"' "$work/m.json"; then
 fi
 mkdir -p "$work/not-a-tree"
 run_check "$INV" docs --plugin "$work/not-a-tree"
-expect_fail "a directory that is not a plugin tree is rejected" "has no skills/ or tests/harnesses/ directory"
+expect_fail "a directory that is not a plugin tree is rejected" "has no skills/ directory"
 
 # --- the coverage scan reads the same root the shape check reads ------------
 #
@@ -704,9 +807,9 @@ fi
 # seam. The full gate is run, not the pinned-scope mode: the pinned-scope
 # mode exits before the shape check.
 seam_descriptions="$work/seam-descriptions"
-mkdir -p "$seam_descriptions/common"
+mkdir -p "$seam_descriptions"
 jq -n '[range(20) | {query: "a malformed query \(.)", should_trigger: true, split: "train"}]' \
-  >"$seam_descriptions/common/yagni.json"
+  >"$seam_descriptions/yagni.json"
 check_out="$(INVENTORY_PATH="$INV" DOCS_ROOT=docs DESCRIPTIONS_ROOT="$seam_descriptions" bash bin/check 2>&1)" \
   && check_rc=0 || check_rc=$?
 expect_fail "the query-set shape check reads the descriptions root seam" "needs >= 10 negatives"

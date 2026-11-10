@@ -1,0 +1,112 @@
+[
+  {
+    "split": "train",
+    "should_trigger": true,
+    "query": "We've agreed tenants get an email when a charge fails. I can see a few ways to wire that into src/billing/charge.js. What are our options before anyone writes a spec?"
+  },
+  {
+    "split": "train",
+    "should_trigger": true,
+    "query": "The goal is settled: jobs in src/scheduler/index.js must survive a worker restart. How should we do this? Lay out genuinely different approaches and compare them."
+  },
+  {
+    "split": "train",
+    "should_trigger": true,
+    "query": "Offline edits have to merge cleanly when src/sync/pull.js runs. Only one approach has been written down and nobody has argued against it. Give me real alternatives side by side."
+  },
+  {
+    "split": "train",
+    "should_trigger": true,
+    "query": "Product wants failed webhook deliveries retried. Which approach: a queue, a periodic sweep, or something we buy? Compare them against what the code does today."
+  },
+  {
+    "split": "train",
+    "should_trigger": true,
+    "query": "Before we spec the session-timeout change in src/auth/session.ts, I want a few competing designs compared, including one where we build nothing at all."
+  },
+  {
+    "split": "train",
+    "should_trigger": true,
+    "query": "The objective is fixed: duplicate messages processed by src/queue/consumer.js go to zero. Compare the alternatives for getting there before we pick one."
+  },
+  {
+    "split": "validation",
+    "should_trigger": true,
+    "query": "We know we want the rounding errors in src/utils/money.ts gone. What are our options, and which would you pick and why?"
+  },
+  {
+    "split": "validation",
+    "should_trigger": true,
+    "query": "The notification goal in docs/design/notifications.md is approved, but there are at least three plausible ways to deliver it. Compare alternatives so we can choose."
+  },
+  {
+    "split": "validation",
+    "should_trigger": true,
+    "query": "Everyone agrees exports must stream instead of loading the whole file into memory. Give me several distinct approaches, each checked against the current code, then a recommendation."
+  },
+  {
+    "split": "validation",
+    "should_trigger": true,
+    "query": "We've decided the API needs rate limiting. How should we do it? What are the real alternatives, including the one that's cheapest to run for a year?"
+  },
+  {
+    "split": "train",
+    "should_trigger": false,
+    "query": "We're adding exponential backoff around chargeTenant in src/billing/charge.js; that part is decided. Write the spec for it.",
+    "expect": "writing-specs"
+  },
+  {
+    "split": "train",
+    "should_trigger": false,
+    "query": "We're considering a self-serve billing initiative but haven't agreed what success looks like. Help me pin down the objective first.",
+    "expect": "define-goals"
+  },
+  {
+    "split": "train",
+    "should_trigger": false,
+    "query": "Make the scheduler better.",
+    "expect": "clarifying-intent"
+  },
+  {
+    "split": "train",
+    "should_trigger": false,
+    "query": "We chose advisory locks for the scheduler and it will be hard to undo. Record that decision along with the alternatives we turned down.",
+    "expect": "architecture-decisions"
+  },
+  {
+    "split": "train",
+    "should_trigger": false,
+    "query": "Show me two or three layout directions for the billing settings page so I can see which one looks right.",
+    "expect": "ui-ux-design"
+  },
+  {
+    "split": "train",
+    "should_trigger": false,
+    "query": "About the approaches you presented a moment ago: go with option 2.",
+    "expect": "clarifying-intent"
+  },
+  {
+    "split": "validation",
+    "should_trigger": false,
+    "query": "We don't know whether the sync library can merge concurrent edits at all. Spike it quickly to find out before we commit to anything.",
+    "expect": "prototyping"
+  },
+  {
+    "split": "validation",
+    "should_trigger": false,
+    "query": "Implement the queue-based webhook retry we chose yesterday.",
+    "expect": "test-driven-development"
+  },
+  {
+    "split": "validation",
+    "should_trigger": false,
+    "query": "I'm not sure we should be building notifications at all, or what problem they would solve. Help me work out what the goal is.",
+    "expect": "define-goals"
+  },
+  {
+    "split": "validation",
+    "should_trigger": false,
+    "query": "Compare a sidebar against a tabbed layout for the orders summary screen. I want to see mockups of each.",
+    "expect": "ui-ux-design"
+  }
+]

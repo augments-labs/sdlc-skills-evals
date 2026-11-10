@@ -181,7 +181,7 @@ adapter_usage() {
     "$1" 2>/dev/null
 }
 
-# TIER → MODEL. Scenarios name a capability tier, never a model; this is the
+# TIER → MODEL. A caller names a capability tier, never a model; this is the
 # one place the binding lives for this CLI. The aliases are the CLI's own, so a
 # release that moves an alias moves the run with it.
 adapter_model() { # $1 small|medium|large
@@ -193,7 +193,7 @@ adapter_model() { # $1 small|medium|large
   esac
 }
 
-# --model only when the scenario asked for a tier; otherwise the CLI's default.
+# --model only when the caller set a tier; otherwise the CLI's default.
 adapter_model_flags() {
   [ -n "${scenario_model_tier:-}" ] || return 0
   printf '%s\n' --model "$(adapter_model "$scenario_model_tier")"
@@ -213,8 +213,8 @@ adapter_run_behavioral() { # $1 workdir  $2 opening file  $3 stream
       --permission-mode acceptEdits ) < /dev/null > "$3" 2>>"$errlog"
 }
 
-# Continue the same behavioural session for scenarios whose failure only exists
-# after an approval handoff. The session id comes from Claude's own structured
+# Continue the same behavioural session for a multi-turn run whose failure only
+# exists after an approval handoff. The session id comes from Claude's own structured
 # stream; an absent id is an adapter error, not a fresh-session substitute.
 adapter_continue_behavioral() { # $1 workdir  $2 prompt  $3 new stream  $4 prior stream
   local wd="$1" prompt="$2" out="$3" prior="$4" session_id plugin=() model=()

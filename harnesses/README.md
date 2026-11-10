@@ -12,12 +12,12 @@ Five required functions — `adapter_check`, `adapter_install`,
 `adapter_chain`, `adapter_run_activation`, `adapter_run_behavioral` — plus
 these optional ones, each only where the harness truly offers it:
 `adapter_behavioral_events`, `adapter_continue_behavioral` (required only
-for a scenario with follow-up turns; it must resume from structured session
+for a multi-turn run, which no current runner makes; it must resume from structured session
 evidence, never a fresh session), `adapter_model` and
-`adapter_model_flags` (required only when a scenario sets
-`scenario_model_tier` or a run passes `--tier`; the runner refuses the run
-on an adapter without them rather than running the default model and
-calling it that tier), `adapter_ran`, `adapter_usage`,
+`adapter_model_flags` (required only when a runner sets a non-empty
+`scenario_model_tier` — the current runners leave it empty; a runner that
+sets a tier must refuse the run on an adapter without them rather than run
+the default model and call it that tier), `adapter_ran`, `adapter_usage`,
 `adapter_activation_flags`, `adapter_prompt_suffix`, `adapter_name`.
 
 Detection is structural, never a prose grep: an activation counts only
@@ -73,7 +73,7 @@ Every launcher carries four header fields:
 
 ## Where each parser's shape comes from
 
-`harnesses/README.md` is the capability and provenance table. Every row
+The table below is the capability and provenance record. Every row
 names the source and its version, the fixture's provenance, and the
 runtime status. A row whose runtime status is *unverified* is a parser
 that has never seen this CLI's own stream.
@@ -107,8 +107,9 @@ are unaffected.
 
 `plugin_dir` (the pinned plugin directory — adapters name the pin, never
 the lab root), `harness_home`, `errlog`, `timeout_s`, `maxturns`,
-`scenario_model_tier`. An unrunnable harness yields
-`indeterminate(stage=harness)`, never `fail`.
+`scenario_model_tier` (a capability tier; the name is historical, and the
+current runners leave it empty). An unrunnable harness is refused before any launch
+(exit 2) and is `indeterminate`, never `fail`.
 
 ## Auth
 
@@ -159,10 +160,11 @@ part of what the verification procedure below settles.
 
 ## The verification procedure — manual, and by hand
 
-**The lab's runner cannot make the first observation.** `bin/behavior`
-refuses an adapter whose header says `runnable=no`: it prints
-`indeterminate(stage=harness)` and exits 2 before it launches anything
-(`bin/behavior:161-173`). Nine of the eleven adapters carry that flag
+**The lab's runners cannot make the first observation.** `bin/evaluate`,
+`bin/triggering`, and `bin/optimize-description` each refuse an adapter
+whose header says `runnable=no`: they print "harness X is unrunnable here
+(reason)" and exit 2 before they launch anything — an unrunnable harness is
+`indeterminate`, never a score. Nine of the eleven adapters carry that flag
 (`opencode` and `claude-code` are the two that do not), and it is the flag
 that says "this harness has not been run here yet" — so the run that would
 produce the evidence is exactly the run the runner refuses to make. The
