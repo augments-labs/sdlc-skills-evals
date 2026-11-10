@@ -73,29 +73,50 @@ results/<date>-<skill>-<harness>-triggering` copies it to
   `plugin` — `{commit, skill_tree}` as above — `description_sha256`,
   `runs` (repetitions per query), and `threshold` (0.5: a query that
   should trigger passes at a trigger rate above 0.5, one that should not
-  passes below it, and a rate of exactly 0.5 fails either way).
+  passes below it, and a rate of exactly 0.5 fails either way). The
+  verdict is decided on the rate rounded to two decimals, as the sheet
+  prints it, while `trigger_rate` is exact: the two can disagree only for
+  a query with more than 100 conclusive runs.
 - `splits` — for each of `train`, `validation`, and `holdout` that was
   scored: `queries`, `passed`, `failed`, `inconclusive`, and `pass_rate`,
   which is passed / (passed + failed) and null when nothing was scored.
 - `queries` — one row per query: `query`, `should_trigger`, `split`,
   `trigger_rate` (null for an inconclusive query), and `verdict` (`PASS`,
-  `FAIL`, or `INCONCLUSIVE`).
+  `FAIL`, or `INCONCLUSIVE`). `trigger_rate` is over the runs that were
+  conclusive, which can be fewer than `runs`: a run the provider refused,
+  or one whose record could not be read, is left out of the rate, and the
+  row does not say how many were.
 
 `description_sha256` is the SHA-256 of the exact bytes of the frontmatter
 line that begins `description:` in the skill's `SKILL.md`, without its
-newline. The newline is the one LF byte that ends the line; every other
-byte is hashed as it is. It is null when the tree has no such line, or
-the line changed while the run was under way. The `SKILL.md` is the one
-at `skills/[<phase>/]<name>/` in the tree the run installed.
+newline. The frontmatter is the block a first line of exactly `---` opens
+and the next line of exactly `---` closes, and the line is the first one
+in it that begins `description:`. The newline is the one LF byte that
+ends the line; every other byte is hashed as it is. The same value, by
+hand:
+
+```bash
+LC_ALL=C awk 'NR == 1 { if ($0 != "---") exit; next }
+              $0 == "---" { exit }
+              /^description:/ { printf "%s", $0; exit }' SKILL.md | sha256sum
+```
+
+It is null when the tree has no such line, or the line changed while the
+run was under way; the run says so when it starts or when it ends. A
+`SKILL.md` with CRLF line endings has no such line: its first line is not
+exactly `---`. The `SKILL.md` is the one at `skills/[<phase>/]<name>/` in
+the tree the run installed.
 
 `bin/report --triggering` refuses — copying nothing — when
 `triggering.json` already exists in the record, when
 `metadata.plugin.skill_tree` is not a git tree hash (the null cases are
-the ones listed above), and when the summary scored no validation query:
-a record reports the validation split, so a `--split train` or `--split
-holdout` summary stays in `workspaces/`. A failing or inconclusive query
-is recorded like any other. No transcript, stream, or log enters the
-summary.
+the ones listed above), when `metadata.description_sha256` is not 64
+lowercase hex digits, and when the summary has no validation query: a
+record reports the validation split, so a `--split train` or `--split
+holdout` summary stays in `workspaces/`, and `bin/triggering` says so in
+its plan and when the run starts. A failing or inconclusive query is
+recorded like any other, a validation split whose queries were all
+inconclusive included. No transcript, stream, or log enters the summary.
 
 ## Naming the run
 

@@ -78,8 +78,8 @@ bin/triggering — score a skill DESCRIPTION against its query set.
   --summary PATH    write the run's summary as one JSON object: which skill
                     text and which description it scored, the count per
                     split, one row per query. bin/report --triggering copies
-                    it into a record. One skill only (not with --all); the
-                    directory of PATH must exist.
+                    it into a record. One skill only (not with --all); PATH
+                    must be writable, which is checked before anything runs.
   --dry-run         print the plan — the pin and the exact command —
                     and call nothing
   --no-fixture      run queries in a bare directory instead of a seeded project
@@ -102,14 +102,23 @@ that commit; both are null when --plugin is a directory whose skill directory
 is not exactly a git work tree's HEAD, before the run and after it.
 description_sha256 is the SHA-256 of the exact bytes of the frontmatter line
 that begins `description:` in the skill's `SKILL.md`, without its newline.
+The frontmatter is the block a first line of exactly `---` opens and the
+next line of exactly `---` closes; the line is the first one in it that
+begins `description:`, and its newline is the one LF byte that ends it. It
+is null when the installed tree has no such line (a file with CRLF line
+endings has none: its first line is not exactly `---`), or when the line
+changed during the run.
 harness_version and model are null when the adapter reads none; model is
 also null unless every scored run named the same one. pass_rate is passed /
 (passed + failed), null when nothing was scored; trigger_rate is null for an
 INCONCLUSIVE query. No transcript, stream, or observed routing enters it.
---dry-run with --summary prints the identity a run would record.
+--dry-run with --summary prints the identity a run would record. A run says
+so when its summary is one bin/report will not record: no skill tree, no
+description hash, or a split without validation (--split train or holdout).
 
 Exit codes: 0 every scored query passed · 1 at least one FAIL
-            2 bad or missing arguments, or harness unrunnable (indeterminate)
+            2 bad or missing arguments, a --summary that could not be
+              written, or harness unrunnable (indeterminate)
             3 jq or the harness CLI is unavailable
 
 Examples:
@@ -150,7 +159,12 @@ while [ "$#" -gt 0 ]; do
     --max-turns)  maxturns="$2"; shift 2;;
     --dry-run)    dry="1"; shift;;
     --json)       jsonout="$2"; shift 2;;
-    --summary)    summary="${2:-}"; [ -n "$summary" ] || { echo "--summary needs a path" >&2; exit 2; }; shift 2;;
+    --summary)    summary="${2:-}"
+                  case "$summary" in
+                    '') echo "--summary needs a path" >&2; exit 2;;
+                    -*) echo "--summary needs a path, and $summary reads as an option (write ./$summary for a file of that name)" >&2; exit 2;;
+                  esac
+                  shift 2;;
     --no-fixture) fixture=""; shift;;
     --harness-dir) harnessdir_override="$2"; shift 2;;
     *) echo "unknown argument: $1" >&2; exit 2;;
@@ -164,7 +178,11 @@ case "$split" in all|train|validation|holdout) ;; *) echo "--split all|train|val
 # for: refuse what cannot be written before anything is launched.
 if [ -n "$summary" ]; then
   [ -z "$all" ] || { echo "--summary is one skill's record: use --skill, not --all" >&2; exit 2; }
-  [ -d "$(dirname "$summary")" ] || { echo "--summary $summary: its directory does not exist" >&2; exit 2; }
+  sumdir="$(dirname -- "$summary")"
+  [ -d "$sumdir" ] || { echo "--summary $summary: its directory does not exist" >&2; exit 2; }
+  [ ! -d "$summary" ] || { echo "--summary $summary is a directory: it names the file to write" >&2; exit 2; }
+  if [ -e "$summary" ]; then [ -w "$summary" ]; else [ -w "$sumdir" ]; fi \
+    || { echo "--summary $summary cannot be written" >&2; exit 2; }
 fi
 # Counters this script feeds straight to `seq` and to arithmetic. A non-numeric
 # --runs yields an empty `seq`, which scores every query zero-valid and reports a
@@ -210,6 +228,12 @@ identity_line() { # $1 identity json $2 why — one line for the operator
   else
     printf 'unidentified (%s) — bin/report will not record this summary\n' "${2:-unknown}"
   fi
+}
+# A record reports the validation split: say so when this run scores none.
+no_validation_line() {
+  case "$split" in
+    train|holdout) echo "summary  : no validation split (--split $split) — bin/report will not record this summary";;
+  esac
 }
 # The skill's SKILL.md in an installed tree: skills/<skill> or
 # skills/<phase>/<skill>, and only when the tree holds exactly one.
@@ -260,6 +284,7 @@ if [ -n "$dry" ]; then
   if [ -n "$summary" ]; then
     identify "$plugin_tree"
     echo "identity : $(identity_line "$id_json" "$id_why")"
+    no_validation_line
   fi
   echo "harness  : $harness"
   echo "command  : $plan_cmd"
@@ -422,7 +447,14 @@ if [ -n "$summary" ]; then
   [ -z "$pin_dir" ] || id_src="$(cat "$pin_dir/commit.txt")"
   identify "$id_src"; plugin_id="$id_json"
   echo "identity : $(identity_line "$plugin_id" "$id_why")"
-  description_sha256="$(lab_description_sha256 "$(skill_md_in "$plugin_src")" 2>/dev/null)"
+  no_validation_line
+  skill_md="$(skill_md_in "$plugin_src")"
+  description_sha256="$(lab_description_sha256 "$skill_md" 2>/dev/null)"
+  if [ -z "$description_sha256" ]; then
+    desc_why="the frontmatter of its SKILL.md has no line that begins description:"
+    [ -n "$skill_md" ] || desc_why="the installed tree does not hold exactly one SKILL.md for $skill"
+    echo "description: unhashed ($desc_why) — bin/report will not record this summary"
+  fi
   harness_version="$(adapter_version 2>/dev/null | head -n 1)"
 fi
 

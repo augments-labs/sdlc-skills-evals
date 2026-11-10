@@ -339,6 +339,12 @@ got="$(lab_description_sha256 "$dfile")"
 [ "$got" = "$(printf 'description: caf\303\251 \342\200\224 dash' | sha256sum | cut -d' ' -f1)" ] \
   && ok "non-ASCII bytes are hashed as they are" \
   || bad "non-ASCII bytes are hashed as they are (got '$got')"
+# the frontmatter delimiters are exactly ---: a file with CRLF line endings
+# opens with "---\r", so it has no frontmatter and no description hash
+printf -- '---\r\ndescription: crlf\r\n---\r\n' > "$dfile"
+got="$(lab_description_sha256 "$dfile")"; rc=$?
+[ -z "$got" ] && [ "$rc" -ne 0 ] && ok "a SKILL.md with CRLF line endings has no description hash" \
+  || bad "a SKILL.md with CRLF line endings has no description hash (got '$got', rc $rc)"
 got="$(lab_description_sha256 "$idwork/no-such-file")"; rc=$?
 [ -z "$got" ] && [ "$rc" -ne 0 ] && ok "a missing SKILL.md has no description hash" \
   || bad "a missing SKILL.md has no description hash (got '$got', rc $rc)"

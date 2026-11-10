@@ -251,7 +251,10 @@ lab_pin_identity() {
 # the line; every other byte of the line is hashed as it is, a trailing
 # space or CR included. The frontmatter is the block a first line of exactly
 # `---` opens and the next line of exactly `---` closes; the first line in
-# it that begins `description:` is the one hashed. The same value, by hand:
+# it that begins `description:` is the one hashed. A file with CRLF line
+# endings therefore has no hash: its first line is `---` and a CR, so it
+# opens no frontmatter. A CR is hashed only where the delimiters end in LF
+# alone. The same value, by hand:
 #
 #   LC_ALL=C awk 'NR == 1 { if ($0 != "---") exit; next }
 #                 $0 == "---" { exit }

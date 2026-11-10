@@ -475,6 +475,50 @@ DESCRIPTIONS_ROOT="$sumdesc" FAKE_LAUNCH_LOG="$sum_launch" "$here/bin/triggering
   && ok "a --summary path in a missing directory is refused before any launch" \
   || bad "a --summary path in a missing directory is refused before any launch (rc $rc: $(cat "$work/sumnodir.out"))"
 
+# a path that begins with - is an option swallowed by mistake, never a file
+DESCRIPTIONS_ROOT="$sumdesc" FAKE_LAUNCH_LOG="$sum_launch" "$here/bin/triggering" --harness fake \
+  --harness-dir "$fake_h" --plugin "$sumrepo" --skill probe --runs 1 --summary --dry-run >"$work/sumopt.out" 2>&1; rc=$?
+[ "$rc" -eq 2 ] && [ ! -e "$sum_launch" ] && grep -q -- '--summary needs a path' "$work/sumopt.out" \
+  && ok "--summary followed by an option is refused: it needs a path" \
+  || bad "--summary followed by an option is refused: it needs a path (rc $rc: $(cat "$work/sumopt.out"))"
+# what cannot be written is refused before the run, not after it
+mkdir -p "$work/sum-is-a-dir"
+DESCRIPTIONS_ROOT="$sumdesc" FAKE_LAUNCH_LOG="$sum_launch" "$here/bin/triggering" --harness fake \
+  --harness-dir "$fake_h" --plugin "$sumrepo" --skill probe --runs 1 \
+  --summary "$work/sum-is-a-dir" >"$work/sumisdir.out" 2>&1; rc=$?
+[ "$rc" -eq 2 ] && [ ! -e "$sum_launch" ] && grep -q -- '--summary .*is a directory' "$work/sumisdir.out" \
+  && ok "a --summary path that is a directory is refused before any launch" \
+  || bad "a --summary path that is a directory is refused before any launch (rc $rc: $(tail -n 2 "$work/sumisdir.out"))"
+if [ "$(id -u)" -ne 0 ]; then
+  mkdir -p "$work/sum-readonly"; chmod 555 "$work/sum-readonly"
+  DESCRIPTIONS_ROOT="$sumdesc" FAKE_LAUNCH_LOG="$sum_launch" "$here/bin/triggering" --harness fake \
+    --harness-dir "$fake_h" --plugin "$sumrepo" --skill probe --runs 1 \
+    --summary "$work/sum-readonly/sum.json" >"$work/sumro.out" 2>&1; rc=$?
+  chmod 755 "$work/sum-readonly"
+  [ "$rc" -eq 2 ] && [ ! -e "$sum_launch" ] && grep -q -- '--summary .*cannot be written' "$work/sumro.out" \
+    && ok "a --summary path in a read-only directory is refused before any launch" \
+    || bad "a --summary path in a read-only directory is refused before any launch (rc $rc: $(tail -n 2 "$work/sumro.out"))"
+else
+  ok "a --summary path in a read-only directory: not checked as root"
+fi
+
+# a skill whose SKILL.md has no description line: scored, and said to be unrecordable
+sumnodesc="$work/sumnodesc"
+mkdir -p "$sumnodesc/skills/common/probe"
+printf -- '---\nname: probe\n---\n\ndescription: body line\n' > "$sumnodesc/skills/common/probe/SKILL.md"
+git -C "$sumnodesc" init -q
+git -C "$sumnodesc" add -A
+git -C "$sumnodesc" -c user.name=t -c user.email=t@example.invalid commit -q -m probe
+sumrun sumnodesc --plugin "$sumnodesc"
+jq -e '.metadata.description_sha256 == null and (.metadata.plugin.skill_tree | type) == "string"' \
+  "$work/sumnodesc.json" >/dev/null 2>&1 \
+  && grep -q '^description: unhashed (.*) — bin/report will not record this summary$' "$work/sumnodesc.out" \
+  && ok "a SKILL.md with no description line is scored, and the run says the summary cannot be recorded" \
+  || bad "a SKILL.md with no description line is scored, and the run says the summary cannot be recorded ($(jq -c .metadata "$work/sumnodesc.json" 2>&1): $(grep '^description' "$work/sumnodesc.out"))"
+grep -q '^description: ' "$work/sum.out" \
+  && bad "a run that hashed its description prints no description line" \
+  || ok "a run that hashed its description prints no description line"
+
 # the plan names the summary and the identity a run would record
 out="$(DESCRIPTIONS_ROOT="$sumdesc" "$here/bin/triggering" --harness fake --harness-dir "$fake_h" \
   --skill probe --plugin "$sumrepo" --runs 2 --jobs 1 --split all --timeout 30 --max-turns 4 \
@@ -483,6 +527,7 @@ want="bin/triggering --harness fake --skill probe --plugin $sumrepo --runs 2 --j
 [ "$(plan_cmd "$out")" = "$want" ] && [ ! -e "$work/plan-sum.json" ] \
   && ok "the dry run names --summary in the planned invocation and writes nothing" \
   || bad "the dry run names --summary in the planned invocation and writes nothing (got '$(plan_cmd "$out")')"
+plan_all="$out"
 printf '%s\n' "$out" | grep -q "^identity : $sum_commit  skill_tree $sum_tree\$" \
   && ok "the dry run names the skill text a summary would carry" \
   || bad "the dry run names the skill text a summary would carry (got '$(printf '%s\n' "$out" | grep identity)')"
@@ -496,6 +541,16 @@ out="$(DESCRIPTIONS_ROOT="$sumdesc" "$here/bin/triggering" --harness fake --harn
 printf '%s\n' "$out" | grep -q '^identity ' \
   && bad "a dry run without --summary prints no identity line" \
   || ok "a dry run without --summary prints no identity line"
+# a split without validation cannot be recorded: the plan and the run say so
+out="$(DESCRIPTIONS_ROOT="$sumdesc" "$here/bin/triggering" --harness fake --harness-dir "$fake_h" \
+  --skill probe --plugin "$sumrepo" --split train --summary "$work/plan-sum.json" --dry-run 2>&1)"
+printf '%s\n' "$out" | grep -q '^summary  : no validation split (--split train) — bin/report will not record this summary$' \
+  && grep -q '^summary  : no validation split (--split holdout) — bin/report will not record' "$work/sumhold.out" \
+  && ok "a summary of train or holdout alone is said to be unrecordable, in the plan and in the run" \
+  || bad "a summary of train or holdout alone is said to be unrecordable, in the plan and in the run (got '$(printf '%s\n' "$out" | grep '^summary')')"
+{ grep -q '^summary  : ' "$work/sum.out" || grep -q '^summary  : ' <<<"$plan_all"; } \
+  && bad "a summary that includes validation prints no such line" \
+  || ok "a summary that includes validation prints no such line"
 printf '%s\n' "$help_text" | grep -q -- '--summary PATH' \
   && ok "--help documents --summary" || bad "--help documents --summary"
 
@@ -504,7 +559,7 @@ printf '%s\n' "$help_text" | grep -q -- '--summary PATH' \
 [ "$rc" -eq 0 ] && cmp -s "$work/sum.json" "$work/sumrec/triggering.json" \
   && ok "bin/report records a named summary with a failing query" \
   || bad "bin/report records a named summary with a failing query (rc $rc: $(cat "$work/sumrec.out"))"
-for t in sumplain:skill_tree sumdirty:skill_tree sumtrain:validation sumhold:validation; do
+for t in sumplain:skill_tree sumdirty:skill_tree sumtrain:validation sumhold:validation sumnodesc:description_sha256; do
   "$here/bin/report" --triggering "$work/${t%%:*}.json" --record "$work/${t%%:*}-rec" >"$work/${t%%:*}-rec.out" 2>&1; rc=$?
   [ "$rc" -eq 2 ] && [ ! -e "$work/${t%%:*}-rec" ] && grep -q "${t##*:}" "$work/${t%%:*}-rec.out" \
     && ok "bin/report refuses the ${t%%:*} summary for its ${t##*:}" \

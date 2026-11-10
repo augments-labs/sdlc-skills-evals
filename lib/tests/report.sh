@@ -155,12 +155,14 @@ copied failing && ok "an indeterminate result with a named skill text is recorde
 # which skill text it scored. One more: a record reports validation, so a
 # summary without that split is not one.
 
-# trig <plugin skill_tree|null> <splits json> — prints a summary as bin/triggering writes it
+# trig <plugin skill_tree|null> <splits json> — prints a summary as bin/triggering
+# writes it; TRIG_DESC replaces the description hash (JSON)
+dhash="$(printf 'description: "probe one"' | sha256sum | cut -d' ' -f1)"
 trig() {
-  jq -n --argjson tree "$1" --argjson splits "$2" '
+  jq -n --argjson tree "$1" --argjson splits "$2" --argjson desc "${TRIG_DESC:-\"$dhash\"}" '
     {metadata: {skill: "probe", harness: "fake", harness_version: null, model: null,
        plugin: {commit: (if $tree == null then null else "c0ffeec0ffeec0ffeec0ffeec0ffeec0ffeec0ff" end), skill_tree: $tree},
-       description_sha256: "ab12", runs: 3, threshold: 0.5},
+       description_sha256: $desc, runs: 3, threshold: 0.5},
      splits: $splits,
      queries: [{query: "q", should_trigger: true, split: "validation", trigger_rate: 0, verdict: "FAIL"}]}'
 }
@@ -172,7 +174,8 @@ trefused() { # $1 tag $2 pattern the refusal names — exit 2, nothing copied
   trec "$1"
   [ "$rc" -eq 2 ] && [ ! -e "$work/$1/rec" ] && grep -q "$2" "$work/$1/out"
 }
-for t in tgood tnull tnotree tnltree tnoval ttrain temptyval tbad ttwo texists tboth; do mkdir -p "$work/$t"; done
+for t in tgood tnull tnotree tnltree tnoval ttrain temptyval tbad ttwo texists tboth \
+  tnodesc tshortdesc tupdesc tnldesc tall tinc; do mkdir -p "$work/$t"; done
 
 # a failing sheet is data: named, with its validation split, it is recorded
 trig "\"$feed\"" "{\"train\": $val, \"validation\": $val}" > "$work/tgood/sum.json"
@@ -211,6 +214,39 @@ trig "\"$feed\"" '{"validation": {"queries": 0, "passed": 0, "failed": 0, "incon
 trefused temptyval 'validation' \
   && ok "a validation split with no query is refused" \
   || bad "a validation split with no query is refused (rc $rc: $(cat "$work/temptyval/out"))"
+# the refusal says what the summary lacks, not what a run did
+grep -q 'has no validation query' "$work/tnoval/out" && grep -q 'has no validation query' "$work/temptyval/out" \
+  && ok "the validation refusal says the summary has no validation query" \
+  || bad "the validation refusal says the summary has no validation query ($(cat "$work/tnoval/out"))"
+# inconclusive is data too: a validation split whose every query was refused is recorded
+trig "\"$feed\"" '{"validation": {"queries": 2, "passed": 0, "failed": 0, "inconclusive": 2, "pass_rate": null}}' > "$work/tinc/sum.json"
+trec tinc
+[ "$rc" -eq 0 ] && cmp -s "$work/tinc/sum.json" "$work/tinc/rec/triggering.json" \
+  && ok "a validation split with only inconclusive queries is recorded" \
+  || bad "a validation split with only inconclusive queries is recorded (rc $rc: $(cat "$work/tinc/out"))"
+# a record says which description it scored: 64 lowercase hex digits, nothing else
+TRIG_DESC=null trig "\"$feed\"" "{\"validation\": $val}" > "$work/tnodesc/sum.json"
+trefused tnodesc 'metadata.description_sha256 is null' && ! grep -q 'skill text' "$work/tnodesc/out" \
+  && ok "a summary with a null description hash is refused, and the named skill text is not blamed" \
+  || bad "a summary with a null description hash is refused, and the named skill text is not blamed (rc $rc: $(cat "$work/tnodesc/out"))"
+TRIG_DESC='"ab12"' trig "\"$feed\"" "{\"validation\": $val}" > "$work/tshortdesc/sum.json"
+trefused tshortdesc 'metadata.description_sha256 is not a SHA-256' \
+  && ok "a summary whose description hash is not 64 hex digits is refused" \
+  || bad "a summary whose description hash is not 64 hex digits is refused (rc $rc: $(cat "$work/tshortdesc/out"))"
+TRIG_DESC="\"$(printf '%s' "$dhash" | tr a-f A-F)\"" trig "\"$feed\"" "{\"validation\": $val}" > "$work/tupdesc/sum.json"
+trefused tupdesc 'metadata.description_sha256 is not a SHA-256' \
+  && ok "a summary whose description hash is in upper case is refused" \
+  || bad "a summary whose description hash is in upper case is refused (rc $rc: $(cat "$work/tupdesc/out"))"
+TRIG_DESC="\"$dhash\\n\"" trig "\"$feed\"" "{\"validation\": $val}" > "$work/tnldesc/sum.json"
+trefused tnldesc 'metadata.description_sha256 is not a SHA-256' \
+  && ok "a summary whose description hash has a trailing newline is refused" \
+  || bad "a summary whose description hash has a trailing newline is refused (rc $rc: $(cat "$work/tnldesc/out"))"
+# every reason is said at once
+TRIG_DESC=null trig null '{}' > "$work/tall/sum.json"
+trefused tall 'skill_tree is null' && grep -q 'description_sha256 is null' "$work/tall/out" \
+  && grep -q 'validation' "$work/tall/out" \
+  && ok "a summary that names nothing and has no validation is told all three" \
+  || bad "a summary that names nothing and has no validation is told all three (rc $rc: $(cat "$work/tall/out"))"
 # both reasons are said at once
 trig null '{}' > "$work/tboth/sum.json"
 trefused tboth 'skill_tree is null' && grep -q 'validation' "$work/tboth/out" \

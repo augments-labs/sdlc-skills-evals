@@ -125,8 +125,8 @@ scored as one JSON object: which skill text (`plugin.commit`,
 `plugin.skill_tree`), which description (`description_sha256`), the count
 per split, and one row per query. `bin/report --triggering` copies it to
 `results/<date>-<skill>-<harness>-triggering/triggering.json`, and refuses
-a summary that does not name its skill text or scored no validation query
-(`results/README.md`). `bin/optimize-description` scores
+a summary that does not name its skill text or its description, or has no
+validation query (`results/README.md`). `bin/optimize-description` scores
 up to `--max-iterations` candidates under
 `workspaces/<campaign>/iteration-<i>/`, shows the reviser only the `train`
 failures, and writes `best-description.txt`, `optimization.json`, and

@@ -19,8 +19,12 @@
 # summary bin/triggering --summary wrote to <record-dir>/triggering.json, and
 # nothing else, under the same two rules: an existing triggering.json
 # refuses, and so does a summary whose metadata.plugin.skill_tree is not a
-# git tree hash. A record reports the validation split, so a summary that
-# scored none (--split train or holdout) is refused too.
+# git tree hash. Two more refusals are the summary's own: one whose
+# metadata.description_sha256 is not 64 lowercase hex digits does not say
+# which description it scored, and a record reports the validation split, so
+# a summary that has no validation query (--split train or holdout) is
+# refused too. A validation split whose queries were all inconclusive is
+# recorded: that is a result.
 #
 # Needs jq to read the metadata (exit 3 without it).
 
@@ -41,8 +45,9 @@ usage: bin/report --workspace <iteration-dir> --record <record-dir>
 Refuses, copying nothing (exit 2): a target that already exists in the
 record; a source that does not name its skill text by a git tree hash
 (metadata.plugin.skill_tree, and metadata.baseline.skill_tree when the
-second arm is old_skill); a summary with no validation split. A failing or
-inconclusive result is recorded like any other.
+second arm is old_skill); a summary that does not name its description
+(metadata.description_sha256, 64 lowercase hex digits) or has no validation
+query. A failing or inconclusive result is recorded like any other.
 EOF
   exit 0; }
 ws=""; rec=""; trig=""
@@ -69,14 +74,20 @@ if [ -n "$trig" ]; then
          elif type == "string" and test("\\A([0-9a-f]{40}|[0-9a-f]{64})\\z") then empty
          else "is not a git tree hash" end
        | "it does not say which skill text it scored (metadata.plugin.skill_tree \(.))"),
+      (at("metadata") | at("description_sha256")
+       | if . == null then "is null"
+         elif type == "string" and test("\\A[0-9a-f]{64}\\z") then empty
+         else "is not a SHA-256 (64 lowercase hex digits)" end
+       | "it does not say which description it scored (metadata.description_sha256 \(.))"),
       (at("splits") | at("validation") | at("queries")
        | if type == "number" and . > 0 then empty
-         else "it scored no validation query (splits.validation), and a record reports validation" end)' \
+         else "it has no validation query (splits.validation), and a record reports validation" end)' \
     "$trig" 2>/dev/null)" || why="it is not one JSON document"
   if [ -n "$why" ]; then
     while IFS= read -r line; do echo "refusing: $trig: $line" >&2; done <<<"$why"
-    echo "  run bin/triggering --summary with the plugin as a commit, or as a clean git work tree," >&2
-    echo "  and with the validation split (--split all or validation). Nothing was copied." >&2
+    echo "  A record needs bin/triggering --summary on a plugin given as a commit or as a clean" >&2
+    echo "  git work tree, a SKILL.md whose frontmatter has a description: line, and the" >&2
+    echo "  validation split (--split all or validation). Nothing was copied." >&2
     exit 2
   fi
   [ -e "$rec/triggering.json" ] && { echo "refusing: $rec/triggering.json exists" >&2; exit 2; }
