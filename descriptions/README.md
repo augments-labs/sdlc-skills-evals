@@ -174,8 +174,10 @@ proves that the intended behavior was observed. `evals/README.md` and
 
 Live runs cost tokens and are **not deterministic**: the same query fires and
 does not fire across runs, and coverage is selective by design. So these are
-user-run tools, never CI, and no triggering result is committed as a
-record — re-run for current truth.
+user-run tools, never CI. A triggering result is committed only as the
+summary a maintainer deliberately records (`bin/triggering --summary`, then
+`bin/report --triggering`; `results/README.md` has the shape) — re-run
+for current truth.
 
 A single green run is weak evidence. Say how many runs you did and what the
 spread was; the runner prints `(fired/valid)` beside every rate for exactly that

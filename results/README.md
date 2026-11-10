@@ -1,6 +1,8 @@
 # results/
 
-Dated records: `results/<date>-<skill>-<harness>/`. A record is committed
+Dated records: `results/<date>-<skill>-<harness>/` for an evaluation and
+`results/<date>-<skill>-<harness>-triggering/` for a triggering run. A
+record is committed
 only when a maintainer deliberately records one; everything under `raw/` and
 every `workspaces/` iteration is ignored and never committed.
 
@@ -58,6 +60,44 @@ installs can differ in bytes from the tree the record names, and the run
 is still identified — from a commit as from a directory, because `git
 archive` converts the same way. A directory that holds a symlink as a
 plain file (`core.symlinks=false`) is identified too.
+
+## What a triggering record is
+
+`bin/triggering --summary <path>` writes one JSON object beside its
+per-query output, and `bin/report --triggering <path> --record
+results/<date>-<skill>-<harness>-triggering` copies it to
+`triggering.json` in the record, and nothing else:
+
+- `metadata` — `skill`, `harness`, `harness_version` and `model` (null
+  under the rules above: `model` is the one every scored run named),
+  `plugin` — `{commit, skill_tree}` as above — `description_sha256`,
+  `runs` (repetitions per query), and `threshold` (0.5: a query that
+  should trigger passes at a trigger rate above 0.5, one that should not
+  passes below it, and a rate of exactly 0.5 fails either way).
+- `splits` — for each of `train`, `validation`, and `holdout` that was
+  scored: `queries`, `passed`, `failed`, `inconclusive`, and `pass_rate`,
+  which is passed / (passed + failed) and null when nothing was scored.
+- `queries` — one row per query: `query`, `should_trigger`, `split`,
+  `trigger_rate` (null for an inconclusive query), and `verdict` (`PASS`,
+  `FAIL`, or `INCONCLUSIVE`).
+
+`description_sha256` is the SHA-256 of the exact bytes of the frontmatter
+line that begins `description:` in the skill's `SKILL.md`, without its
+newline. The newline is the one LF byte that ends the line; every other
+byte is hashed as it is. It is null when the tree has no such line, or
+the line changed while the run was under way. The `SKILL.md` is the one
+at `skills/[<phase>/]<name>/` in the tree the run installed.
+
+`bin/report --triggering` refuses — copying nothing — when
+`triggering.json` already exists in the record, when
+`metadata.plugin.skill_tree` is not a git tree hash (the null cases are
+the ones listed above), and when the summary scored no validation query:
+a record reports the validation split, so a `--split train` or `--split
+holdout` summary stays in `workspaces/`. A failing or inconclusive query
+is recorded like any other. No transcript, stream, or log enters the
+summary.
+
+## Naming the run
 
 Name the `--dry-run` that priced the run in the PR that commits the
 record. A description optimization is not recorded here:
