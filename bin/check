@@ -423,20 +423,23 @@ _check_corpora() { # the corpora, against the committed inventory
   skills_list="$(jq -r '.skills[]' "$inv_path")" \
     || { echo "check: FAIL cannot read the skill list from $inv_path"; return 1; }
 
-  # A corpus asset for a skill the inventory does not hold.
+  # A corpus asset for a skill the inventory does not hold. The list is read
+  # from a here-string, not through a pipe: `grep -q` leaves at the match, a
+  # writer still writing is killed on the closed pipe, and under pipefail that
+  # status would read as "not a skill".
   while IFS= read -r f; do
     rel="${f#"$desc_root"/}"
     case "$rel" in
       holdout/*) rel="${rel#holdout/}" ;;
     esac
     rel="${rel%.json}"
-    printf '%s\n' "$skills_list" | grep -qxF "$rel" && continue
+    grep -qxF "$rel" <<<"$skills_list" && continue
     echo "check: FAIL a corpus asset names a skill the inventory does not hold: $rel ($f)"
     return 1
   done < <(find "$desc_root" -name '*.json' -type f | sort)
   while IFS= read -r f; do
     rel="$(dirname "${f#"$evals_root"/}")"
-    printf '%s\n' "$skills_list" | grep -qxF "$rel" && continue
+    grep -qxF "$rel" <<<"$skills_list" && continue
     echo "check: FAIL a corpus asset names a skill the inventory does not hold: $rel ($f)"
     return 1
   done < <(find "$evals_root" -name 'evals.json' -type f | sort)
@@ -452,7 +455,7 @@ _check_corpora() { # the corpora, against the committed inventory
       case "$id" in
         *' '*) continue ;;
       esac
-      printf '%s\n' "$skills_list" | grep -qxF "$id" && continue
+      grep -qxF "$id" <<<"$skills_list" && continue
       echo "check: FAIL $f names a route that is not a skill: $id"
       return 1
     done < <(jq -r '.[] | select(.should_trigger == false) | .expect // empty' "$f")
