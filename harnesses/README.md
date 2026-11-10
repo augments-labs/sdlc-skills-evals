@@ -18,7 +18,11 @@ evidence, never a fresh session), `adapter_model` and
 `scenario_model_tier` — the current runners leave it empty; a runner that
 sets a tier must refuse the run on an adapter without them rather than run
 the default model and call it that tier), `adapter_ran`, `adapter_usage`,
-`adapter_activation_flags`, `adapter_prompt_suffix`, `adapter_name`.
+`adapter_version` (the CLI version the adapter itself probed) and
+`adapter_session_model <stream>` (the model the session named in its own
+stream) — `bin/evaluate` records both, and null without them, never the
+tier asked for — `adapter_activation_flags`, `adapter_prompt_suffix`,
+`adapter_name`.
 
 Detection is structural, never a prose grep: an activation counts only
 when the harness's own stream carries a structured skill-invocation

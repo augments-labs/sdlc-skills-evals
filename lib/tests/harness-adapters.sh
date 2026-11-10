@@ -126,6 +126,7 @@ expect() { # $1 harness  $2 key
     claude-code/tier) echo "yes";;
     claude-code/cli) echo "claude";;
     claude-code/seed) echo "yes";;
+    claude-code/model) echo "claude-sonnet-4";;
     codex/skill) echo "sdlc-skills:using-sdlc-skills";;
     codex/install) echo "codex plugin marketplace add";;
     codex/launch) echo "codex exec";;
@@ -190,6 +191,7 @@ expect() { # $1 harness  $2 key
     opencode/tier) echo "no";;
     opencode/cli) echo "opencode";;
     opencode/seed) echo "yes";;
+    opencode/version) echo "1.0.0";;
     pi/skill) echo "using-sdlc-skills";;
     pi/install) echo "pi install";;
     pi/launch) echo "pi";;
@@ -690,6 +692,44 @@ EOS
     else
       bad "$h usage reports the run's own total (expected $usage, got '${got:-none}')"
     fi
+  fi
+
+  # --- what the run ran on -----------------------------------------------------
+  # A record names the CLI version and the model only as the adapter read
+  # them: the version from its own probe, the model from what the session
+  # itself reported. An adapter that reads neither binds neither function,
+  # and the record holds null — never a default, never the tier asked for.
+  local want_model want_version
+  want_model="$(expect "$h" model)"; want_version="$(expect "$h" version)"
+  if [ -n "$want_model" ]; then
+    got="$(adapter_session_model "$work/act.jsonl" 2>/dev/null)"
+    if [ "$got" = "$want_model" ]; then
+      ok "$h reads the model the session named ($want_model)"
+    else
+      bad "$h reads the model the session named (expected $want_model, got '${got:-none}')"
+    fi
+    got="$(for f in empty bad refusal unk; do adapter_session_model "$work/$f.jsonl" 2>/dev/null; done)"
+    if [ -z "$got" ]; then
+      ok "$h names no model for a stream that reports none"
+    else
+      bad "$h names no model for a stream that reports none (got '$got')"
+    fi
+  elif command -v adapter_session_model >/dev/null 2>&1; then
+    bad "$h binds adapter_session_model, and no fixture pins what it reads"
+  else
+    ok "$h binds no adapter_session_model (a record's model is null)"
+  fi
+  if [ -n "$want_version" ]; then
+    got="$(adapter_version 2>/dev/null)"
+    if [ "$got" = "$want_version" ]; then
+      ok "$h reports the CLI version it probed ($want_version)"
+    else
+      bad "$h reports the CLI version it probed (expected $want_version, got '${got:-none}')"
+    fi
+  elif command -v adapter_version >/dev/null 2>&1; then
+    bad "$h binds adapter_version, and no test pins what it reports"
+  else
+    ok "$h binds no adapter_version (a record's harness_version is null)"
   fi
 
   # --- the resume path -------------------------------------------------------

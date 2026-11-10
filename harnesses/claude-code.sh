@@ -181,6 +181,14 @@ adapter_usage() {
     "$1" 2>/dev/null
 }
 
+# THE MODEL THE SESSION RAN ON: the init record names it. A record takes it
+# from here and nowhere else — the tier asked for is an alias the CLI may
+# move, and a run with no tier is whatever the CLI defaults to. Silent when
+# the stream holds no init record, so the record says null instead.
+adapter_session_model() { # $1 stream file
+  jq -r 'select(.type == "system" and .subtype == "init") | .model | strings' "$1" 2>/dev/null | head -n 1
+}
+
 # TIER → MODEL. A caller names a capability tier, never a model; this is the
 # one place the binding lives for this CLI. The aliases are the CLI's own, so a
 # release that moves an alias moves the run with it.

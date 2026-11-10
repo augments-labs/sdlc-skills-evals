@@ -16,7 +16,10 @@ CLI. Read `harnesses/README.md` for the contract, then:
 3. Add what the CLI truly offers and nothing else: `adapter_usage` only
    from observed token keys (silence beats invention),
    `adapter_continue_behavioral` only from a structured session identity,
-   `adapter_model` only for a real tier-to-model binding.
+   `adapter_model` only for a real tier-to-model binding,
+   `adapter_version` only from a probe that runs under the closed
+   environment, `adapter_session_model` only from a model field observed
+   in a real stream.
 4. Write the header from observation: `runnable=no` with the reason
    until a real run on this machine proves otherwise;
    `permission_flags` naming exactly the flags the file passes (a header
