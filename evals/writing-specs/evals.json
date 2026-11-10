@@ -11,7 +11,7 @@
     {
       "id": "vague-edges",
       "prompt": "Spec the reporting export in this repo: tenants can export their invoices as CSV. That's the whole brief — work out the details, especially what happens with ten thousand rows and with special characters in tenant names.",
-      "expected_output": "Requirements that pin down the vague edges (row limits/pagination, CSV escaping rules, filename convention, empty-result behavior) as testable criteria, and mark the remaining open questions as questions rather than silently assuming answers.",
+      "expected_output": "Requirements that pin down the vague edges (what happens at ten thousand rows, CSV escaping rules, empty-result behavior) as testable criteria, and leave a value no source states (a row cap, a page size, a filename convention) as an open question with an owner rather than a plausible value in a requirement.",
       "assertions": []
     }
   ]
