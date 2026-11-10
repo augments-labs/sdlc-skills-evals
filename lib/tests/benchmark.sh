@@ -200,6 +200,18 @@ printf '{"plugin": ' > "$work5/broken/identity.json"
     and (.runs | length) == 4' "$work5/broken/benchmark.json" >/dev/null 2>&1 \
   && ok "an unreadable identity.json is a null identity, said aloud" \
   || bad "an unreadable identity.json is a null identity, said aloud (rc $rc)"
+# so is one that holds anything but a single object
+n=0
+for content in '[]' '"x"' 'null' '{"skill":"x"}{"skill":"y"}' ''; do
+  n=$((n + 1)); cp -r "$here/lib/tests/fixtures/bench-iter" "$work5/shape$n"
+  printf '%s\n' "$content" > "$work5/shape$n/identity.json"
+  "$here/bin/benchmark" "$work5/shape$n" >"$work5/shape$n.out" 2>&1; rc=$?
+  [ "$rc" -eq 0 ] && grep -q 'identity.json' "$work5/shape$n.out" \
+    && jq -e '.metadata.plugin == {commit: null, skill_tree: null} and .metadata.skill == null
+      and (.runs | length) == 4' "$work5/shape$n/benchmark.json" >/dev/null 2>&1 \
+    && ok "identity.json holding '$content' is a null identity, said aloud" \
+    || bad "identity.json holding '$content' is a null identity, said aloud (rc $rc: $(head -n 2 "$work5/shape$n.out"))"
+done
 rm -rf "$work5"
 
 exit "$fails"

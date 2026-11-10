@@ -59,7 +59,9 @@ done
   echo "no with_skill/second-arm pairs in $iter" >&2; exit 2; }
 
 identity='{}'
-if [ -f "$iter/identity.json" ] && ! identity="$(jq -ce 'objects' "$iter/identity.json" 2>/dev/null)"; then
+if [ -f "$iter/identity.json" ] && ! identity="$(jq -cse \
+    'if length == 1 and (.[0] | type) == "object" then .[0] else error("not one object") end' \
+    "$iter/identity.json" 2>/dev/null)"; then
   identity='{}'
   echo "benchmark: $iter/identity.json is unreadable — this iteration's identity is null" >&2
 fi
