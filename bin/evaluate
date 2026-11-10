@@ -32,7 +32,8 @@
 #
 # plugin names the tree with_skill installed and baseline the one old_skill
 # installed (null for without_skill): the full commit, and the git tree hash
-# of the skill's directory at that commit (lib/pin.sh lab_pin_identity). A
+# of the skill's directory at that commit (lib/pin.sh lab_pin_identity, which
+# also says where git's checkout conversions leave that name inexact). A
 # directory counts only as the top of a git work tree whose skill directory
 # is exactly HEAD's, before the run and after it; otherwise both are null,
 # the run says so, and bin/report will not record the iteration.

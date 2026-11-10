@@ -132,10 +132,12 @@ lab_pin_note() {
 # the commit.
 #
 # A ref is resolved in the plugin checkout, and a run installs it with `git
-# archive`: the hash names what the run installed only while no
-# .gitattributes rule (export-ignore, export-subst) makes the archive differ
-# from the tree. The plugin has no export-ignore or export-subst rule at the
-# pinned commit; re-check its .gitattributes when the pin moves.
+# archive`: the hash names what the run installed only while the archive
+# equals the tree. An export-ignore or export-subst rule in .gitattributes
+# makes it differ, and so does any conversion git applies on checkout (below):
+# git archive applies the same ones. At the pinned commit the plugin has no
+# export-ignore or export-subst rule, and its other rules (eol=lf, binary)
+# convert nothing; re-check its .gitattributes when the pin moves.
 #
 # A directory is identified only when it is the top of a git work tree whose
 # skill directory is exactly HEAD's: `git -c core.fileMode=true status
@@ -149,10 +151,12 @@ lab_pin_note() {
 # reference the plugin checkout has no commit for is {null, null}.
 #
 # The check is git's, so it compares through git's own conversions. Where git
-# rewrites a file on checkout (core.autocrlf, an eol, filter or ident
-# attribute) or keeps a symlink as a plain file (core.symlinks=false), a
-# directory git calls clean can differ in bytes from the tree, and is still
-# identified. Name a commit there.
+# converts a file on checkout (core.autocrlf=true, or an eol=crlf, filter or
+# ident attribute, for example), a directory git calls clean can differ in
+# bytes from the tree, and is still identified; so is one that holds a
+# symlink as a plain file (core.symlinks=false). A commit is no way round the
+# conversions, which git archive applies too: the name is exact only where
+# git converts nothing in the skill directory.
 #
 # The reason for a null goes to stderr. Returns 0 for any identity, a null
 # one included (127 only on a wrong argument count): an unnamed tree is a
