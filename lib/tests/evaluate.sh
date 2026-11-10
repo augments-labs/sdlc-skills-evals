@@ -581,6 +581,140 @@ printf '%s\n' "$dry_id" | grep -q '^identity : with_skill unidentified.*bin/repo
   && ok "the dry run prints one identity line per arm that installs a plugin, none for without_skill" \
   || bad "the dry run prints one identity line per arm that installs a plugin, none for without_skill"
 
+# --- --runs N: each eval and arm is repeated N times --------------------------
+
+dry3="$(dry --plugin "$with_plug" --runs 3)"
+printf '%s' "$dry3" | grep -qE '(^|[^0-9])18 calls' \
+  && printf '%s\n' "$dry3" | grep -qx 'budget   : 3 eval(s) x 2 arms x 3 runs = 18 arm calls' \
+  && ok "the dry run prices evals x arms x runs" || bad "the dry run prices evals x arms x runs (got '$dry3')"
+printf '%s' "$(dry --plugin "$with_plug" --runs 3 --grade-with-harness)" | grep -qE '(^|[^0-9])24 calls' \
+  && ok "the dry run prices one rubric call per arm with prose, per run" \
+  || bad "the dry run prices one rubric call per arm with prose, per run"
+[ "$(dry --plugin "$with_plug" --runs 1)" = "$dry_out" ] \
+  && [ "$(dry --plugin "$with_plug" --runs 1 --grade-with-harness)" = "$(dry --plugin "$with_plug" --grade-with-harness)" ] \
+  && ok "--runs 1 plans what no --runs plans, to the byte" || bad "--runs 1 plans what no --runs plans, to the byte"
+bad_runs=""
+for v in 0 x -1 1.5 ''; do
+  dry --plugin "$with_plug" --runs "$v" >/dev/null; [ "$?" -eq 2 ] || bad_runs="$bad_runs '$v'"
+done
+[ -z "$bad_runs" ] && ok "--runs needs a positive integer" || bad "--runs needs a positive integer (accepted:$bad_runs)"
+"$ev" --help | grep -q -- '--runs N' && ok "--help names --runs" || bad "--help names --runs"
+
+idrun runs2 --plugin "$gitplug" --runs 2; rc=$?
+rit="$(idit runs2)"
+missing=""
+for a in with_skill without_skill; do
+  for k in 1 2; do
+    for f in eval-case.json timing.json run_status.json grading.json outputs/response.txt; do
+      [ -e "$rit/nested-files/$a/run-$k/$f" ] || missing="$missing $a/run-$k/$f"
+    done
+  done
+  [ ! -e "$rit/nested-files/$a/grading.json" ] && [ ! -e "$rit/nested-files/$a/outputs" ] \
+    && [ ! -e "$rit/nested-files/$a/run-3" ] || missing="$missing $a:stray"
+done
+[ "$rc" -eq 0 ] && [ -z "$missing" ] && ok "--runs 2 writes each repetition under <arm>/run-<k>/" \
+  || bad "--runs 2 writes each repetition under <arm>/run-<k>/ (rc $rc; missing:$missing; $(tail -3 "$work/runs2/out"))"
+[ "$(grep -c . "$work/runs2/hook.log" 2>/dev/null)" = 4 ] \
+  && [ "$(grep -c "^install $gitplug\$" "$work/runs2/launch.log" 2>/dev/null)" = 2 ] \
+  && ok "--runs 2 makes evals x arms x 2 calls" \
+  || bad "--runs 2 makes evals x arms x 2 calls ($(grep -c . "$work/runs2/hook.log" 2>/dev/null) sessions)"
+jq -e '.runs_per_eval == 2' "$rit/identity.json" >/dev/null 2>&1 \
+  && jq -e '.metadata.runs_per_eval == 2 and (.runs | length) == 4
+    and ([.runs[] | [.configuration, .run_number]]
+         == [["with_skill", 1], ["with_skill", 2], ["without_skill", 1], ["without_skill", 2]])
+    and all(.runs[]; .outcome == "ok" and .pass_rate == 1)
+    and .run_summary.with_skill.pass_rate == {mean: 1, stddev: 0}' "$rit/benchmark.json" >/dev/null 2>&1 \
+  && ok "the benchmark holds one numbered row per run, and runs_per_eval is N" \
+  || bad "the benchmark holds one numbered row per run, and runs_per_eval is N ($(jq -c '[.metadata.runs_per_eval, .runs]' "$rit/benchmark.json" 2>&1))"
+report_to runs2; rc=$?
+[ "$rc" -eq 0 ] && jq -e '.metadata.runs_per_eval == 2' "$work/runs2/record/benchmark.json" >/dev/null 2>&1 \
+  && ok "bin/report records a repeated iteration, runs_per_eval with it" || bad "bin/report records a repeated iteration, runs_per_eval with it (rc $rc)"
+
+# --runs 1 is the layout and the output of no --runs
+idrun runs1 --plugin "$gitplug" --runs 1; rc1=$?
+idrun runs0 --plugin "$gitplug"; rc0=$?
+tree_of() { ( cd "$(idit "$1")" && find . | sort ); }
+said() { sed -e "s#$work/$1/#W/#g" -e "s#/$1/#/T/#g" "$work/$1/out"; }
+[ "$rc1" -eq 0 ] && [ "$rc0" -eq 0 ] && [ "$(tree_of runs1)" = "$(tree_of runs0)" ] \
+  && [ -z "$(find "$(idit runs1)" -name 'run-*')" ] \
+  && [ -f "$(idit runs1)/nested-files/with_skill/grading.json" ] \
+  && ok "--runs 1 keeps the single-run layout" || bad "--runs 1 keeps the single-run layout (rc $rc1/$rc0)"
+[ "$(said runs1)" = "$(said runs0)" ] && [ -s "$work/runs1/out" ] \
+  && ok "--runs 1 says what no --runs says" \
+  || bad "--runs 1 says what no --runs says ($(diff <(said runs1) <(said runs0) | head -4))"
+jq -e '.runs_per_eval == 1' "$(idit runs1)/identity.json" >/dev/null 2>&1 \
+  && jq -e 'all(.runs[]; .run_number == 1)' "$(idit runs1)/benchmark.json" >/dev/null 2>&1 \
+  && ok "a single run is run 1 of 1" || bad "a single run is run 1 of 1"
+
+# one run says, word for word, what it said before --runs existed
+dry_g="$(dry --plugin "$with_plug" --grade-with-harness)"
+printf '%s\n' "$dry_out" | grep -qxF 'budget   : 3 eval(s) x 2 arms = 6 arm calls' \
+  && printf '%s\n' "$dry_out" | grep -qxF 'at most 6 calls total, billed to your own harness account.' \
+  && printf '%s\n' "$dry_g" | grep -qxF 'budget   : 3 eval(s) x 2 arms = 6 arm calls' \
+  && printf '%s\n' "$dry_g" | grep -qxF '         + 2 rubric grader call(s) (1 eval(s) with prose x 2 arms)' \
+  && printf '%s\n' "$dry_g" | grep -qxF 'at most 8 calls total, billed to your own harness account.' \
+  && ok "one run is priced in the words used before --runs" \
+  || bad "one run is priced in the words used before --runs ($(printf '%s\n' "$dry_g" | grep -E 'budget|rubric|at most' | tr '\n' ';'))"
+one_said=$'nested-files/with_skill: running\nnested-files/without_skill: running'
+[ "$(grep ': running$' "$work/runs0/out")" = "$one_said" ] && [ "$(grep ': running$' "$work/runs1/out")" = "$one_said" ] \
+  && ! grep -q '/run-[0-9]' "$work/runs0/out" "$work/runs1/out" \
+  && ok "one run names its arms without a run number" \
+  || bad "one run names its arms without a run number ($(grep ': running$' "$work/runs1/out" | tr '\n' ';'))"
+
+# the repetitions go in order: both arms of run 1, then both arms of run 2
+[ "$(grep ': running$' "$work/runs2/out")" = "nested-files/with_skill/run-1: running
+nested-files/without_skill/run-1: running
+nested-files/with_skill/run-2: running
+nested-files/without_skill/run-2: running" ] \
+  && ok "--runs 2 runs both arms of run 1 before run 2" \
+  || bad "--runs 2 runs both arms of run 1 before run 2 ($(grep ': running$' "$work/runs2/out" | tr '\n' ';'))"
+
+# a count with leading zeros is decimal, and zero is still refused
+lead=""
+for v in "08:x 8 runs = 48" "003:x 3 runs = 18" "010:x 10 runs = 60"; do
+  dry --plugin "$with_plug" --runs "${v%%:*}" | grep -qxF "budget   : 3 eval(s) x 2 arms ${v#*:} arm calls" \
+    || lead="$lead ${v%%:*}"
+done
+dry --plugin "$with_plug" --runs 00 >/dev/null; [ "$?" -eq 2 ] || lead="$lead 00(accepted)"
+[ -z "$lead" ] && ok "--runs reads leading zeros as decimal, and 00 is no count" \
+  || bad "--runs reads leading zeros as decimal, and 00 is no count (wrong:$lead)"
+
+# one repetition that measures nothing, or cannot be graded, is that
+# repetition's alone: the third session is with_skill/run-2
+khook="$work/count-hook"
+cat > "$khook" <<'HOOK'
+#!/usr/bin/env bash
+echo call >> "$HOOK_LOG"
+if [ "$(wc -l < "$HOOK_LOG")" -eq 3 ]; then
+  case "$KHOOK" in
+    crash) exit 3;;
+    lose) rm -f "$KHOOK_ARM/eval-case.json";;
+  esac
+fi
+echo "done answer"
+HOOK
+chmod +x "$khook"
+KHOOK=crash EV_HOOK="$khook" idrun runsx --plugin "$gitplug" --runs 2; rc=$?
+xit="$(idit runsx)/nested-files"
+[ "$rc" -eq 0 ] && grep -q '^nested-files/with_skill/run-2: indeterminate' "$work/runsx/out" \
+  && [ "$(grep -c ': indeterminate' "$work/runsx/out")" -eq 1 ] \
+  && [ "$(jq -r .outcome "$xit/with_skill/run-2/run_status.json" 2>/dev/null)" = indeterminate ] \
+  && [ "$(jq -r .outcome "$xit/with_skill/run-1/run_status.json" "$xit"/without_skill/run-*/run_status.json 2>/dev/null | tr '\n' ' ')" = "ok ok ok " ] \
+  && jq -e '[.runs[] | [.configuration, .run_number, .outcome]]
+      == [["with_skill", 1, "ok"], ["with_skill", 2, "indeterminate"], ["without_skill", 1, "ok"], ["without_skill", 2, "ok"]]
+    and .run_summary.with_skill.indeterminate_count == 1 and .run_summary.without_skill.indeterminate_count == 0
+    and .metadata.runs_per_eval == 2' "$(idit runsx)/benchmark.json" >/dev/null 2>&1 \
+  && ok "a repetition that measured nothing is indeterminate alone, under its run number" \
+  || bad "a repetition that measured nothing is indeterminate alone, under its run number (rc $rc; $(jq -c '[.runs[] | [.configuration, .run_number, .outcome]]' "$(idit runsx)/benchmark.json" 2>&1); $(tail -n 4 "$work/runsx/out" | tr '\n' ';'))"
+KHOOK=lose KHOOK_ARM="$(idit runsy)/nested-files/with_skill/run-2" EV_HOOK="$khook" idrun runsy --plugin "$gitplug" --runs 2; rc=$?
+[ "$rc" -eq 2 ] && grep -qxF 'nested-files/with_skill/run-2: bin/grade failed' "$work/runsy/out" \
+  && [ "$(grep -c 'bin/grade failed' "$work/runsy/out")" -eq 1 ] \
+  && grep -qxF 'not recorded: nested-files/with_skill/run-2 benchmark' "$work/runsy/out" \
+  && [ ! -e "$(idit runsy)/nested-files/with_skill/run-2/grading.json" ] \
+  && [ -f "$(idit runsy)/nested-files/without_skill/run-2/grading.json" ] \
+  && ok "a repetition that cannot be graded is named with its run number, and the rest still run" \
+  || bad "a repetition that cannot be graded is named with its run number, and the rest still run (rc $rc; $(tail -n 5 "$work/runsy/out" | tr '\n' ';'))"
+
 [ ! -s "$own_trip" ] && ok "no real agent CLI was called" || bad "no real agent CLI was called ($(cat "$own_trip"))"
 
 exit "$fails"

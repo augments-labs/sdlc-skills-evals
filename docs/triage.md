@@ -9,7 +9,17 @@ Unobserved is `indeterminate`, never a pass and never a fail.
 Each arm's `run_status.json` says whether it measured anything
 (`outcome: ok | indeterminate`, with `reason`, `exit_status`, `adapter_ran`,
 `skill_chain`). An `indeterminate` arm scores `pass_rate: null`, is counted in
-`benchmark.json`'s `indeterminate_count`, and stays out of the mean.
+`benchmark.json`'s `indeterminate_count`, and stays out of the mean. Under
+`--runs N` above 1 an arm's files are per repetition, in
+`<arm>/run-<k>/`, and `benchmark.json`'s `runs[].run_number` names the
+repetition a row came from. `bin/benchmark` exits `2` and writes nothing,
+with "`<eval>/<arm>` holds run(s) 1, 3, not 1 to 3", when an arm directory
+lacks a repetition (a run that was interrupted, a `run-<k>/` that was
+removed): the iteration is not N runs per eval, so run it again as a new
+iteration. A `benchmark.json` and `benchmark.md` already there are the
+earlier aggregation's, and the message says so of the `benchmark.json`. An
+eval whose whole arm directory is gone is not refused: `runs[]` has no row
+for that eval and arm.
 
 1. **Unrunnable harness.** `bin/evaluate` exits `2` before any run with
    "harness X is unrunnable here (reason)": its adapter says `runnable=no`.

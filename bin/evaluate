@@ -4,8 +4,9 @@
 # adapter this script sources; referenced indirectly, never in this file.
 # bin/evaluate — the agentskills.io paired evaluation of one skill.
 #
-# For each eval in evals/<skill>/evals.json, runs the eval's prompt twice on
-# one harness, in a staged workdir holding the eval's input files:
+# For each eval in evals/<skill>/evals.json, runs the eval's prompt once per
+# arm on one harness (--runs N: N times per arm), in a staged workdir holding
+# the eval's input files:
 #
 #   with_skill     the pinned plugin installed
 #   without_skill  no plugin installed           (the default pair)
@@ -23,7 +24,10 @@
 #   <arm>/run_status.json                   {outcome: ok|indeterminate, reason,
 #                                           exit_status, adapter_ran, skill_chain}
 #   <arm>/grading.json                      bin/grade
-# then, for the iteration, identity.json — what was measured:
+# With --runs N above 1 each repetition keeps those arm files one level down,
+# under <arm>/run-<k>/ (k from 1 to N), and <arm>/ holds nothing else; one run
+# keeps the layout above. One run's stddev means nothing: a record uses 3.
+# Then, for the iteration, identity.json — what was measured:
 #   {skill, harness, harness_version, model, runs_per_eval,
 #    plugin: {commit, skill_tree}, baseline: {commit, skill_tree} | null}
 # benchmark.json and benchmark.md (bin/benchmark, which copies identity.json
@@ -48,8 +52,8 @@
 #
 # ============================ THIS COSTS REAL MONEY ============================
 # Every arm is a live session against your own harness account: 2 calls per
-# eval, plus one rubric grader call per arm with a prose assertion under
-# --grade-with-harness.
+# eval and run (evals x 2 arms x --runs), plus one rubric grader call per
+# arm and run with a prose assertion under --grade-with-harness.
 #
 # Price it first:  --dry-run  prints the plan and its call count, calls nothing.
 # ==============================================================================
@@ -88,6 +92,9 @@ Options:
   --baseline-plugin P     pair with_skill against old_skill on this tree,
                           instead of without_skill
   --eval-id ID            run only this eval (repeatable; default: every eval)
+  --runs N                run each eval N times per arm              (default: 1).
+                          Above 1, each repetition is <arm>/run-<k>/. With one
+                          run the stddev means nothing; a record uses 3
   --campaign NAME         workspace name under workspaces/  (default: evaluate-<skill>)
   --iteration N           write iteration-N (refused if it holds a run;
                           default: the next free iteration)
@@ -98,9 +105,9 @@ Options:
   --harness-dir DIR       read the adapter from DIR instead of harnesses/
   --dry-run               print the plan and its call count; launch nothing
 
-COST: live sessions against your own harness account — 2 per eval, plus one
-per arm with a prose assertion under --grade-with-harness. Always --dry-run
-first.
+COST: live sessions against your own harness account — evals x 2 arms x
+--runs, plus one per arm and run with a prose assertion under
+--grade-with-harness. Always --dry-run first.
 
 The iteration's identity.json says which skill text each arm installed;
 --dry-run prints it. An arm it cannot name still runs and is scored, and
@@ -116,11 +123,12 @@ Exit codes: 0 every arm ran and was recorded (an indeterminate arm is a
 Examples:
   bin/evaluate --harness opencode --skill yagni --dry-run
   bin/evaluate --harness opencode --skill yagni --plugin ../sdlc-skills --eval-id cut-the-knob
+  bin/evaluate --harness opencode --skill yagni --runs 3 --dry-run
 EOF
 }
 
 harness=""; skill=""; plugin=""; baseline=""; iteration=""; campaign=""
-timeout_s=1800; maxturns=""; grade_harness=""; dry=""; eval_ids=()
+timeout_s=1800; maxturns=""; runs=1; grade_harness=""; dry=""; eval_ids=()
 while [ "$#" -gt 0 ]; do
   case "$1" in
     -h|--help)            usage; exit 0;;
@@ -133,6 +141,7 @@ while [ "$#" -gt 0 ]; do
     --iteration)          iteration="${2:-}"; shift 2 || exit 2;;
     --timeout)            timeout_s="${2:-}"; shift 2 || exit 2;;
     --max-turns)          maxturns="${2:-}"; shift 2 || exit 2;;
+    --runs)               runs="${2:-}"; shift 2 || exit 2;;
     --grade-with-harness) grade_harness="1"; shift;;
     --harness-dir)        harnessdir="${2:-}"; shift 2 || exit 2;;
     --dry-run)            dry="1"; shift;;
@@ -143,7 +152,7 @@ done
 [ -n "$skill" ] || { echo "needs --skill NAME" >&2; exit 2; }
 case "$skill" in */*|.|..) echo "--skill is a name, not a path" >&2; exit 2;; esac
 command -v jq >/dev/null 2>&1 || { echo "needs \`jq\`" >&2; exit 3; }
-for pair in timeout:timeout_s max-turns:maxturns iteration:iteration; do
+for pair in timeout:timeout_s max-turns:maxturns iteration:iteration runs:runs; do
   flag="${pair%%:*}"; var="${pair#*:}"
   [ -n "${!var}" ] || continue
   case "${!var}" in
@@ -152,6 +161,8 @@ for pair in timeout:timeout_s max-turns:maxturns iteration:iteration; do
   esac
 done
 [ -n "$timeout_s" ] || { echo "--timeout needs a positive integer" >&2; exit 2; }
+[ -n "$runs" ] || { echo "--runs needs a positive integer" >&2; exit 2; }
+runs="$((10#$runs))"
 [ -n "$campaign" ] || campaign="evaluate-$skill"
 case "$campaign" in */*|.|..) echo "--campaign is a name, not a path" >&2; exit 2;; esac
 
@@ -248,9 +259,10 @@ prose_evals="$(jq --argjson ids "$selected_json" '[.evals[] | select((.id | tost
 
 if [ -n "$dry" ]; then
   # The plan, priced: no checkout, no adapter, no CLI.
-  arm_calls=$((2 * ${#selected[@]}))
+  arm_calls=$((2 * ${#selected[@]} * runs))
   grader_calls=0
-  [ -n "$grade_harness" ] && grader_calls=$((2 * prose_evals))
+  [ -n "$grade_harness" ] && grader_calls=$((2 * prose_evals * runs))
+  per_run=""; [ "$runs" -gt 1 ] && per_run=" x $runs runs"
   echo "plugin   : $plugin_tree  ($plugin_note)"
   [ -n "$baseline" ] && echo "baseline : $baseline_tree  ($baseline_note)"
   echo "identity : $(identity_line with_skill "$plugin_id" "$plugin_why")"
@@ -258,9 +270,9 @@ if [ -n "$dry" ]; then
   echo "harness  : $harness"
   echo "arms     : with_skill, $second_arm"
   echo "evals    : ${selected[*]}"
-  printf 'budget   : %d eval(s) x 2 arms = %d arm calls\n' "${#selected[@]}" "$arm_calls"
-  [ -n "$grade_harness" ] && printf '         + %d rubric grader call(s) (%d eval(s) with prose x 2 arms)\n' \
-    "$grader_calls" "$prose_evals"
+  printf 'budget   : %d eval(s) x 2 arms%s = %d arm calls\n' "${#selected[@]}" "$per_run" "$arm_calls"
+  [ -n "$grade_harness" ] && printf '         + %d rubric grader call(s) (%d eval(s) with prose x 2 arms%s)\n' \
+    "$grader_calls" "$prose_evals" "$per_run"
   printf '\nat most %d calls total, billed to your own harness account.\n' "$((arm_calls + grader_calls))"
   exit 0
 fi
@@ -373,10 +385,11 @@ indeterminate_reason() { # $1 arm $2 exit code $3 stream $4 errlog
 ms_now() { date +%s%3N; }
 
 session_models="" # one line per session: the model it named, or empty
-run_arm() { # $1 eval id $2 arm $3 plugin source ("" for none)
-  local id="$1" arm="$2" src="$3" case_json arm_dir workdir stream rc start end toks reason pairs s d ran chain m
+run_arm() { # $1 eval id $2 arm $3 plugin source ("" for none) $4 "" or run-<k>
+  local id="$1" arm="$2" src="$3" name="$1/$2${4:+/$4}"
+  local case_json arm_dir workdir stream rc start end toks reason pairs s d ran chain m
   case_json="$(case_of "$id")"
-  arm_dir="$it/$id/$arm"
+  arm_dir="$it/$name"
   mkdir -p "$arm_dir" || return 1
   jq '{id, prompt, expected_output, assertions: (.assertions // []), files: (.files // [])}' \
     <<<"$case_json" > "$arm_dir/eval-case.json" || return 1
@@ -402,7 +415,7 @@ run_arm() { # $1 eval id $2 arm $3 plugin source ("" for none)
   stream="$arm_dir/stream.txt"; : > "$stream"
   errlog="$arm_dir/stderr.txt"; : > "$errlog"
   scenario_model_tier=""
-  log "$id/$arm: running"
+  log "$name: running"
   start="$(ms_now)"
   (
     TMPDIR="$_outer_tmpdir"
@@ -426,7 +439,7 @@ run_arm() { # $1 eval id $2 arm $3 plugin source ("" for none)
   # git-count waits for review.
   if ! git_err="$(lab_changed_files "$workdir" "$seed" 2>&1 >"$arm_dir/git-changed.txt")"; then
     rm -f "$arm_dir/git-changed.txt"
-    log "$id/$arm: change list unavailable: $(head -n 1 <<<"$git_err")"
+    log "$name: change list unavailable: $(head -n 1 <<<"$git_err")"
   fi
   mkdir -p "$arm_dir/outputs"
   cp -a "$workdir/." "$arm_dir/outputs/" && rm -rf "$arm_dir/outputs/.git" || return 1
@@ -445,13 +458,13 @@ run_arm() { # $1 eval id $2 arm $3 plugin source ("" for none)
     '{outcome: (if $r == "" then "ok" else "indeterminate" end),
       reason: (if $r == "" then null else $r end),
       exit_status: $rc, adapter_ran: $ran, skill_chain: $chain}' > "$arm_dir/run_status.json" || return 1
-  [ -z "$reason" ] || log "$id/$arm: indeterminate — $reason"
+  [ -z "$reason" ] || log "$name: indeterminate — $reason"
 
   drop_run_base
 
   local grade_args=("$arm_dir")
   [ -n "$grade_harness" ] && grade_args+=(--harness "$harness" --harness-dir "$harnessdir" --timeout "$timeout_s")
-  "$lab_root/bin/grade" "${grade_args[@]}" || { echo "$id/$arm: bin/grade failed" >&2; return 1; }
+  "$lab_root/bin/grade" "${grade_args[@]}" || { echo "$name: bin/grade failed" >&2; return 1; }
 }
 
 failed=""
@@ -459,8 +472,12 @@ for id in "${selected[@]}"; do
   mkdir -p "$it/$id"
   case_of "$id" | jq '{eval_id: .id, eval_name: (.name // .id), prompt, assertions: (.assertions // [])}' \
     > "$it/$id/eval_metadata.json"
-  run_arm "$id" with_skill "$with_src" || failed="$failed $id/with_skill"
-  run_arm "$id" "$second_arm" "$second_src" || failed="$failed $id/$second_arm"
+  for ((k = 1; k <= runs; k++)); do
+    # One run keeps the arm's files in <arm>/; more put each under <arm>/run-<k>/.
+    rep=""; [ "$runs" -gt 1 ] && rep="run-$k"
+    run_arm "$id" with_skill "$with_src" "$rep" || failed="$failed $id/with_skill${rep:+/$rep}"
+    run_arm "$id" "$second_arm" "$second_src" "$rep" || failed="$failed $id/$second_arm${rep:+/$rep}"
+  done
 done
 
 # What the iteration measured. A tree whose identity is not what it was
@@ -477,10 +494,10 @@ plugin_id="$(recheck with_skill "$plugin" "$plugin_id")"
 model="$(printf '%s' "$session_models" | sort -u)"
 case "$model" in *$'\n'*) model="";; esac
 jq -n --arg skill "$skill" --arg harness "$harness" --arg hv "$harness_version" --arg model "$model" \
-  --argjson plugin "$plugin_id" --argjson baseline "$baseline_id" '
+  --argjson runs "$runs" --argjson plugin "$plugin_id" --argjson baseline "$baseline_id" '
   def known: if . == "" then null else . end;
   {skill: $skill, harness: $harness, harness_version: ($hv | known), model: ($model | known),
-   runs_per_eval: 1, plugin: $plugin, baseline: $baseline}' > "$it/identity.json" \
+   runs_per_eval: $runs, plugin: $plugin, baseline: $baseline}' > "$it/identity.json" \
   || failed="$failed identity"
 
 "$lab_root/bin/benchmark" "$it" || failed="$failed benchmark"

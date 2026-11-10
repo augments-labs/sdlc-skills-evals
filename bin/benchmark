@@ -3,33 +3,55 @@
 # benchmark.md.
 #
 # Reads <eval-id>/{with_skill,without_skill|old_skill}/{grading.json,
-# timing.json} and writes benchmark.json:
+# timing.json} — or, for an arm bin/evaluate repeated (--runs N above 1),
+# the same two files under each <arm>/run-<k>/ — and writes benchmark.json:
 #   metadata    {iteration, configurations, eval_ids, skill, harness,
 #               harness_version, model, runs_per_eval, plugin, baseline}
-#   runs[]      one row per eval and arm: {eval_id, configuration, outcome,
-#               reason, pass_rate, passed, failed, needs_review, total,
-#               time_seconds, tokens}
+#   runs[]      one row per eval, arm and run: {eval_id, configuration,
+#               run_number, outcome, reason, pass_rate, passed, failed,
+#               needs_review, total, time_seconds, tokens}; run_number is
+#               the k of run-<k>/, and 1 for an arm that was run once
 #   run_summary {with_skill: {...}, without_skill|old_skill: {...},
 #                delta: {pass_rate, time_seconds, tokens}}
 # Each arm is {pass_rate, time_seconds, tokens} as {mean, stddev}
-# (population) plus indeterminate_count. A null pass rate — an
-# indeterminate arm, or an eval with no assertions yet — stays out of the
-# mean; an arm with no scored run has a null pass_rate, never zero. Token stats
-# run over the runs that reported tokens. The second arm keeps its own name
+# (population) over every scored run of that configuration, plus
+# indeterminate_count. With one run per eval the stddev is the spread
+# between evals and says nothing about run-to-run variance: a record uses
+# 3 runs. A null pass rate — an indeterminate arm, or an eval with no
+# assertions yet — stays out of the mean; an arm with no scored run has a
+# null pass_rate, never zero. Token stats run over the runs that reported
+# tokens. The second arm keeps its own name
 # (without_skill or old_skill). benchmark.md is the same data for a human:
-# a Summary table and a Per-Eval Breakdown. No live calls.
+# a Summary table and a Per-Eval Breakdown, with a run column when an arm
+# was repeated. No live calls.
+#
+# An arm is one run or run-<k>/ directories (k from 1, no leading zero),
+# never both. Refused: an arm holding eval-case.json, outputs/,
+# run_status.json, grading.json or timing.json beside run-<k>/ (a run's
+# git-changed.txt, stream.txt and stderr.txt are not looked at), a run-
+# name that is not run-<k>, or a run-<k> that is not a directory. Refused
+# too: an iteration where an arm directory does not hold exactly runs 1 to
+# N: N is identity.json's runs_per_eval, else the highest run number the
+# iteration holds. An eval with no directory for an arm has no row for that
+# arm, with one run or with N: that is not refused. Each of these refusals
+# names the arm, says the iteration is not aggregated, writes nothing, and
+# exits 2; a benchmark.json and benchmark.md already there stay as they
+# were, and the refusal says the benchmark.json is from an earlier
+# aggregation. No other exit says that.
 #
 # The identity fields of metadata are bin/evaluate's <iteration>/identity.json,
-# copied — except that runs_per_eval defaults to 1 and a commit or skill_tree
-# that is not a string becomes null: which skill, on which harness (and CLI
-# version, and the model the sessions named — null when unknown), and which
-# skill text each arm installed. plugin is {commit, skill_tree} for
-# with_skill; baseline is the same pair for old_skill and null for
-# without_skill. skill_tree is the git tree hash of the skill's directory at
-# that commit. An iteration with no identity.json, or an unreadable one, is
-# still benchmarked, unnamed: skill, harness, harness_version and model are
-# null, and plugin (and baseline for old_skill) is {commit: null,
-# skill_tree: null} — bin/report will not record it.
+# copied — except that a missing runs_per_eval is the highest run number the
+# iteration holds (1 for one run per arm) and a commit or skill_tree that is
+# not a string becomes null: which skill, on which harness (and CLI version,
+# and the model the sessions named — null when unknown), and which skill
+# text each arm installed. plugin is {commit, skill_tree} for with_skill;
+# baseline is the same pair for old_skill and null for without_skill.
+# skill_tree is the git tree hash of the skill's directory at that commit.
+# An iteration with no identity.json, or an unreadable one (not one JSON
+# object, or a runs_per_eval that is not a positive integer), is still
+# benchmarked, unnamed: skill, harness, harness_version and model are null,
+# and plugin (and baseline for old_skill) is {commit: null, skill_tree: null}
+# — bin/report will not record it.
 #
 # An arm whose grading.json is missing or unreadable, or whose timing.json
 # is unreadable (not an object, or a non-number duration_ms/total_tokens),
@@ -43,6 +65,8 @@ iter="${1:-}"; [ -n "$iter" ] || { echo "needs an iteration dir" >&2; exit 2; }
 [ -d "$iter" ] || { echo "no such dir: $iter" >&2; exit 2; }
 
 command -v jq >/dev/null 2>&1 || { echo "needs \`jq\`" >&2; exit 3; }
+# shellcheck source=../lib/common.sh
+. "$(cd "$(dirname "$0")/.." && pwd)/lib/common.sh"
 
 second_arm=""
 for e in "$iter"/*/; do
@@ -61,38 +85,79 @@ done
 [ -n "$second_arm" ] && [ "$second_arm" != with_skill ] || {
   echo "no with_skill/second-arm pairs in $iter" >&2; exit 2; }
 
+# A refusal writes nothing, so a benchmark.json already in the iteration is
+# an earlier aggregation's: say so, or it reads as this one's.
+not_aggregated() { # $1 why, or nothing
+  echo "benchmark: $iter is not aggregated${1:+ — $1}" >&2
+  [ ! -f "$iter/benchmark.json" ] \
+    || echo "benchmark: $iter/benchmark.json is from an earlier aggregation and is left as it was" >&2
+  exit 2
+}
+
+# Every arm directory is one run or run-<k>/ directories: lab_arm_runs says
+# which. A directory with no run- entry is one run; the ones it refuses
+# (lib/common.sh names them) leave the iteration not aggregated.
+for e in "$iter"/*/; do
+  [ -d "$e" ] || continue
+  for a in with_skill "$second_arm"; do
+    [ ! -d "$e$a" ] || lab_arm_runs "$e$a" >/dev/null || not_aggregated
+  done
+done
+
 identity='{}'
 if [ -f "$iter/identity.json" ] && ! identity="$(jq -cse \
-    'if length == 1 and (.[0] | type) == "object" then .[0] else error("not one object") end' \
+    'if length == 1 and (.[0] | type) == "object"
+        and (.[0].runs_per_eval | . == null or (type == "number" and . >= 1 and . == floor))
+      then .[0] else error("not one identity") end' \
     "$iter/identity.json" 2>/dev/null)"; then
   identity='{}'
-  echo "benchmark: $iter/identity.json is unreadable — this iteration's identity is null" >&2
+  echo "benchmark: $iter/identity.json is unreadable (not one JSON object, or a runs_per_eval that is not a positive integer) — this iteration's identity is null" >&2
 fi
 
-# One row per eval and arm, in eval order then arm order.
+# One row per eval, arm and run, in eval order, then arm order, then run order.
 runs="$(for e in "$iter"/*/; do
   [ -d "$e" ] || continue
   for a in with_skill "$second_arm"; do
-    d="$e$a"
-    [ -d "$d" ] || continue
-    bad=""; g='{}'; t='null'
-    if [ ! -f "$d/grading.json" ]; then bad="grading.json missing"
-    elif ! g="$(jq -ce '.summary | objects' "$d/grading.json" 2>/dev/null)"; then
-      g='{}'; bad="grading.json unreadable"
-    fi
-    if [ -f "$d/timing.json" ] && ! t="$(jq -ce 'objects
-        | select(all(.duration_ms, .total_tokens; . == null or type == "number"))' "$d/timing.json" 2>/dev/null)"; then
-      t='null'; bad="${bad:+$bad; }timing.json unreadable"
-    fi
-    [ -z "$bad" ] || g="$(jq -nc --arg r "$bad" '{outcome: "indeterminate", reason: $r}')"
-    jq -nc --arg eval "$(basename "$e")" --arg arm "$a" --argjson g "$g" --argjson t "$t" '
-      {eval_id: $eval, configuration: $arm, outcome: ($g.outcome // "ok"),
-       reason: $g.reason, pass_rate: $g.pass_rate, passed: $g.passed, failed: $g.failed,
-       needs_review: $g.needs_review, total: $g.total,
-       time_seconds: (if $t == null then null else (($t.duration_ms // 0) / 1000) end),
-       tokens: (if $t == null then null else $t.total_tokens end)}'
+    [ -d "$e$a" ] || continue
+    while read -r k d; do
+      bad=""; g='{}'; t='null'
+      if [ ! -f "$d/grading.json" ]; then bad="grading.json missing"
+      elif ! g="$(jq -ce '.summary | objects' "$d/grading.json" 2>/dev/null)"; then
+        g='{}'; bad="grading.json unreadable"
+      fi
+      if [ -f "$d/timing.json" ] && ! t="$(jq -ce 'objects
+          | select(all(.duration_ms, .total_tokens; . == null or type == "number"))' "$d/timing.json" 2>/dev/null)"; then
+        t='null'; bad="${bad:+$bad; }timing.json unreadable"
+      fi
+      [ -z "$bad" ] || g="$(jq -nc --arg r "$bad" '{outcome: "indeterminate", reason: $r}')"
+      jq -nc --arg eval "$(basename "$e")" --arg arm "$a" --argjson k "$k" --argjson g "$g" --argjson t "$t" '
+        {eval_id: $eval, configuration: $arm, run_number: $k, outcome: ($g.outcome // "ok"),
+         reason: $g.reason, pass_rate: $g.pass_rate, passed: $g.passed, failed: $g.failed,
+         needs_review: $g.needs_review, total: $g.total,
+         time_seconds: (if $t == null then null else (($t.duration_ms // 0) / 1000) end),
+         tokens: (if $t == null then null else $t.total_tokens end)}'
+    done < <(lab_arm_runs "$e$a")
   done
 done | jq -s .)"
+
+# Every arm directory holds N runs, numbered 1 to N: N is identity.json's
+# runs_per_eval, else the highest run number held. An iteration that holds
+# anything else is refused, and nothing is written. (An eval with no
+# directory for an arm has no rows here, so it is not looked at.)
+uneven="$(jq -rn --argjson runs "$runs" --argjson id "$identity" '
+  ($id.runs_per_eval // ([$runs[].run_number] | max) // 1) as $n
+  | $runs | group_by([.eval_id, .configuration])[]
+  | select(length != $n or (map(.run_number) | sort) != [range(1; length + 1)])
+  | "\(.[0].eval_id)/\(.[0].configuration) holds run(s) \(map(.run_number | tostring) | join(", ")), not 1 to \($n)"')" \
+  || { echo "cannot aggregate $iter" >&2; exit 2; }
+if [ -n "$uneven" ]; then
+  printf 'benchmark: %s\n' "$uneven" >&2
+  if jq -e '.runs_per_eval != null' <<<"$identity" >/dev/null; then
+    not_aggregated "identity.json says runs_per_eval is $(jq -r .runs_per_eval <<<"$identity")"
+  else
+    not_aggregated "every arm directory holds the same runs, 1 to N"
+  fi
+fi
 
 jq -n --argjson runs "$runs" --arg arm "$second_arm" --arg iter "$(basename "$iter")" \
   --argjson id "$identity" '
@@ -115,7 +180,7 @@ jq -n --argjson runs "$runs" --arg arm "$second_arm" --arg iter "$(basename "$it
                 eval_ids: ([$runs[].eval_id] | unique),
                 skill: $id.skill, harness: $id.harness,
                 harness_version: $id.harness_version, model: $id.model,
-                runs_per_eval: ($id.runs_per_eval // 1),
+                runs_per_eval: ($id.runs_per_eval // ([$runs[].run_number] | max) // 1),
                 plugin: named($id.plugin),
                 baseline: (if $arm == "old_skill" then named($id.baseline) else null end)},
      runs: $runs,
@@ -132,6 +197,8 @@ jq -r '
   def pct($total): if $total == 0 then "n/a (0 assertions)"
     elif . == null then "n/a" else "\(. * 100 | round)%" end;
   .metadata.configurations as $c | .run_summary as $s
+  # The run column appears only when an arm was repeated.
+  | (any(.runs[]; .run_number > 1)) as $rep
   | "# Benchmark: \(.metadata.iteration)", "",
     "## Summary", "",
     "| configuration | pass rate | time (s) | tokens | indeterminate |",
@@ -143,9 +210,9 @@ jq -r '
     "A null pass rate (an indeterminate run, or an eval with no assertions) is left out of the mean.",
     "",
     "## Per-Eval Breakdown", "",
-    "| eval | configuration | outcome | pass rate | passed | failed | needs review | time (s) | tokens |",
-    "|---|---|---|---|---|---|---|---|---|",
-    (.runs[] | "| \(.eval_id) | \(.configuration) | \(.outcome) | \(.total as $n | .pass_rate | pct($n)) | \(.passed | num) | \(.failed | num) | \(.needs_review | num) | \(.time_seconds | num) | \(.tokens | num) |")
+    "| eval | configuration |\(if $rep then " run |" else "" end) outcome | pass rate | passed | failed | needs review | time (s) | tokens |",
+    "|---|---|\(if $rep then "---|" else "" end)---|---|---|---|---|---|---|",
+    (.runs[] | "| \(.eval_id) | \(.configuration) |\(if $rep then " \(.run_number) |" else "" end) \(.outcome) | \(.total as $n | .pass_rate | pct($n)) | \(.passed | num) | \(.failed | num) | \(.needs_review | num) | \(.time_seconds | num) | \(.tokens | num) |")
 ' "$iter/benchmark.json" > "$iter/benchmark.md" || { echo "cannot write $iter/benchmark.md" >&2; exit 2; }
 
 # A row the records could not support is counted apart and fails the exit.

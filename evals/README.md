@@ -19,6 +19,8 @@ directory, then copies a case's `files` entries on top (paths relative to
 `evals/<skill>/`, never escaping it), and seeds the result as one git
 commit. Assertions are graded against what the arm produced there:
 `[check:<verb> <args>]` ones mechanically, prose ones as `needs_review`.
+`--runs N` repeats every case N times per arm, each repetition staged and
+graded on its own.
 
 `bin/check` validates every set's shape and that each path a prompt names
 exists under `files/`. Writing a set: `docs/authoring.md`. Running one —

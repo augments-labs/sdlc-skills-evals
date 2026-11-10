@@ -69,11 +69,34 @@ bin/evaluate --harness opencode --skill yagni
 ```
 
 Outputs land in `workspaces/<campaign>/` (default campaign
-`evaluate-<skill>`), one `iteration-<N>/` per run: per eval and arm the
-produced `outputs/`, `run_status.json`, `timing.json`, and `grading.json`,
-then `identity.json`, `benchmark.json`, `benchmark.md`, and an empty
-`feedback.json` for your review. `--baseline-plugin` pairs the skill
-against an older plugin tree (`old_skill`) instead of no skill.
+`evaluate-<skill>`), one `iteration-<N>/` per `bin/evaluate` call: per eval
+and arm the produced `outputs/`, `run_status.json`, `timing.json`, and
+`grading.json`, then `identity.json`, `benchmark.json`, `benchmark.md`, and
+an empty `feedback.json` for your review. `--baseline-plugin` pairs the
+skill against an older plugin tree (`old_skill`) instead of no skill.
+
+`--runs N` runs each eval N times per arm (default 1): evals x 2 arms x N
+calls, which the dry run prints. Above 1, each repetition keeps its files
+under `<arm>/run-<k>/`, and each `runs[]` row of `benchmark.json` carries
+its `run_number`. The mean and stddev of a configuration are over all of
+its scored runs. With one run the stddev means nothing; a record uses 3:
+
+```bash
+bin/evaluate --harness opencode --skill yagni --runs 3 --dry-run
+bin/evaluate --harness opencode --skill yagni --runs 3
+```
+
+An arm is one run or `run-1/` to `run-N/`, never both. `bin/grade` and
+`bin/benchmark` refuse (exit 2, naming it) an arm that holds
+`eval-case.json`, `outputs/`, `run_status.json`, `grading.json` or
+`timing.json` beside `run-<k>/` (a run's `git-changed.txt`, `stream.txt`
+and `stderr.txt` are not looked at), or a `run-` name `bin/evaluate` does
+not write. `bin/benchmark` also writes nothing unless every arm directory
+in the iteration holds runs 1 to N: N is `identity.json`'s `runs_per_eval`,
+else the highest run number the iteration holds. After either refusal a
+`benchmark.json` and `benchmark.md` from an earlier aggregation are left
+as they were, and the refusal says the `benchmark.json` is the earlier
+one.
 
 `identity.json` says what the iteration measured, and `bin/benchmark`
 copies it into `benchmark.json`'s `metadata`: the skill, the harness, its
@@ -101,7 +124,8 @@ bin/evaluate --harness opencode --skill yagni --grade-with-harness
 
 After you edit assertions, re-grade an arm offline, re-aggregate, and
 promote the iteration to a record (`--harness` on `bin/grade` is the live
-rubric grader, one call per arm with prose):
+rubric grader, one call per arm run with prose; given an arm that holds
+`run-<k>/` directories, `bin/grade` grades each of them):
 
 ```bash
 bin/grade workspaces/evaluate-yagni/iteration-1/<eval-id>/with_skill

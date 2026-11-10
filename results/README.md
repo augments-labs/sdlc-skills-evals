@@ -14,17 +14,26 @@ record, and refuses — copying nothing — if any target already exists:
 
 - `benchmark.json` — per configuration (`with_skill` and `without_skill`,
   or `old_skill`): `pass_rate`, `time_seconds`, and `tokens` as mean ±
-  stddev over the scored runs, `indeterminate_count`, and the delta between
-  the two configurations. An `indeterminate` arm has a null pass rate and
-  stays out of the mean. Its `metadata` says what was measured: `skill`,
+  stddev over all scored runs of that configuration, `indeterminate_count`,
+  and the delta between the two configurations. An `indeterminate` arm has
+  a null pass rate and stays out of the mean. `runs[]` holds one row per
+  eval, configuration and run, each with its `run_number` (1 to
+  `runs_per_eval`). Its `metadata` says what was measured: `skill`,
   `harness`, `harness_version` (null when the adapter reads none),
   `model` (the one every session named; null when the adapter reads none,
   a session named none, or two disagreed — never a guess),
-  `runs_per_eval`, `plugin` — `{commit, skill_tree}` for `with_skill` —
+  `runs_per_eval` (the `--runs` of the iteration), `plugin` —
+  `{commit, skill_tree}` for `with_skill` —
   and `baseline`, the same pair for `old_skill` and null for
   `without_skill`.
 - `benchmark.md` — the same table, rendered.
 - `feedback.json` — your review of the outputs (`{"reviews": [...]}`).
+
+With one run the stddev means nothing: it is the spread between the evals,
+not between runs of the same eval. A record uses 3
+(`bin/evaluate --runs 3`). `bin/benchmark` writes a `benchmark.json` only
+for an iteration where every arm directory holds runs 1 to
+`runs_per_eval`.
 
 `commit` is the full commit the arm's tree came from: the one a reference
 was archived from, or `HEAD` of a directory. `skill_tree` is the git tree
