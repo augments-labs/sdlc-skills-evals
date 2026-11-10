@@ -1,0 +1,112 @@
+[
+  {
+    "split": "train",
+    "should_trigger": true,
+    "query": "What does cents(0.615) in src/utils/money.ts return, 61 or 62?"
+  },
+  {
+    "split": "train",
+    "should_trigger": true,
+    "query": "Does handle() in src/server.js match a request whose method is lowercase 'get', or does it fall through to the 404?"
+  },
+  {
+    "split": "train",
+    "should_trigger": true,
+    "query": "In src/apikeys.js, which branch of resolve() runs for the header 'bearer abc' with a lowercase b?"
+  },
+  {
+    "split": "train",
+    "should_trigger": true,
+    "query": "What does poolSize resolve to at runtime when it is imported through src/config/index.ts?"
+  },
+  {
+    "split": "train",
+    "should_trigger": true,
+    "query": "I want to write in the review that building the route key with a template string in src/server.js is slower than joining an array. Is it?"
+  },
+  {
+    "split": "train",
+    "should_trigger": true,
+    "query": "With the Node version installed here, does node:test count a test that returns a rejected promise as failed?"
+  },
+  {
+    "split": "validation",
+    "should_trigger": true,
+    "query": "What does total() in src/checkout.js return when the order has no subtotal?"
+  },
+  {
+    "split": "validation",
+    "should_trigger": true,
+    "query": "Is a null argument handled by importCsv in src/import/csv.js, or does it throw?"
+  },
+  {
+    "split": "validation",
+    "should_trigger": true,
+    "query": "The second test in test/server.test.js gets { ok: true } back. Which code path in src/server.js produces that body?"
+  },
+  {
+    "split": "validation",
+    "should_trigger": true,
+    "query": "Before I tell the team the Map in src/apikeys.js uses less memory than a plain object would for ten thousand keys: does it?"
+  },
+  {
+    "split": "train",
+    "should_trigger": false,
+    "query": "Why is the 404 body in src/server.js an object with an error field rather than a plain string? What was the thinking behind it?",
+    "expect": "none"
+  },
+  {
+    "split": "train",
+    "should_trigger": false,
+    "query": "Requests that used to reach a handler in src/server.js started coming back 404 in staging this morning and nobody knows why. Find the cause.",
+    "expect": "debugging"
+  },
+  {
+    "split": "train",
+    "should_trigger": false,
+    "query": "We have no rate limiter yet. Spike two ways of building one, a token bucket and a sliding window, so we can see which is simpler.",
+    "expect": "prototyping"
+  },
+  {
+    "split": "train",
+    "should_trigger": false,
+    "query": "When was poolSize in src/config/database.ts set to 10, and in which commit?",
+    "expect": "none"
+  },
+  {
+    "split": "train",
+    "should_trigger": false,
+    "query": "Should handle in src/server.js be called dispatch instead? Which name reads better next to route?",
+    "expect": "coding-standards"
+  },
+  {
+    "split": "train",
+    "should_trigger": false,
+    "query": "Add a tax line to total() in src/checkout.js: 20% of the subtotal, rounded to the cent.",
+    "expect": "test-driven-development"
+  },
+  {
+    "split": "validation",
+    "should_trigger": false,
+    "query": "Should src/config/index.ts re-export every setting or only the ones other modules use? What is the better design?",
+    "expect": "none"
+  },
+  {
+    "split": "validation",
+    "should_trigger": false,
+    "query": "Imports through src/import/csv.js drop the last row for some files in staging and we can't tell what changed.",
+    "expect": "debugging"
+  },
+  {
+    "split": "validation",
+    "should_trigger": false,
+    "query": "There is no cache in front of resolve() in src/apikeys.js. Build a throwaway one to find out whether an LRU is worth having.",
+    "expect": "prototyping"
+  },
+  {
+    "split": "validation",
+    "should_trigger": false,
+    "query": "Who introduced the legacy invoice module in src/legacy/invoice.js, and what does the history say it replaced?",
+    "expect": "none"
+  }
+]

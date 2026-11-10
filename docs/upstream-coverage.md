@@ -2,9 +2,8 @@
 
 This record answers two questions for whoever picks the lab up next.
 
-1. **What has to be covered?** The pinned upstream: the 48 canonical skills
-   the inventory holds, of the 49 at the pin, and 11 harnesses, at one
-   commit. `config/upstream-inventory.json` holds the
+1. **What has to be covered?** The pinned upstream: 49 canonical skills and
+   11 harnesses, at one commit. `config/upstream-inventory.json` holds the
    pin; `bin/check` enforces it offline.
 2. **What of the earlier plan is already built?** Every task of the
    predecessor plan, mapped to preserved, extended or removed scope, with
@@ -25,7 +24,7 @@ which.
 | Repository | `https://github.com/augments-labs/sdlc-skills` |
 | Commit | `c1e995a0371b11271b1d9a393e89fb2f345b2611` — a commit, not a mutable version tag |
 | Package version | `12.0.0` |
-| Canonical skills | 48 of the 49 at `skills/<phase>/<name>/SKILL.md`; the inventory holds the bare `<name>`. The 49th, `runtime-evidence`, is new in `12.0.0` and joins the inventory together with its eval set and query set, which the gate requires of every skill it holds |
+| Canonical skills | 49, at `skills/<phase>/<name>/SKILL.md`; the inventory holds the bare `<name>` |
 | Upstream harnesses | 11, at `tests/harnesses/<name>.sh` |
 
 The packaged mirror under `plugins/sdlc-skills/skills/` carries the same
@@ -64,13 +63,12 @@ obligation. `bin/check` fails when a task in this table has no verdict.
 Rows E-2, E-4, E-8 and E-10 describe the lab before the behavior runner, its
 scenarios and manifests, `bin/campaign`, `lib/verdict.sh` and
 `lib/prelude.sh` were retired by the agentskills.io alignment, and "46
-skills" in E-5 and E-7 is that pin's count; the inventory holds 48. E-0's
+skills" in E-5 and E-7 is that pin's count; the inventory holds 49. E-0's
 "the committed inventory names the v11 commit", E-5's "the pinned v11
 bodies" and E-7's "every skill in the pin now carries a definition" were
 true of the pin of that time, as is each "the v11 body of" or "the v11
-bodies of" cell of the corpus audit; the pin is now `12.0.0`, the inventory
-names its commit, and one skill at it has no definition yet (the gaps
-section below). The rows stay as written: they are provenance.
+bodies of" cell of the corpus audit; the pin is now `12.0.0` and the
+inventory names its commit. The rows stay as written: they are provenance.
 
 Work after the tasks themselves: the independent review fixes (`5b15240`),
 the pull-request feedback round (`2d15beb`) and the merge of the whole lab
@@ -104,18 +102,16 @@ now in the user's hands.
 `bin/check` prints the three asset lists on every run that reaches the
 pinned-scope section — the last section of the full gate — so a run that
 fails earlier prints none of them; the lists below are their state at this
-commit. The lists are computed from the inventory, and for it the two skill
-gaps are closed: every skill the inventory holds carries a description set
-and an output-eval definition. The 49th skill at the pin,
-`runtime-evidence`, is not in the inventory yet and has neither; no list
-below names it. The old evals-coverage gate
-was a reported gap list so the initial coverage could be recorded without a
-red cell — the plan's own clause permits it ("Initial coverage may record
-missing assets; V3-CORPORA closes them", `01-inventory.md`) — and the last
-definition has now landed, so the list is a **failure** again: a missing
-asset fails the gate, and the lists are printed before it stops so a reader
-sees what is missing. V3-CORPORA closed the two skill gaps and V3-HARNESSES
-the adapter gap.
+commit. The lists are computed from the inventory, which names every skill
+at the pin, and the two skill gaps are closed: every skill the inventory
+holds carries a description set and an output-eval definition. The old
+evals-coverage gate was a reported gap list so the initial coverage could be
+recorded without a red cell — the plan's own clause permits it ("Initial
+coverage may record missing assets; V3-CORPORA closes them",
+`01-inventory.md`) — and the last definition has now landed, so the list is
+a **failure** again: a missing asset fails the gate, and the lists are
+printed before it stops so a reader sees what is missing. V3-CORPORA closed
+the two skill gaps and V3-HARNESSES the adapter gap.
 
 ### Skills with no eval definition (0)
 
@@ -146,9 +142,10 @@ A rate is only comparable with a rate measured against the same entries in
 the same splits, so the per-entry split of every retained set is frozen
 here and `bin/check` compares each set against it: an entry that moves
 between `train` and `validation` fails the gate. The two sets the `v11.2.0`
-pin added, `brainstorming` and `eliminating-corrections`, have no earlier
-assignment and are not frozen. Sets are keyed by the bare skill name, the
-way the corpus stores them at `descriptions/<skill>.json`.
+pin added, `brainstorming` and `eliminating-corrections`, and the one the
+`12.0.0` pin added, `runtime-evidence`, have no earlier assignment and are
+not frozen. Sets are keyed by the bare skill name, the way the corpus stores
+them at `descriptions/<skill>.json`.
 
 The block below is the data the gate reads. `frozen_splits` maps a skill to
 one letter per entry, in the set's order: `T` is `train`, `V` is
@@ -209,7 +206,8 @@ holdout cannot simply be placed in the corpus before the selection step.
   },
   "new_sets": [
     "brainstorming",
-    "eliminating-corrections"
+    "eliminating-corrections",
+    "runtime-evidence"
   ],
   "selections": {}
 }
@@ -224,8 +222,10 @@ near-miss negatives, and an output-eval definition of two or three cases
 with its own fixture tree. A row is not a name: it links the upstream body
 the corpus was written against, the positives, the near misses, the output
 case that bounds the skill, and the inputs the corpus stages for it.
-`12.0.0` changed the body of every one of the 48 skills, and no set has been
-re-checked against the new bodies yet.
+`12.0.0` changed the body of every one of the 48 skills the earlier pin
+held, and none of their sets has been re-checked against the new bodies yet.
+The `runtime-evidence` row is new with `12.0.0`: its two corpora were
+written against the skill's body at the pin.
 
 Two staged-input trees exist, and they are different things. The
 **description-query tree** is what `bin/triggering` seeds each run with
@@ -282,6 +282,7 @@ design or ask rather than presuppose an artefact.
 | `reviewing-a-pr` | `skills/testing/reviewing-a-pr/SKILL.md` | 10 | 10 | 3 — `own-pr` | `evals/reviewing-a-pr/files/` (8 files: `README.md`, `package.json`, `src`, `test`); queries name no path |
 | `reviewing-plans` | `skills/design/reviewing-plans/SKILL.md` | 10 | 10 | 3 — `unwritten-plan` | `evals/reviewing-plans/files/` (9 files: `README.md`, `package.json`, `plans`, `src`); queries name `.sdlc-skills` |
 | `rollout-controls` | `skills/implementation/rollout-controls/SKILL.md` | 10 | 10 | 3 — `declined-rollout` | `evals/rollout-controls/files/` (8 files: `README.md`, `config`, `ops`, `package.json`, `src`); queries name no path |
+| `runtime-evidence` | `skills/common/runtime-evidence/SKILL.md` | 10 | 10 | 3 — `naming-question-not-behavior` | `evals/runtime-evidence/files/` (9 files: `README.md`, `config`, `package.json`, `src`, `test`); queries name `src`, `test` |
 | `scoping` | `skills/planning/scoping/SKILL.md` | 10 | 10 | 2 — `midstream-growth` | `evals/scoping/files/` (2 files: `README.md`, `package.json`); queries name no path |
 | `security-audits` | `skills/testing/security-audits/SKILL.md` | 10 | 10 | 2 — `comment-only` | `evals/security-audits/files/` (5 files: `README.md`, `package.json`, `src`); queries name no path |
 | `subagent-driven-development` | `skills/implementation/subagent-driven-development/SKILL.md` | 10 | 10 | 2 — `breaker-trips` | `evals/subagent-driven-development/files/` (10 files: `README.md`, `evidence`, `package.json`, `plans`, `src`); queries name `.sdlc-skills` |

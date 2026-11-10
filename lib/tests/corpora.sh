@@ -137,9 +137,10 @@ while IFS= read -r sk; do
   fi
 done < <(jq -r '.skills[]' "$INV")
 
-# the two sets v11.2.0 added never name their own skill: a query or a prompt
-# that says the skill's name tests the name, not the description
-for sk in brainstorming eliminating-corrections; do
+# the two sets v11.2.0 added and the one 12.0.0 added never name their own
+# skill: a query or a prompt that says the skill's name tests the name, not
+# the description
+for sk in brainstorming eliminating-corrections runtime-evidence; do
   named=0
   if [ -f "descriptions/$sk.json" ] \
       && jq -r '.[].query' "descriptions/$sk.json" | grep -qiF "$sk"; then named=1; fi

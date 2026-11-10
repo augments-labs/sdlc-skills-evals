@@ -1,0 +1,9 @@
+{
+  "name": "notify-service",
+  "version": "0.1.0",
+  "private": true,
+  "main": "src/http/client.js",
+  "scripts": {
+    "test": "node --test"
+  }
+}

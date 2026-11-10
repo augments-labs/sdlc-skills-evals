@@ -116,15 +116,20 @@ if jq -e --arg c "$PIN_COMMIT" --arg v "$PIN_VERSION" \
 else
   bad "the inventory pins $PIN_COMMIT ($PIN_VERSION) (has $(jq -r '.upstream.commit + " " + .upstream.version' "$INV" 2>/dev/null))"
 fi
-if jq -e '(.skills | length) == 48 and all(.skills[]; test("^[a-z0-9][a-z0-9-]*$"))' "$INV" >/dev/null 2>&1; then
-  ok "the inventory holds 48 bare skill names"
+if jq -e '(.skills | length) == 49 and all(.skills[]; test("^[a-z0-9][a-z0-9-]*$"))' "$INV" >/dev/null 2>&1; then
+  ok "the inventory holds 49 bare skill names"
 else
-  bad "the inventory holds 48 bare skill names (has $(jq '.skills | length' "$INV" 2>/dev/null), first $(jq -r '.skills[0]' "$INV" 2>/dev/null))"
+  bad "the inventory holds 49 bare skill names (has $(jq '.skills | length' "$INV" 2>/dev/null), first $(jq -r '.skills[0]' "$INV" 2>/dev/null))"
 fi
 if jq -e '(.skills | index("brainstorming")) != null and (.skills | index("eliminating-corrections")) != null' "$INV" >/dev/null 2>&1; then
   ok "the inventory holds the two skills v11.2.0 added"
 else
   bad "the inventory holds the two skills v11.2.0 added (brainstorming, eliminating-corrections)"
+fi
+if jq -e '(.skills | index("runtime-evidence")) != null' "$INV" >/dev/null 2>&1; then
+  ok "the inventory holds the skill 12.0.0 added"
+else
+  bad "the inventory holds the skill 12.0.0 added (runtime-evidence)"
 fi
 if jq -e '(.harnesses | length) == 11' "$INV" >/dev/null 2>&1; then
   ok "the inventory holds the 11 upstream harnesses"

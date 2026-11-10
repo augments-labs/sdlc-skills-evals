@@ -1,0 +1,4 @@
+{
+  "httpTimeoutMs": 1500,
+  "retries": 2
+}
