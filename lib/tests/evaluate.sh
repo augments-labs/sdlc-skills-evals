@@ -581,6 +581,71 @@ printf '%s\n' "$dry_id" | grep -q '^identity : with_skill unidentified.*bin/repo
   && ok "the dry run prints one identity line per arm that installs a plugin, none for without_skill" \
   || bad "the dry run prints one identity line per arm that installs a plugin, none for without_skill"
 
+# --- --runs N: each eval and arm is repeated N times --------------------------
+
+dry3="$(dry --plugin "$with_plug" --runs 3)"
+printf '%s' "$dry3" | grep -qE '(^|[^0-9])18 calls' \
+  && printf '%s\n' "$dry3" | grep -qx 'budget   : 3 eval(s) x 2 arms x 3 runs = 18 arm calls' \
+  && ok "the dry run prices evals x arms x runs" || bad "the dry run prices evals x arms x runs (got '$dry3')"
+printf '%s' "$(dry --plugin "$with_plug" --runs 3 --grade-with-harness)" | grep -qE '(^|[^0-9])24 calls' \
+  && ok "the dry run prices one rubric call per arm with prose, per run" \
+  || bad "the dry run prices one rubric call per arm with prose, per run"
+[ "$(dry --plugin "$with_plug" --runs 1)" = "$dry_out" ] \
+  && [ "$(dry --plugin "$with_plug" --runs 1 --grade-with-harness)" = "$(dry --plugin "$with_plug" --grade-with-harness)" ] \
+  && ok "--runs 1 plans what no --runs plans, to the byte" || bad "--runs 1 plans what no --runs plans, to the byte"
+bad_runs=""
+for v in 0 x -1 1.5 ''; do
+  dry --plugin "$with_plug" --runs "$v" >/dev/null; [ "$?" -eq 2 ] || bad_runs="$bad_runs '$v'"
+done
+[ -z "$bad_runs" ] && ok "--runs needs a positive integer" || bad "--runs needs a positive integer (accepted:$bad_runs)"
+"$ev" --help | grep -q -- '--runs N' && ok "--help names --runs" || bad "--help names --runs"
+
+idrun runs2 --plugin "$gitplug" --runs 2; rc=$?
+rit="$(idit runs2)"
+missing=""
+for a in with_skill without_skill; do
+  for k in 1 2; do
+    for f in eval-case.json timing.json run_status.json grading.json outputs/response.txt; do
+      [ -e "$rit/nested-files/$a/run-$k/$f" ] || missing="$missing $a/run-$k/$f"
+    done
+  done
+  [ ! -e "$rit/nested-files/$a/grading.json" ] && [ ! -e "$rit/nested-files/$a/outputs" ] \
+    && [ ! -e "$rit/nested-files/$a/run-3" ] || missing="$missing $a:stray"
+done
+[ "$rc" -eq 0 ] && [ -z "$missing" ] && ok "--runs 2 writes each repetition under <arm>/run-<k>/" \
+  || bad "--runs 2 writes each repetition under <arm>/run-<k>/ (rc $rc; missing:$missing; $(tail -3 "$work/runs2/out"))"
+[ "$(grep -c . "$work/runs2/hook.log" 2>/dev/null)" = 4 ] \
+  && [ "$(grep -c "^install $gitplug\$" "$work/runs2/launch.log" 2>/dev/null)" = 2 ] \
+  && ok "--runs 2 makes evals x arms x 2 calls" \
+  || bad "--runs 2 makes evals x arms x 2 calls ($(grep -c . "$work/runs2/hook.log" 2>/dev/null) sessions)"
+jq -e '.runs_per_eval == 2' "$rit/identity.json" >/dev/null 2>&1 \
+  && jq -e '.metadata.runs_per_eval == 2 and (.runs | length) == 4
+    and ([.runs[] | [.configuration, .run_number]]
+         == [["with_skill", 1], ["with_skill", 2], ["without_skill", 1], ["without_skill", 2]])
+    and all(.runs[]; .outcome == "ok" and .pass_rate == 1)
+    and .run_summary.with_skill.pass_rate == {mean: 1, stddev: 0}' "$rit/benchmark.json" >/dev/null 2>&1 \
+  && ok "the benchmark holds one numbered row per run, and runs_per_eval is N" \
+  || bad "the benchmark holds one numbered row per run, and runs_per_eval is N ($(jq -c '[.metadata.runs_per_eval, .runs]' "$rit/benchmark.json" 2>&1))"
+report_to runs2; rc=$?
+[ "$rc" -eq 0 ] && jq -e '.metadata.runs_per_eval == 2' "$work/runs2/record/benchmark.json" >/dev/null 2>&1 \
+  && ok "a repeated iteration is recorded like any other" || bad "a repeated iteration is recorded like any other (rc $rc)"
+
+# --runs 1 is the layout and the output of no --runs
+idrun runs1 --plugin "$gitplug" --runs 1; rc1=$?
+idrun runs0 --plugin "$gitplug"; rc0=$?
+tree_of() { ( cd "$(idit "$1")" && find . | sort ); }
+said() { sed -e "s#$work/$1/#W/#g" -e "s#/$1/#/T/#g" "$work/$1/out"; }
+[ "$rc1" -eq 0 ] && [ "$rc0" -eq 0 ] && [ "$(tree_of runs1)" = "$(tree_of runs0)" ] \
+  && [ -z "$(find "$(idit runs1)" -name 'run-*')" ] \
+  && [ -f "$(idit runs1)/nested-files/with_skill/grading.json" ] \
+  && ok "--runs 1 keeps the single-run layout" || bad "--runs 1 keeps the single-run layout (rc $rc1/$rc0)"
+[ "$(said runs1)" = "$(said runs0)" ] && [ -s "$work/runs1/out" ] \
+  && ok "--runs 1 says what no --runs says" \
+  || bad "--runs 1 says what no --runs says ($(diff <(said runs1) <(said runs0) | head -4))"
+jq -e '.runs_per_eval == 1' "$(idit runs1)/identity.json" >/dev/null 2>&1 \
+  && jq -e 'all(.runs[]; .run_number == 1)' "$(idit runs1)/benchmark.json" >/dev/null 2>&1 \
+  && ok "a single run is run 1 of 1" || bad "a single run is run 1 of 1"
+
 [ ! -s "$own_trip" ] && ok "no real agent CLI was called" || bad "no real agent CLI was called ($(cat "$own_trip"))"
 
 exit "$fails"
