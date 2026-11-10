@@ -13,9 +13,12 @@ Each arm's `run_status.json` says whether it measured anything
 `--runs N` above 1 an arm's files are per repetition, in
 `<arm>/run-<k>/`, and `benchmark.json`'s `runs[].run_number` names the
 repetition a row came from. `bin/benchmark` exits `2` and writes nothing,
-with "`<eval>/<arm>` holds run(s) 1, 3, not 1 to 3", when an arm lacks a
-repetition (a run that was interrupted, a directory that was removed):
-the iteration is not N runs per eval, so run it again as a new iteration.
+with "`<eval>/<arm>` holds run(s) 1, 3, not 1 to 3", when an arm directory
+lacks a repetition (a run that was interrupted, a `run-<k>/` that was
+removed): the iteration is not N runs per eval, so run it again as a new
+iteration. A `benchmark.json` already there is the earlier aggregation's,
+and the message says so. An eval whose whole arm directory is gone is not
+refused: `runs[]` has no row for that eval and arm.
 
 1. **Unrunnable harness.** `bin/evaluate` exits `2` before any run with
    "harness X is unrunnable here (reason)": its adapter says `runnable=no`.

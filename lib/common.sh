@@ -33,11 +33,14 @@ lab_changed_files() { # $1 work tree $2 base commit
 
 # The runs of one arm directory, one per line as "<run number> <dir>", in
 # number order: the arm itself as run 1, or its run-<k>/ directories when
-# bin/evaluate repeated the arm (--runs N above 1). An arm is one or the
-# other. Return 2, the reason on stderr and nothing on stdout, for a name
-# that begins run- and is not run-<k> (k digits, counted from 1, no leading
-# zero), for a run-<k> that is not a directory, and for run-<k>/ beside a
-# run's own files. The numbers are text here, never shell arithmetic.
+# bin/evaluate repeated the arm (--runs N above 1). A directory with no
+# run- entry comes back as run 1 whatever it holds. Return 2, the reason on
+# stderr and nothing on stdout, for a name that begins run- and is not
+# run-<k> (k digits, counted from 1, no leading zero), for a run-<k> that is
+# not a directory (a symlink to one counts as one), and for run-<k>/ beside
+# one of a run's own files: eval-case.json, outputs, run_status.json,
+# grading.json, timing.json. The numbers are text here, never shell
+# arithmetic.
 lab_arm_runs() { # $1 arm dir
   local arm="${1%/}" r k f out=""
   for r in "$arm"/run-*; do

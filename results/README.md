@@ -32,7 +32,8 @@ record, and refuses — copying nothing — if any target already exists:
 With one run the stddev means nothing: it is the spread between the evals,
 not between runs of the same eval. A record uses 3
 (`bin/evaluate --runs 3`). `bin/benchmark` writes a `benchmark.json` only
-for an iteration where every eval and arm holds runs 1 to `runs_per_eval`.
+for an iteration where every arm directory holds runs 1 to
+`runs_per_eval`.
 
 `commit` is the full commit the arm's tree came from: the one a reference
 was archived from, or `HEAD` of a directory. `skill_tree` is the git tree

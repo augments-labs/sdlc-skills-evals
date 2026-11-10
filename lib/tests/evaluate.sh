@@ -628,7 +628,7 @@ jq -e '.runs_per_eval == 2' "$rit/identity.json" >/dev/null 2>&1 \
   || bad "the benchmark holds one numbered row per run, and runs_per_eval is N ($(jq -c '[.metadata.runs_per_eval, .runs]' "$rit/benchmark.json" 2>&1))"
 report_to runs2; rc=$?
 [ "$rc" -eq 0 ] && jq -e '.metadata.runs_per_eval == 2' "$work/runs2/record/benchmark.json" >/dev/null 2>&1 \
-  && ok "a repeated iteration is recorded like any other" || bad "a repeated iteration is recorded like any other (rc $rc)"
+  && ok "bin/report records a repeated iteration, runs_per_eval with it" || bad "bin/report records a repeated iteration, runs_per_eval with it (rc $rc)"
 
 # --runs 1 is the layout and the output of no --runs
 idrun runs1 --plugin "$gitplug" --runs 1; rc1=$?

@@ -7,8 +7,10 @@ so no test needs a sibling plugin checkout or a live CLI.
 - `common.sh` — `log`, `die`, `require_tool` (127 on the first missing
   tool), `lab_run_dir`, `lab_root`, `plugin_root`, and `lab_arm_runs
   <arm-dir>`: the arm's runs as `<run number> <dir>` lines (the arm itself
-  as run 1, or its `run-<k>/` directories in number order), or exit 2 with
-  the reason for an arm that is neither.
+  as run 1 when it holds no `run-` entry, or its `run-<k>/` directories in
+  number order), or exit 2 with the reason for a `run-` entry that is not
+  a `run-<k>/` directory (k from 1) or for `run-<k>/` beside a run's own
+  files.
 - `home-env.sh` — `lab_home_env <run-dir>` prints the per-run `HOME`,
   `XDG_*`, `TMPDIR`, and `LAB_RUN_BASE` assignments (eval them); the home
   lives under `${TMPDIR:-/tmp}/sdlc-skills-evals/<run-id>/`, never under

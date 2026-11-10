@@ -28,10 +28,12 @@
 # An arm is one run or run-<k>/ directories (k from 1, no leading zero),
 # never both: an arm holding a run's files beside run-<k>/, a run- name
 # that is not run-<k>, or a run-<k> that is not a directory is refused. So
-# is an iteration where some eval and arm does not hold exactly runs 1 to
+# is an iteration where an arm directory does not hold exactly runs 1 to
 # N: N is identity.json's runs_per_eval, else the highest run number the
-# iteration holds. A refusal names the arm, writes nothing (a benchmark.json
-# already there stays as it was), and exits 2.
+# iteration holds. An eval with no directory for an arm has no row for that
+# arm, with one run or with N: that is not refused. A refusal names the
+# arm, writes nothing, and exits 2; a benchmark.json already there stays as
+# it was, and the refusal says it is from an earlier aggregation.
 #
 # The identity fields of metadata are bin/evaluate's <iteration>/identity.json,
 # copied — except that a missing runs_per_eval is the highest run number the
@@ -79,13 +81,21 @@ done
 [ -n "$second_arm" ] && [ "$second_arm" != with_skill ] || {
   echo "no with_skill/second-arm pairs in $iter" >&2; exit 2; }
 
-# Every arm is one run or run-<k>/ directories (lab_arm_runs says which and
-# refuses the rest), or the iteration is not aggregated.
+# A refusal writes nothing, so a benchmark.json already in the iteration is
+# an earlier aggregation's: say so, or it reads as this one's.
+not_aggregated() { # $1 why, or nothing
+  echo "benchmark: $iter is not aggregated${1:+ — $1}" >&2
+  [ ! -f "$iter/benchmark.json" ] \
+    || echo "benchmark: $iter/benchmark.json is from an earlier aggregation and is left as it was" >&2
+  exit 2
+}
+
+# Every arm directory is one run or run-<k>/ directories (lab_arm_runs says
+# which and refuses the rest), or the iteration is not aggregated.
 for e in "$iter"/*/; do
   [ -d "$e" ] || continue
   for a in with_skill "$second_arm"; do
-    [ ! -d "$e$a" ] || lab_arm_runs "$e$a" >/dev/null || {
-      echo "benchmark: $iter is not aggregated" >&2; exit 2; }
+    [ ! -d "$e$a" ] || lab_arm_runs "$e$a" >/dev/null || not_aggregated
   done
 done
 
@@ -96,7 +106,7 @@ if [ -f "$iter/identity.json" ] && ! identity="$(jq -cse \
       then .[0] else error("not one identity") end' \
     "$iter/identity.json" 2>/dev/null)"; then
   identity='{}'
-  echo "benchmark: $iter/identity.json is unreadable — this iteration's identity is null" >&2
+  echo "benchmark: $iter/identity.json is unreadable (not one JSON object, or a runs_per_eval that is not a positive integer) — this iteration's identity is null" >&2
 fi
 
 # One row per eval, arm and run, in eval order, then arm order, then run order.
@@ -125,9 +135,10 @@ runs="$(for e in "$iter"/*/; do
   done
 done | jq -s .)"
 
-# One iteration is N runs of every eval and arm, numbered 1 to N: N is
-# identity.json's runs_per_eval, else the highest run number held. An
-# iteration that is anything else is refused, and nothing is written.
+# Every arm directory holds N runs, numbered 1 to N: N is identity.json's
+# runs_per_eval, else the highest run number held. An iteration that holds
+# anything else is refused, and nothing is written. (An eval with no
+# directory for an arm has no rows here, so it is not looked at.)
 uneven="$(jq -rn --argjson runs "$runs" --argjson id "$identity" '
   ($id.runs_per_eval // ([$runs[].run_number] | max) // 1) as $n
   | $runs | group_by([.eval_id, .configuration])[]
@@ -137,11 +148,10 @@ uneven="$(jq -rn --argjson runs "$runs" --argjson id "$identity" '
 if [ -n "$uneven" ]; then
   printf 'benchmark: %s\n' "$uneven" >&2
   if jq -e '.runs_per_eval != null' <<<"$identity" >/dev/null; then
-    echo "benchmark: $iter is not aggregated — identity.json says runs_per_eval is $(jq -r .runs_per_eval <<<"$identity")" >&2
+    not_aggregated "identity.json says runs_per_eval is $(jq -r .runs_per_eval <<<"$identity")"
   else
-    echo "benchmark: $iter is not aggregated — every eval and arm holds the same runs, 1 to N" >&2
+    not_aggregated "every arm directory holds the same runs, 1 to N"
   fi
-  exit 2
 fi
 
 jq -n --argjson runs "$runs" --arg arm "$second_arm" --arg iter "$(basename "$iter")" \

@@ -69,11 +69,11 @@ bin/evaluate --harness opencode --skill yagni
 ```
 
 Outputs land in `workspaces/<campaign>/` (default campaign
-`evaluate-<skill>`), one `iteration-<N>/` per run: per eval and arm the
-produced `outputs/`, `run_status.json`, `timing.json`, and `grading.json`,
-then `identity.json`, `benchmark.json`, `benchmark.md`, and an empty
-`feedback.json` for your review. `--baseline-plugin` pairs the skill
-against an older plugin tree (`old_skill`) instead of no skill.
+`evaluate-<skill>`), one `iteration-<N>/` per `bin/evaluate` call: per eval
+and arm the produced `outputs/`, `run_status.json`, `timing.json`, and
+`grading.json`, then `identity.json`, `benchmark.json`, `benchmark.md`, and
+an empty `feedback.json` for your review. `--baseline-plugin` pairs the
+skill against an older plugin tree (`old_skill`) instead of no skill.
 
 `--runs N` runs each eval N times per arm (default 1): evals x 2 arms x N
 calls, which the dry run prints. Above 1, each repetition keeps its files
@@ -87,11 +87,14 @@ bin/evaluate --harness opencode --skill yagni --runs 3
 ```
 
 An arm is one run or `run-1/` to `run-N/`, never both. `bin/grade` and
-`bin/benchmark` refuse (exit 2, naming it) an arm that holds a run's files
-beside `run-<k>/`, or a `run-` name `bin/evaluate` does not write.
-`bin/benchmark` also writes nothing unless every eval and arm holds runs 1
-to N: N is `identity.json`'s `runs_per_eval`, else the highest run number
-the iteration holds.
+`bin/benchmark` refuse (exit 2, naming it) an arm that holds one of a
+run's files (`eval-case.json`, `outputs/`, `run_status.json`,
+`grading.json`, `timing.json`) beside `run-<k>/`, or a `run-` name
+`bin/evaluate` does not write. `bin/benchmark` also writes nothing unless
+every arm directory in the iteration holds runs 1 to N: N is
+`identity.json`'s `runs_per_eval`, else the highest run number the
+iteration holds. A `benchmark.json` from an earlier aggregation is left as
+it was, and the refusal says so.
 
 `identity.json` says what the iteration measured, and `bin/benchmark`
 copies it into `benchmark.json`'s `metadata`: the skill, the harness, its

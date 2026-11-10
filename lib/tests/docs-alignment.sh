@@ -281,7 +281,7 @@ done
   || bad "lib/README.md names every lib/*.sh and nothing that is gone:$libgaps"
 check "the PR template names bin/evaluate" grep -qF 'bin/evaluate' .github/PULL_REQUEST_TEMPLATE.md
 
-# --- one run has no spread: said wherever --runs is explained ----------------
+# --- one run has no spread: said in three docs and bin/evaluate --help -------
 
 flat() { tr -s ' \n' ' '; }
 nospread=""

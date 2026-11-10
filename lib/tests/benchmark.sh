@@ -343,15 +343,52 @@ refused "$work6/uneven" "eval-b/with_skill holds run(s) 1, not 1 to 2" \
 mk_runs "$work6/huge" 2
 mv "$work6/huge/eval-a/with_skill/run-2" "$work6/huge/eval-a/with_skill/run-99999999999999999999"
 refused "$work6/huge" "eval-a/with_skill holds run(s) 1, " \
-  && ok "a run number of twenty digits is refused, not wrapped" \
-  || bad "a run number of twenty digits is refused, not wrapped ($(why))"
+  && ok "a run number of twenty digits is refused" \
+  || bad "a run number of twenty digits is refused ($(why))"
+# the right number of runs under the wrong numbers
+mk_runs "$work6/skip" 2
+for e in eval-a eval-b; do
+  for a in with_skill without_skill; do mv "$work6/skip/$e/$a/run-2" "$work6/skip/$e/$a/run-3"; done
+done
+jq -n '{skill: "probe", harness: "fake", runs_per_eval: 2}' > "$work6/skip/identity.json"
+refused "$work6/skip" "eval-a/with_skill holds run(s) 1, 3, not 1 to 2" \
+  && ok "N runs that are not numbered 1 to N are refused" \
+  || bad "N runs that are not numbered 1 to N are refused ($(why))"
+# a run-<k> that is a file
+mk_runs "$work6/file" 2
+rm -rf "$work6/file/eval-b/without_skill/run-2"; : > "$work6/file/eval-b/without_skill/run-2"
+refused "$work6/file" "eval-b/without_skill/run-2 is not a directory" \
+  && ok "a run-<k> that is not a directory is refused, and says so" \
+  || bad "a run-<k> that is not a directory is refused, and says so ($(why))"
+# a refusal leaves an earlier benchmark.json and benchmark.md as they were, and says so
+mk_runs "$work6/stale" 2
+"$here/bin/benchmark" "$work6/stale" >/dev/null 2>&1
+cp "$work6/stale/benchmark.json" "$work6/stale.json"; cp "$work6/stale/benchmark.md" "$work6/stale.md"
+rm -rf "$work6/stale/eval-b/with_skill/run-2"
+out="$("$here/bin/benchmark" "$work6/stale" 2>&1 >/dev/null)"; rc=$?
+[ "$rc" -eq 2 ] && cmp -s "$work6/stale/benchmark.json" "$work6/stale.json" && cmp -s "$work6/stale/benchmark.md" "$work6/stale.md" \
+  && printf '%s' "$out" | grep -qF "$work6/stale/benchmark.json is from an earlier aggregation and is left as it was" \
+  && ok "a refusal leaves an earlier benchmark.json as it was, and says it is the earlier one" \
+  || bad "a refusal leaves an earlier benchmark.json as it was, and says it is the earlier one (rc $rc: $out)"
+out="$("$here/bin/benchmark" "$work6/hole" 2>&1 >/dev/null)"; rc=$?
+[ "$rc" -eq 2 ] && ! printf '%s' "$out" | grep -q 'earlier aggregation' \
+  && ok "a refusal with no benchmark.json names no earlier one" \
+  || bad "a refusal with no benchmark.json names no earlier one (rc $rc: $out)"
+# an arm directory that is not there at all is skipped, as it is with one run
+mk_runs "$work6/lone" 2
+rm -rf "$work6/lone/eval-b/without_skill"
+"$here/bin/benchmark" "$work6/lone" >/dev/null 2>&1; rc=$?
+[ "$rc" -eq 0 ] && jq -e '[.runs[] | [.eval_id, .configuration]] | unique
+    == [["eval-a", "with_skill"], ["eval-a", "without_skill"], ["eval-b", "with_skill"]]' "$work6/lone/benchmark.json" >/dev/null 2>&1 \
+  && ok "an arm directory that is missing altogether is skipped, not refused" \
+  || bad "an arm directory that is missing altogether is skipped, not refused (rc $rc)"
 # a runs_per_eval that is no count names nothing: the identity is null
 notn=""
 for v in '"three"' 0 2.5 -1 true; do
   rm -rf "$work6/notn"; mk_runs "$work6/notn" 2
   jq -n --argjson v "$v" '{skill: "probe", harness: "fake", runs_per_eval: $v}' > "$work6/notn/identity.json"
   out="$("$here/bin/benchmark" "$work6/notn" 2>&1 >/dev/null)"; rc=$?
-  [ "$rc" -eq 0 ] && printf '%s' "$out" | grep -q 'identity.json is unreadable' \
+  [ "$rc" -eq 0 ] && printf '%s' "$out" | grep -qF 'identity.json is unreadable (not one JSON object, or a runs_per_eval that is not a positive integer)' \
     && jq -e '.metadata.runs_per_eval == 2 and .metadata.skill == null and .metadata.harness == null' \
          "$work6/notn/benchmark.json" >/dev/null 2>&1 || notn="$notn $v(rc $rc)"
 done

@@ -17,7 +17,8 @@
 # written beside them. The exit is the highest of theirs. A directory that
 # holds a run's files beside run-<k>/, a run- name that is not run-<k> (k
 # from 1, no leading zero), or a run-<k> that is not a directory is refused
-# (exit 2) before anything is graded.
+# (exit 2) before anything is graded. A directory with no run- entry at all
+# is graded as one run dir.
 #
 # An arm whose run_status.json says "indeterminate" measured nothing, so it
 # is not scored: its summary carries the reason and a null pass rate, and
@@ -62,14 +63,15 @@ usage: bin/grade <arm-run-dir> [--harness NAME [--harness-dir DIR] [--timeout S]
 
   <arm-run-dir>      a run's directory (eval-case.json, outputs/), or an arm
                      holding run-<k>/ directories: each one is graded. A
-                     directory holding both is refused
+                     directory holding both, or a run- entry that is not a
+                     run-<k>/ directory (k from 1), is refused
   --harness NAME     grade prose assertions with a skill-free session on NAME
                      (a live call per arm run with prose; never in CI)
   --harness-dir DIR  read the adapter from DIR instead of harnesses/
   --timeout S        the grader session's wall clock, seconds (default: 600)
 
-Exit codes: 0 graded · 2 bad arguments, a missing record, or an unrunnable
-harness · 3 the harness CLI is unavailable
+Exit codes: 0 graded · 2 bad arguments, a missing record, a refused arm
+directory, or an unrunnable harness · 3 the harness CLI is unavailable
 EOF
 }
 
@@ -89,8 +91,9 @@ done
 case "$timeout_s" in ''|*[!0-9]*|0) echo "--timeout needs a positive integer" >&2; exit 2;; esac
 
 # A repeated arm: grade each run-<k>/ in number order, and fail if any of
-# them cannot be. A directory that is neither one run nor run-<k>/
-# directories (lab_arm_runs says which) is refused before anything is graded.
+# them cannot be. A directory lab_arm_runs refuses (a run's files beside
+# run-<k>/, or a bad run- entry) is refused before anything is graded; one
+# with no run- entry is this run dir, graded below.
 arm_runs="$(lab_arm_runs "$run_dir")" || exit 2
 if [ "$arm_runs" != "1 ${run_dir%/}" ]; then
   rep_flags=(--harness-dir "$harnessdir" --timeout "$timeout_s")
