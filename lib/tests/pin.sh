@@ -2,6 +2,9 @@
 # Offline test: plugin pinning by path or ref. Builds its own throwaway
 # plugin stand-in, so no sibling checkout is needed. No live run.
 set -uo pipefail
+# git reads no user or system configuration here: one that converts files
+# (core.autocrlf=true, for example) would change what these cases check out.
+export GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_SYSTEM=/dev/null
 here="$(cd "$(dirname "$0")" && pwd)"
 # shellcheck source=../pin.sh
 source "$here/../pin.sh"
@@ -368,12 +371,52 @@ got="$(identb "$b_commit" "$ex")"
 [ "$got" = "$b_notree" ] && grep -q 'link does not hold the bytes the tree holds' "$idwork/reason" \
   && ok "a symlink to another target is not the tree's" \
   || bad "a symlink to another target is not the tree's (got '$got': $(cat "$idwork/reason"))"
+# a target is compared whole: one more newline at its end is another target
+ln -sfn $'SKILL.md\n' "$ex/skills/common/probe/link"
+got="$(identb "$b_commit" "$ex")"
+[ "$got" = "$b_notree" ] && grep -q 'link does not hold the bytes the tree holds' "$idwork/reason" \
+  && ok "a symlink whose target has a newline the tree's lacks is not the tree's" \
+  || bad "a symlink whose target has a newline the tree's lacks is not the tree's (got '$got': $(cat "$idwork/reason"))"
+nl="$idwork/nl"; mkdir -p "$nl/skills/common/probe"
+printf -- '---\nname: probe\ndescription: "probe one"\n---\n' > "$nl/skills/common/probe/SKILL.md"
+ln -s $'SKILL.md\n' "$nl/skills/common/probe/link"
+git -C "$nl" init -q
+git -C "$nl" -c user.name=t -c user.email=t@example.invalid add -A \
+  && git -C "$nl" -c user.name=t -c user.email=t@example.invalid commit -q -m one
+nl_want="$(jq -nc --arg c "$(git -C "$nl" rev-parse HEAD)" --arg t "$(git -C "$nl" rev-parse HEAD:skills/common/probe)" \
+  '{commit: $c, skill_tree: $t}')"
+got="$(SDLC_SKILLS_ROOT="$nl" lab_pin_identity "$nl" probe 2>"$idwork/reason" | jq -c . 2>/dev/null)"
+[ "$got" = "$nl_want" ] && ok "a symlink whose target ends in a newline, as the tree holds it, is the tree's" \
+  || bad "a symlink whose target ends in a newline, as the tree holds it, is the tree's (got '$got': $(cat "$idwork/reason"))"
 ln -sfn SKILL.md "$ex/skills/common/probe/link"; rm -f "$ex/skills/common/probe/notes.txt"
 got="$(identb "$b_commit" "$ex")"
 [ "$got" = "$b_notree" ] && grep -q 'notes.txt is not a plain file' "$idwork/reason" \
   && ok "a reference installed without one of the tree's files has no skill tree" \
   || bad "a reference installed without one of the tree's files has no skill tree (got '$got': $(cat "$idwork/reason"))"
-rm -rf "$conv" "$nosym" "$ex" "$exconv" "$idwork/reason"
+# a tree git cannot list to its end names nothing: the entries it did not
+# print were not read back. Here a subdirectory's tree object is gone, and
+# the file under it was edited.
+part="$idwork/part"; mkdir -p "$part/skills/common/probe/zz"
+printf -- '---\nname: probe\ndescription: "probe one"\n---\n' > "$part/skills/common/probe/SKILL.md"
+printf 'more\n' > "$part/skills/common/probe/zz/more.txt"
+git -C "$part" init -q
+git -C "$part" -c user.name=t -c user.email=t@example.invalid add -A \
+  && git -C "$part" -c user.name=t -c user.email=t@example.invalid commit -q -m one
+p_commit="$(git -C "$part" rev-parse HEAD)"
+pex="$idwork/pex"; mkdir -p "$pex"; git -C "$part" archive "$p_commit" | tar -x -C "$pex"
+printf 'edited\n' >> "$pex/skills/common/probe/zz/more.txt"
+p_sub="$(git -C "$part" rev-parse HEAD:skills/common/probe/zz)"
+rm -f "$part/.git/objects/${p_sub:0:2}/${p_sub:2}"
+p_listed="$(git -C "$part" ls-tree -r --name-only "$p_commit:skills/common/probe" 2>/dev/null)"; p_rc=$?
+[ "$p_rc" -ne 0 ] && [ "$p_listed" = SKILL.md ] \
+  && ok "control: git lists the entries before the tree it cannot read, and fails" \
+  || bad "control: git lists the entries before the tree it cannot read, and fails (rc $p_rc, listed '$p_listed')"
+got="$(SDLC_SKILLS_ROOT="$part" lab_pin_identity "$p_commit" probe "$pex" 2>"$idwork/reason" | jq -c . 2>/dev/null)"
+[ "$got" = "$(jq -nc --arg c "$p_commit" '{commit: $c, skill_tree: null}')" ] \
+  && grep -q 'git cannot list' "$idwork/reason" \
+  && ok "a reference whose tree git cannot list to its end has no skill tree" \
+  || bad "a reference whose tree git cannot list to its end has no skill tree (got '$got': $(cat "$idwork/reason"))"
+rm -rf "$conv" "$nosym" "$ex" "$exconv" "$nl" "$part" "$pex" "$idwork/reason"
 
 # --- which description a tree carries -----------------------------------------
 #

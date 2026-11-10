@@ -162,8 +162,8 @@ lab_pin_note() {
 # entry of the tree is read back from the files: a file must be a plain
 # file whose blob hash, taken with no conversion (`git hash-object
 # --no-filters`), is the entry's, and a symlink must be a symlink whose
-# target hashes to the entry's. A tree that holds a submodule is not
-# identified.
+# target hashes to the entry's. A tree that holds a submodule, or that git
+# cannot list to its end, is not identified.
 #
 # Not checked on an installed reference: file modes (the tree hash covers
 # the executable bit; a directory's modes are checked by the status above)
@@ -192,11 +192,13 @@ _lab_identity_json() { # $1 commit ("" = null) $2 skill tree ("" = null)
 # _lab_installed_as_tree <repo> <commit> <skill dir> <installed root> — 0 when
 # every entry of <commit>:<skill dir> is, under <installed root>, the file
 # the tree holds; otherwise prints the first one that is not, and returns 1.
+# The listing ends in `end` only when git printed all of it (an entry always
+# holds a tab, so none is `end`): entries git did not list were not read back.
 _lab_installed_as_tree() {
-  local repo="$1" commit="$2" dir="$3" at entry mode oid path f got seen=0
+  local repo="$1" commit="$2" dir="$3" at entry mode oid path f got whole=0
   at="$(cd "$4" 2>/dev/null && pwd)" || { printf '%s is not a directory' "$4"; return 1; }
   while IFS= read -r -d '' entry; do
-    seen=1
+    [ "$entry" != end ] || { whole=1; break; }
     path="${entry#*$'\t'}"; entry="${entry%%$'\t'*}"
     mode="${entry%% *}"; oid="${entry##* }"
     f="$at/$dir/$path"
@@ -204,17 +206,17 @@ _lab_installed_as_tree() {
       160000) printf '%s/%s is a submodule' "$dir" "$path"; return 1;;
       120000)
         [ -L "$f" ] || { printf '%s/%s is not a symlink, which the tree holds there' "$dir" "$path"; return 1; }
-        got="$(printf '%s' "$(readlink "$f")" | git -C "$repo" hash-object --stdin 2>/dev/null)";;
+        got="$(readlink -n "$f" | git -C "$repo" hash-object --stdin 2>/dev/null)";;
       *)
         [ -f "$f" ] && [ ! -L "$f" ] \
           || { printf '%s/%s is not a plain file, which the tree holds there' "$dir" "$path"; return 1; }
         got="$(git -C "$repo" hash-object --no-filters -- "$f" 2>/dev/null)";;
     esac
     [ "$got" = "$oid" ] || {
-      printf '%s/%s does not hold the bytes the tree holds (git converts a file where its configuration or an attribute says so)' "$dir" "$path"
+      printf '%s/%s does not hold the bytes the tree holds (an edit, or a conversion git makes where its configuration or an attribute says so)' "$dir" "$path"
       return 1; }
-  done < <(git -C "$repo" ls-tree -r -z "$commit:$dir" 2>/dev/null)
-  [ "$seen" -eq 1 ] || { printf 'git cannot list %s:%s' "$commit" "$dir"; return 1; }
+  done < <(git -C "$repo" ls-tree -r -z "$commit:$dir" 2>/dev/null && printf 'end\0')
+  [ "$whole" -eq 1 ] || { printf 'git cannot list %s:%s to its end' "$commit" "$dir"; return 1; }
 }
 
 lab_pin_identity() {

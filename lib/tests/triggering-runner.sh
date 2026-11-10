@@ -16,6 +16,9 @@
 # No case in this file reaches a real agent CLI: the sentinel stands in
 # for one, and it always fails.
 set -uo pipefail
+# git reads no user or system configuration here: one that converts files
+# (core.autocrlf=true, for example) would change what these cases check out.
+export GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_SYSTEM=/dev/null
 here="$(cd "$(dirname "$0")/../.." && pwd)"
 fake_h="$here/lib/tests/fake-cli"
 export SDLC_SKILLS_EVALS_ROOT="$here"
@@ -445,6 +448,12 @@ jq -e '.metadata.plugin == {commit: null, skill_tree: null}' "$work/sumdirty.jso
   && grep -q 'identity *: .*changed during the run' "$work/sumdirty.out" \
   && ok "a plugin edited during the run ends unidentified" \
   || bad "a plugin edited during the run ends unidentified ($(jq -c .metadata "$work/sumdirty.json" 2>&1))"
+# the same for a commit: its checked-out files edited during the run
+SDLC_SKILLS_ROOT="$sumrepo" SUM_DIRTY=1 sumrun sumrefdirty --plugin "$sum_commit"
+jq -e '.metadata.plugin == {commit: null, skill_tree: null}' "$work/sumrefdirty.json" >/dev/null 2>&1 \
+  && grep -q 'identity *: .*changed during the run' "$work/sumrefdirty.out" \
+  && ok "a commit whose checked-out files were edited during the run ends unidentified" \
+  || bad "a commit whose checked-out files were edited during the run ends unidentified ($(jq -c .metadata "$work/sumrefdirty.json" 2>&1): $(grep '^identity' "$work/sumrefdirty.out"))"
 # a tree with no description for the skill has no description hash
 sumrun sumnoskill --plugin "$standin"
 jq -e '.metadata.description_sha256 == null and .metadata.plugin.skill_tree == null' \

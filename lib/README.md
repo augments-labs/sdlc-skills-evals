@@ -21,12 +21,14 @@ so no test needs a sibling plugin checkout or a live CLI.
   register it on `EXIT`.
 - `pin.sh` — `lab_inventory_commit` prints the committed upstream pin;
   `lab_pin_tree` and `lab_pin_note` resolve and describe a `--plugin`;
-  `lab_pin_identity <path|ref> <skill>` prints `{commit, skill_tree}` for
-  the skill text that tree holds (the reason for a null goes to stderr:
-  both are null for a directory whose skill directory is not exactly a git
-  work tree's HEAD, and for a reference the plugin checkout has no commit
-  for; a reference whose commit lacks the skill keeps its commit and has a
-  null `skill_tree`);
+  `lab_pin_identity <path|ref> <skill> [<installed tree>]` prints
+  `{commit, skill_tree}` for the skill text that tree holds (the reason for
+  a null goes to stderr: both are null for a directory whose skill
+  directory is not exactly a git work tree's HEAD, its files read back byte
+  for byte, and for a reference the plugin checkout has no commit for; a
+  reference keeps its commit and has a null `skill_tree` when the commit
+  lacks the skill, or when `<installed tree>`, the directory a runner
+  installed it to, does not hold the tree's files);
   `lab_description_sha256 <SKILL.md>` prints the SHA-256 of the frontmatter
   `description:` line, without its newline;
   `lab_pin_plugin <path|ref> <run-dir>` prints the resolved commit (a

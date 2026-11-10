@@ -69,10 +69,11 @@ as a plain file (`core.symlinks=false`), it calls a directory clean whose
 files are no tree's, and it installs a commit the same way. So a run reads
 each file of the skill's directory back against the tree. Where one
 differs, a directory has no identity, and a commit keeps its `commit` and
-has a null `skill_tree`; the run names the file. A `--dry-run` installs
-nothing, so for a commit it prints the identity the commit names. Two
-things are not read back for a commit: file modes, and files the installed
-directory holds beyond the tree's.
+has a null `skill_tree`; the run names the file. The same holds for a
+skill directory that holds a submodule, which is not read back at all. A
+`--dry-run` installs nothing, so for a commit it prints the identity the
+commit names. Two things are not read back for a commit: file modes, and
+files the installed directory holds beyond the tree's.
 
 ## What a triggering record is
 
