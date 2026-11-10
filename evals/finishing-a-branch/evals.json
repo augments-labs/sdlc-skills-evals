@@ -5,7 +5,7 @@
     {
       "id": "which-transition",
       "prompt": "The proration work in this repo is complete on task/proration and its gates are green. I am not sure whether to open a PR, keep it local for tomorrow's pairing, or just push it. What do I do with this branch?",
-      "expected_output": "Asks which transition I want (push, PR, integrate, keep, discard) instead of assuming one, then executes exactly that transition — and does not merge or push anything under the guise of answering.",
+      "expected_output": "Asks which transition I want (push, PR, integrate, keep) instead of assuming one, and does not offer discard as a choice, then executes exactly that transition — and does not merge or push anything under the guise of answering.",
       "assertions": []
     },
     {
