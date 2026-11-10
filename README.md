@@ -49,7 +49,10 @@ Prerequisites:
   the pin it resolved; `bin/optimize-description` also records it in
   `optimization.json`, and `bin/evaluate` records what each arm installed
   in `identity.json`. `bin/triggering` records none, so note the pin you
-  priced when you start it.
+  priced when you start it;
+- `git` and `jq` on your `PATH`: `bin/evaluate`, `bin/grade`,
+  `bin/benchmark`, `bin/report`, `bin/triggering` and
+  `bin/optimize-description` exit 3 without `jq`.
 
 Price every live command with its own `--dry-run` first: it prints the pin,
 the selection, and the number of CLI calls, and launches nothing. For
@@ -80,8 +83,9 @@ and for each arm that installed a plugin the full `commit` and the
 `git rev-parse <commit>:skills/<phase>/<name>`, which names the skill text
 by content. A `--plugin` or `--baseline-plugin` directory is named only
 when it is the top of a git work tree whose skill directory is exactly
-`HEAD`'s: no modified, untracked or git-ignored file in it, and none
-marked `assume-unchanged` or `skip-worktree`. Otherwise both are null, the
+`HEAD`'s: no modified, untracked or git-ignored file in it, no file mode
+`HEAD` does not hold, and no file marked `assume-unchanged` or
+`skip-worktree`. Otherwise both are null, the
 `--dry-run` and the run say so, and `bin/report` will not record the
 iteration.
 

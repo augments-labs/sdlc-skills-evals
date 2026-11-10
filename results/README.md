@@ -37,12 +37,14 @@ or the second arm is `old_skill` and `baseline.skill_tree` is not one. It
 says which arm. `bin/evaluate` writes a null there when `--plugin` or
 `--baseline-plugin` was:
 
-- a reference the plugin checkout has no commit for, or whose commit holds
-  no single `skills/[<phase>/]<name>/SKILL.md`;
-- a directory that is not the top of a git work tree with a commit;
+- a reference the plugin checkout has no commit for;
+- a reference or a directory's `HEAD` whose commit holds no single
+  `skills/[<phase>/]<name>/SKILL.md`;
+- a directory that is not the top of a git work tree with a commit, or one
+  git cannot report on;
 - a directory whose skill directory is not exactly `HEAD`'s: a modified,
-  untracked or git-ignored file in it, or a file marked `assume-unchanged`
-  or `skip-worktree`;
+  untracked or git-ignored file in it, a file mode `HEAD` does not hold, or
+  a file marked `assume-unchanged` or `skip-worktree`;
 - a tree whose identity changed while the run was under way.
 
 An iteration with no readable `identity.json` has a null identity too. Run

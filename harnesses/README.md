@@ -288,8 +288,7 @@ A record names the skill text an arm installed as the git tree hash of
 `skills/[<phase>/]<name>` (`lib/pin.sh` `lab_pin_identity`). An adapter
 that installs another copy of the skill — `antigravity` and `devin`
 install the tree's `plugins/sdlc-skills` mirror — stays `runnable=no`
-until it shows the copy it loads is that same text, or `bin/evaluate`
-records a null identity for it.
+until it shows the copy it loads is that same text.
 
 ## The adapter tests
 
