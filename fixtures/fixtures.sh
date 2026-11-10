@@ -9,16 +9,16 @@
 # spends the run reading. These give it enough to be wrong in an interesting way,
 # and nothing more.
 
-# The tracked corpus root: the material the seeded trees are built from.
+# The tracked seed root (fixtures/seed/): the invented material the seeded trees are built from.
 #
 # It is a committed root of its own, and not the project's own `.sdlc-skills/`
 # directory: the repository ignores that one, so a fixture placed there would
 # be present in the working tree and absent from the commit — which is exactly
 # the failure this root exists to end. A plan fixture is a REPRESENTATION of a
 # plan, staged where a plan lives; it is not the lab's own plan.
-fixture_corpus_root() {
+fixture_seed_root() {
   local src="${BASH_SOURCE[0]}"
-  ( cd "$(dirname "$src")/corpus" && pwd )
+  ( cd "$(dirname "$src")/seed" && pwd )
 }
 
 
@@ -26,12 +26,12 @@ fixture_corpus_root() {
 # (`node --test test/` treats the dir as a module path on modern Node). A skill
 # that claims something is verified has to notice its gate does not run.
 #
-# The material comes from the tracked corpus root, so the tree a run is given
+# The material comes from the tracked seed root, so the tree a run is given
 # is the tree the repository holds: nothing here is written by a script whose
 # output the repository does not carry.
 fixture_node_api() {
   local d="$1" root
-  root="$(fixture_corpus_root)"
+  root="$(fixture_seed_root)"
   mkdir -p "$d/src" "$d/test"
   cp "$root/project/package.json" "$root/project/README.md" "$d/"
   cp "$root/project/src/server.js" "$root/project/src/apikeys.js" "$d/src/"
@@ -71,7 +71,7 @@ fixture_node_api() {
 # rather than a silently mis-scored run.
 fixture_activation_paths() {
   local d="$1" root
-  root="$(fixture_corpus_root)"
+  root="$(fixture_seed_root)"
   mkdir -p "$d/.sdlc-skills/plans" "$d/.agent/sessions" "$d/docs/tickets"
 
   # the project the queries name
