@@ -327,11 +327,13 @@ declare -F adapter_ran >/dev/null 2>&1 || adapter_ran() { return 0; }
 declare -F adapter_version >/dev/null 2>&1 || adapter_version() { :; }
 declare -F adapter_session_model >/dev/null 2>&1 || adapter_session_model() { :; }
 
-# Stop a launch and everything under it. The CLI is not the job the runner
-# started but a descendant of it (the adapter's subshell, then `timeout`,
-# then the CLI), so a signal to the job alone leaves the CLI running. Each
-# process gets TERM, the signal `timeout` sends a CLI at its deadline,
-# children before their parent. Without `pgrep` only the job is signalled.
+# Stop a launch and every process found under it when it is stopped. The CLI
+# is not the job the runner started but a descendant of it (the adapter's
+# subshell, then `timeout`, then the CLI), so a signal to the job alone
+# leaves the CLI running. Each process gets TERM, the signal `timeout` sends
+# a CLI at its deadline, children before their parent. A process started
+# after the walk passed its parent, or one that left the tree before it, is
+# not reached. Without `pgrep` only the job is signalled.
 stop_tree() { # $1 pid
   local kid
   for kid in $(pgrep -P "$1" 2>/dev/null); do stop_tree "$kid"; done

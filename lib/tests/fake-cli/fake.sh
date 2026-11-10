@@ -136,8 +136,10 @@ _fake_body() { # $1 workdir $2 prompt $3 stream — the canned behavior
     blocked) printf 'usage limit exceeded\n' >> "$3"; return 0;;
     dead) : > "$3"; return 0;;
     linger)
-      _fake_emit_ok "$3" "$2"
+      # the pid first: the runner may stop this process as soon as it reads
+      # the subject, and `exec` keeps the pid
       [ -z "${FAKE_LINGER_LOG:-}" ] || printf '%s\n' "$$" >> "$FAKE_LINGER_LOG"
+      _fake_emit_ok "$3" "$2"
       exec sleep 600;;
     *) _fake_emit_ok "$3" "$2"; return 0;;
   esac
