@@ -110,6 +110,11 @@ to the holdout file, which is written after the selection. Twenty
 happy-path positives decide nothing either: they pass every eval they are
 ever run through and prove nothing.
 
+An `expect` with no space in it is always looked up as a skill name, `"none"`
+apart. So an activity is written as a phrase with a space in it, as in
+`"inline explanation"`; an activity written without one, hyphenated or not,
+fails the gate as a route that is not a skill.
+
 **The near-misses are the point.** A description firing on its own happy-path
 opening proves nothing, because every description does that. The runner observes the subject anywhere in the bounded skill chain, including
 a prerequisite or an on-demand read for model selection. Another skill owning
