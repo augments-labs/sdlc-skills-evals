@@ -214,4 +214,77 @@ for content in '[]' '"x"' 'null' '{"skill":"x"}{"skill":"y"}' ''; do
 done
 rm -rf "$work5"
 
+# --- repeated runs: <arm>/run-<k>/ holds one repetition ---------------------
+work6="$(mktemp -d)"
+mk_runs() { # $1 dir $2 runs — the fixture, each arm repeated: run-1 is the
+            # fixture's arm, each later with_skill run scores 0.5 lower
+  local e a k
+  cp -r "$here/lib/tests/fixtures/bench-iter" "$1"
+  for e in eval-a eval-b; do
+    for a in with_skill without_skill; do
+      mkdir "$1/$e/$a/run-1"
+      mv "$1/$e/$a/grading.json" "$1/$e/$a/timing.json" "$1/$e/$a/run-1/"
+      for k in $(seq 2 "$2"); do
+        cp -r "$1/$e/$a/run-1" "$1/$e/$a/run-$k"
+        [ "$a" = with_skill ] || continue
+        jq '.summary.pass_rate -= 0.5' "$1/$e/$a/run-1/grading.json" > "$1/$e/$a/run-$k/grading.json"
+      done
+    done
+  done
+}
+mk_runs "$work6/rep" 2
+"$here/bin/benchmark" "$work6/rep" >/dev/null 2>&1; rc=$?
+rb="$work6/rep/benchmark.json"
+[ "$rc" -eq 0 ] && jq -e '(.runs | length) == 8
+  and ([.runs[] | select(.eval_id == "eval-a" and .configuration == "with_skill") | [.run_number, .pass_rate]]
+       == [[1, 1], [2, 0.5]])
+  and ([.runs[] | select(.eval_id == "eval-b" and .configuration == "without_skill") | .run_number] == [1, 2])
+  and ([.runs[] | [.eval_id, .configuration]] | unique | length) == 4' "$rb" >/dev/null 2>&1 \
+  && ok "a repeated arm is one row per run, numbered" \
+  || bad "a repeated arm is one row per run, numbered (rc $rc; $(jq -c '[.runs[] | [.eval_id, .configuration, .run_number, .pass_rate]]' "$rb" 2>&1))"
+# with_skill scored 1, 0.5, 0.5, 0: mean 0.5, population stddev sqrt(0.125)
+jq -e '.run_summary.with_skill.pass_rate.mean == 0.5
+  and ((.run_summary.with_skill.pass_rate.stddev - 0.3535533905932738) | fabs) < 1e-9
+  and .run_summary.with_skill.time_seconds == {mean: 30, stddev: 10}
+  and .run_summary.without_skill.pass_rate == {mean: 0.25, stddev: 0.25}
+  and .run_summary.delta.pass_rate == 0.25' "$rb" >/dev/null 2>&1 \
+  && ok "mean and stddev run over every scored run of a configuration" \
+  || bad "mean and stddev run over every scored run of a configuration ($(jq -c .run_summary "$rb" 2>&1))"
+jq -e '.metadata.runs_per_eval == 2' "$rb" >/dev/null 2>&1 \
+  && ok "with no identity.json, runs_per_eval is the number of runs the layout holds" \
+  || bad "with no identity.json, runs_per_eval is the number of runs the layout holds ($(jq -c .metadata.runs_per_eval "$rb" 2>&1))"
+jq -n '{skill: "probe", harness: "fake", runs_per_eval: 3}' > "$work6/rep/identity.json"
+"$here/bin/benchmark" "$work6/rep" >/dev/null 2>&1
+jq -e '.metadata.runs_per_eval == 3' "$rb" >/dev/null 2>&1 \
+  && ok "runs_per_eval is identity.json's when it names one" \
+  || bad "runs_per_eval is identity.json's when it names one"
+grep -qxF '| eval | configuration | run | outcome | pass rate | passed | failed | needs review | time (s) | tokens |' "$work6/rep/benchmark.md" \
+  && grep -q '^| eval-a | with_skill | 2 | ok | 50% |' "$work6/rep/benchmark.md" \
+  && ok "benchmark.md numbers the runs of a repeated iteration" \
+  || bad "benchmark.md numbers the runs of a repeated iteration ($(grep '^| eval' "$work6/rep/benchmark.md" | head -3))"
+# the single-run layout: every row is run 1, and benchmark.md is what it was
+jq -e '(.runs | length) == 4 and all(.runs[]; .run_number == 1) and .metadata.runs_per_eval == 1' "$b" >/dev/null 2>&1 \
+  && ok "a single-run arm is run 1" || bad "a single-run arm is run 1"
+grep -qxF '| eval | configuration | outcome | pass rate | passed | failed | needs review | time (s) | tokens |' "$m" \
+  && grep -q '^| eval-a | with_skill | ok | 100% |' "$m" \
+  && ok "benchmark.md of a single-run iteration has no run column" \
+  || bad "benchmark.md of a single-run iteration has no run column"
+# runs are read in number order, not name order
+mk_runs "$work6/ten" 10
+"$here/bin/benchmark" "$work6/ten" >/dev/null 2>&1
+jq -e '[.runs[] | select(.eval_id == "eval-a" and .configuration == "with_skill") | .run_number] == [range(1; 11)]' \
+  "$work6/ten/benchmark.json" >/dev/null 2>&1 \
+  && ok "run-10 follows run-9" || bad "run-10 follows run-9"
+# a run whose record is missing is an indeterminate row of its own
+mk_runs "$work6/gap" 2
+rm "$work6/gap/eval-b/with_skill/run-2/grading.json"
+"$here/bin/benchmark" "$work6/gap" >/dev/null 2>&1; rc=$?
+[ "$rc" -eq 2 ] && jq -e '[.runs[] | select(.outcome == "indeterminate") | [.eval_id, .configuration, .run_number, .reason]]
+    == [["eval-b", "with_skill", 2, "grading.json missing"]]
+  and .run_summary.with_skill.indeterminate_count == 1
+  and .run_summary.with_skill.pass_rate.mean == (2 / 3)' "$work6/gap/benchmark.json" >/dev/null 2>&1 \
+  && ok "a run with no grading.json is its own indeterminate row, out of the mean" \
+  || bad "a run with no grading.json is its own indeterminate row, out of the mean (rc $rc)"
+rm -rf "$work6"
+
 exit "$fails"

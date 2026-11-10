@@ -3,21 +3,27 @@
 # benchmark.md.
 #
 # Reads <eval-id>/{with_skill,without_skill|old_skill}/{grading.json,
-# timing.json} and writes benchmark.json:
+# timing.json} — or, for an arm bin/evaluate repeated (--runs N above 1),
+# the same two files under each <arm>/run-<k>/ — and writes benchmark.json:
 #   metadata    {iteration, configurations, eval_ids, skill, harness,
 #               harness_version, model, runs_per_eval, plugin, baseline}
-#   runs[]      one row per eval and arm: {eval_id, configuration, outcome,
-#               reason, pass_rate, passed, failed, needs_review, total,
-#               time_seconds, tokens}
+#   runs[]      one row per eval, arm and run: {eval_id, configuration,
+#               run_number, outcome, reason, pass_rate, passed, failed,
+#               needs_review, total, time_seconds, tokens}; run_number is
+#               the k of run-<k>/, and 1 for an arm that was run once
 #   run_summary {with_skill: {...}, without_skill|old_skill: {...},
 #                delta: {pass_rate, time_seconds, tokens}}
 # Each arm is {pass_rate, time_seconds, tokens} as {mean, stddev}
-# (population) plus indeterminate_count. A null pass rate — an
+# (population) over every scored run of that configuration, plus
+# indeterminate_count. With one run per eval the stddev is the spread
+# between evals and says nothing about run-to-run variance: a record uses
+# 3 runs. A null pass rate — an
 # indeterminate arm, or an eval with no assertions yet — stays out of the
 # mean; an arm with no scored run has a null pass_rate, never zero. Token stats
 # run over the runs that reported tokens. The second arm keeps its own name
 # (without_skill or old_skill). benchmark.md is the same data for a human:
-# a Summary table and a Per-Eval Breakdown. No live calls.
+# a Summary table and a Per-Eval Breakdown, with a run column when an arm
+# was repeated. No live calls.
 #
 # The identity fields of metadata are bin/evaluate's <iteration>/identity.json,
 # copied — except that runs_per_eval defaults to 1 and a commit or skill_tree
@@ -69,28 +75,42 @@ if [ -f "$iter/identity.json" ] && ! identity="$(jq -cse \
   echo "benchmark: $iter/identity.json is unreadable — this iteration's identity is null" >&2
 fi
 
-# One row per eval and arm, in eval order then arm order.
+# The run dirs of one arm, one per line as "<run number> <dir>": the arm dir
+# itself as run 1, or its run-<k>/ directories in numeric order when
+# bin/evaluate repeated the arm (--runs N above 1).
+arm_runs() { # $1 arm dir
+  local r k out=""
+  for r in "$1"/run-*/; do
+    k="$(basename "$r")"; k="${k#run-}"
+    case "$k" in ''|*[!0-9]*) continue;; esac
+    [ -d "$r" ] && out="$out$((10#$k)) ${r%/}"$'\n'
+  done
+  if [ -n "$out" ]; then printf '%s' "$out" | sort -n; else printf '1 %s\n' "$1"; fi
+}
+
+# One row per eval, arm and run, in eval order, then arm order, then run order.
 runs="$(for e in "$iter"/*/; do
   [ -d "$e" ] || continue
   for a in with_skill "$second_arm"; do
-    d="$e$a"
-    [ -d "$d" ] || continue
-    bad=""; g='{}'; t='null'
-    if [ ! -f "$d/grading.json" ]; then bad="grading.json missing"
-    elif ! g="$(jq -ce '.summary | objects' "$d/grading.json" 2>/dev/null)"; then
-      g='{}'; bad="grading.json unreadable"
-    fi
-    if [ -f "$d/timing.json" ] && ! t="$(jq -ce 'objects
-        | select(all(.duration_ms, .total_tokens; . == null or type == "number"))' "$d/timing.json" 2>/dev/null)"; then
-      t='null'; bad="${bad:+$bad; }timing.json unreadable"
-    fi
-    [ -z "$bad" ] || g="$(jq -nc --arg r "$bad" '{outcome: "indeterminate", reason: $r}')"
-    jq -nc --arg eval "$(basename "$e")" --arg arm "$a" --argjson g "$g" --argjson t "$t" '
-      {eval_id: $eval, configuration: $arm, outcome: ($g.outcome // "ok"),
-       reason: $g.reason, pass_rate: $g.pass_rate, passed: $g.passed, failed: $g.failed,
-       needs_review: $g.needs_review, total: $g.total,
-       time_seconds: (if $t == null then null else (($t.duration_ms // 0) / 1000) end),
-       tokens: (if $t == null then null else $t.total_tokens end)}'
+    [ -d "$e$a" ] || continue
+    while read -r k d; do
+      bad=""; g='{}'; t='null'
+      if [ ! -f "$d/grading.json" ]; then bad="grading.json missing"
+      elif ! g="$(jq -ce '.summary | objects' "$d/grading.json" 2>/dev/null)"; then
+        g='{}'; bad="grading.json unreadable"
+      fi
+      if [ -f "$d/timing.json" ] && ! t="$(jq -ce 'objects
+          | select(all(.duration_ms, .total_tokens; . == null or type == "number"))' "$d/timing.json" 2>/dev/null)"; then
+        t='null'; bad="${bad:+$bad; }timing.json unreadable"
+      fi
+      [ -z "$bad" ] || g="$(jq -nc --arg r "$bad" '{outcome: "indeterminate", reason: $r}')"
+      jq -nc --arg eval "$(basename "$e")" --arg arm "$a" --argjson k "$k" --argjson g "$g" --argjson t "$t" '
+        {eval_id: $eval, configuration: $arm, run_number: $k, outcome: ($g.outcome // "ok"),
+         reason: $g.reason, pass_rate: $g.pass_rate, passed: $g.passed, failed: $g.failed,
+         needs_review: $g.needs_review, total: $g.total,
+         time_seconds: (if $t == null then null else (($t.duration_ms // 0) / 1000) end),
+         tokens: (if $t == null then null else $t.total_tokens end)}'
+    done < <(arm_runs "$e$a")
   done
 done | jq -s .)"
 
@@ -115,7 +135,7 @@ jq -n --argjson runs "$runs" --arg arm "$second_arm" --arg iter "$(basename "$it
                 eval_ids: ([$runs[].eval_id] | unique),
                 skill: $id.skill, harness: $id.harness,
                 harness_version: $id.harness_version, model: $id.model,
-                runs_per_eval: ($id.runs_per_eval // 1),
+                runs_per_eval: ($id.runs_per_eval // ([$runs[].run_number] | max) // 1),
                 plugin: named($id.plugin),
                 baseline: (if $arm == "old_skill" then named($id.baseline) else null end)},
      runs: $runs,
@@ -132,6 +152,8 @@ jq -r '
   def pct($total): if $total == 0 then "n/a (0 assertions)"
     elif . == null then "n/a" else "\(. * 100 | round)%" end;
   .metadata.configurations as $c | .run_summary as $s
+  # The run column appears only when an arm was repeated.
+  | (any(.runs[]; .run_number > 1)) as $rep
   | "# Benchmark: \(.metadata.iteration)", "",
     "## Summary", "",
     "| configuration | pass rate | time (s) | tokens | indeterminate |",
@@ -143,9 +165,9 @@ jq -r '
     "A null pass rate (an indeterminate run, or an eval with no assertions) is left out of the mean.",
     "",
     "## Per-Eval Breakdown", "",
-    "| eval | configuration | outcome | pass rate | passed | failed | needs review | time (s) | tokens |",
-    "|---|---|---|---|---|---|---|---|---|",
-    (.runs[] | "| \(.eval_id) | \(.configuration) | \(.outcome) | \(.total as $n | .pass_rate | pct($n)) | \(.passed | num) | \(.failed | num) | \(.needs_review | num) | \(.time_seconds | num) | \(.tokens | num) |")
+    "| eval | configuration |\(if $rep then " run |" else "" end) outcome | pass rate | passed | failed | needs review | time (s) | tokens |",
+    "|---|---|\(if $rep then "---|" else "" end)---|---|---|---|---|---|---|",
+    (.runs[] | "| \(.eval_id) | \(.configuration) |\(if $rep then " \(.run_number) |" else "" end) \(.outcome) | \(.total as $n | .pass_rate | pct($n)) | \(.passed | num) | \(.failed | num) | \(.needs_review | num) | \(.time_seconds | num) | \(.tokens | num) |")
 ' "$iter/benchmark.json" > "$iter/benchmark.md" || { echo "cannot write $iter/benchmark.md" >&2; exit 2; }
 
 # A row the records could not support is counted apart and fails the exit.
