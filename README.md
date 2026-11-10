@@ -86,6 +86,13 @@ bin/evaluate --harness opencode --skill yagni --runs 3 --dry-run
 bin/evaluate --harness opencode --skill yagni --runs 3
 ```
 
+An arm is one run or `run-1/` to `run-N/`, never both. `bin/grade` and
+`bin/benchmark` refuse (exit 2, naming it) an arm that holds a run's files
+beside `run-<k>/`, or a `run-` name `bin/evaluate` does not write.
+`bin/benchmark` also writes nothing unless every eval and arm holds runs 1
+to N: N is `identity.json`'s `runs_per_eval`, else the highest run number
+the iteration holds.
+
 `identity.json` says what the iteration measured, and `bin/benchmark`
 copies it into `benchmark.json`'s `metadata`: the skill, the harness, its
 CLI version and the model every session named (each null when the adapter

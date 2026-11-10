@@ -12,8 +12,12 @@
 # {outcome, passed, failed, needs_review, total, pass_rate}}.
 #
 # An arm bin/evaluate repeated (--runs N above 1) holds no run of its own
-# but run-<k>/ directories: given that arm dir, each run-<k>/ is graded as
-# its own run dir with the same flags, and nothing is written beside them.
+# but run-<k>/ directories: given that arm dir, each run-<k>/ is graded, in
+# number order, as its own run dir with the same flags, and nothing is
+# written beside them. The exit is the highest of theirs. A directory that
+# holds a run's files beside run-<k>/, a run- name that is not run-<k> (k
+# from 1, no leading zero), or a run-<k> that is not a directory is refused
+# (exit 2) before anything is graded.
 #
 # An arm whose run_status.json says "indeterminate" measured nothing, so it
 # is not scored: its summary carries the reason and a null pass rate, and
@@ -57,7 +61,8 @@ usage() {
 usage: bin/grade <arm-run-dir> [--harness NAME [--harness-dir DIR] [--timeout S]]
 
   <arm-run-dir>      a run's directory (eval-case.json, outputs/), or an arm
-                     holding run-<k>/ directories: each one is graded
+                     holding run-<k>/ directories: each one is graded. A
+                     directory holding both is refused
   --harness NAME     grade prose assertions with a skill-free session on NAME
                      (a live call per arm run with prose; never in CI)
   --harness-dir DIR  read the adapter from DIR instead of harnesses/
@@ -83,24 +88,20 @@ done
 [ -n "$run_dir" ] || { echo "needs an arm run dir" >&2; exit 2; }
 case "$timeout_s" in ''|*[!0-9]*|0) echo "--timeout needs a positive integer" >&2; exit 2;; esac
 
-# A repeated arm: grade each run-<k>/, and fail if any of them cannot be.
-if [ ! -f "$run_dir/eval-case.json" ]; then
-  rep_dirs=()
-  for d in "$run_dir"/run-*/; do
-    case "$(basename "$d")" in run-|run-*[!0-9]*) continue;; esac
-    [ -d "$d" ] && rep_dirs+=("${d%/}")
-  done
-  if [ "${#rep_dirs[@]}" -gt 0 ]; then
-    rep_flags=(--harness-dir "$harnessdir" --timeout "$timeout_s")
-    [ -n "$harness" ] && rep_flags+=(--harness "$harness")
-    rep_rc=0
-    for d in "${rep_dirs[@]}"; do
-      bash "$0" "$d" "${rep_flags[@]}"; rc=$?
-      [ "$rc" -eq 0 ] || echo "bin/grade: $(basename "$d") was not graded (exit $rc)" >&2
-      [ "$rc" -le "$rep_rc" ] || rep_rc="$rc"
-    done
-    exit "$rep_rc"
-  fi
+# A repeated arm: grade each run-<k>/ in number order, and fail if any of
+# them cannot be. A directory that is neither one run nor run-<k>/
+# directories (lab_arm_runs says which) is refused before anything is graded.
+arm_runs="$(lab_arm_runs "$run_dir")" || exit 2
+if [ "$arm_runs" != "1 ${run_dir%/}" ]; then
+  rep_flags=(--harness-dir "$harnessdir" --timeout "$timeout_s")
+  [ -n "$harness" ] && rep_flags+=(--harness "$harness")
+  rep_rc=0
+  while read -r _ d <&3; do
+    bash "$0" "$d" "${rep_flags[@]}"; rc=$?
+    [ "$rc" -eq 0 ] || echo "bin/grade: $(basename "$d") was not graded (exit $rc)" >&2
+    [ "$rc" -le "$rep_rc" ] || rep_rc="$rc"
+  done 3<<<"$arm_runs"
+  exit "$rep_rc"
 fi
 case_file="$run_dir/eval-case.json"
 out_dir="$run_dir/outputs"

@@ -281,4 +281,19 @@ done
   || bad "lib/README.md names every lib/*.sh and nothing that is gone:$libgaps"
 check "the PR template names bin/evaluate" grep -qF 'bin/evaluate' .github/PULL_REQUEST_TEMPLATE.md
 
+# --- one run has no spread: said wherever --runs is explained ----------------
+
+flat() { tr -s ' \n' ' '; }
+nospread=""
+for f in README.md results/README.md docs/authoring.md; do
+  flat < "$f" | grep -qF 'With one run the stddev means nothing' || flat < "$f" | grep -qF 'with one run the stddev means nothing' \
+    || nospread="$nospread $f(stddev)"
+  flat < "$f" | grep -qF -- '--runs 3' || nospread="$nospread $f(--runs 3)"
+done
+ev_help="$(bash bin/evaluate --help | flat)"
+grep -qF 'With one run the stddev means nothing; a record uses 3' <<<"$ev_help" || nospread="$nospread bin/evaluate--help(stddev)"
+grep -qF -- '--runs 3 --dry-run' <<<"$ev_help" || nospread="$nospread bin/evaluate--help(--runs 3)"
+[ -z "$nospread" ] && ok "README, results/README.md, docs/authoring.md and bin/evaluate --help say one run has no stddev and a record uses 3" \
+  || bad "the docs say one run has no stddev and a record uses 3 (missing:$nospread)"
+
 exit "$fails"

@@ -646,6 +646,75 @@ jq -e '.runs_per_eval == 1' "$(idit runs1)/identity.json" >/dev/null 2>&1 \
   && jq -e 'all(.runs[]; .run_number == 1)' "$(idit runs1)/benchmark.json" >/dev/null 2>&1 \
   && ok "a single run is run 1 of 1" || bad "a single run is run 1 of 1"
 
+# one run says, word for word, what it said before --runs existed
+dry_g="$(dry --plugin "$with_plug" --grade-with-harness)"
+printf '%s\n' "$dry_out" | grep -qxF 'budget   : 3 eval(s) x 2 arms = 6 arm calls' \
+  && printf '%s\n' "$dry_out" | grep -qxF 'at most 6 calls total, billed to your own harness account.' \
+  && printf '%s\n' "$dry_g" | grep -qxF 'budget   : 3 eval(s) x 2 arms = 6 arm calls' \
+  && printf '%s\n' "$dry_g" | grep -qxF '         + 2 rubric grader call(s) (1 eval(s) with prose x 2 arms)' \
+  && printf '%s\n' "$dry_g" | grep -qxF 'at most 8 calls total, billed to your own harness account.' \
+  && ok "one run is priced in the words used before --runs" \
+  || bad "one run is priced in the words used before --runs ($(printf '%s\n' "$dry_g" | grep -E 'budget|rubric|at most' | tr '\n' ';'))"
+one_said=$'nested-files/with_skill: running\nnested-files/without_skill: running'
+[ "$(grep ': running$' "$work/runs0/out")" = "$one_said" ] && [ "$(grep ': running$' "$work/runs1/out")" = "$one_said" ] \
+  && ! grep -q '/run-[0-9]' "$work/runs0/out" "$work/runs1/out" \
+  && ok "one run names its arms without a run number" \
+  || bad "one run names its arms without a run number ($(grep ': running$' "$work/runs1/out" | tr '\n' ';'))"
+
+# the repetitions go in order: both arms of run 1, then both arms of run 2
+[ "$(grep ': running$' "$work/runs2/out")" = "nested-files/with_skill/run-1: running
+nested-files/without_skill/run-1: running
+nested-files/with_skill/run-2: running
+nested-files/without_skill/run-2: running" ] \
+  && ok "--runs 2 runs both arms of run 1 before run 2" \
+  || bad "--runs 2 runs both arms of run 1 before run 2 ($(grep ': running$' "$work/runs2/out" | tr '\n' ';'))"
+
+# a count with leading zeros is decimal, and zero is still refused
+lead=""
+for v in "08:x 8 runs = 48" "003:x 3 runs = 18" "010:x 10 runs = 60"; do
+  dry --plugin "$with_plug" --runs "${v%%:*}" | grep -qxF "budget   : 3 eval(s) x 2 arms ${v#*:} arm calls" \
+    || lead="$lead ${v%%:*}"
+done
+dry --plugin "$with_plug" --runs 00 >/dev/null; [ "$?" -eq 2 ] || lead="$lead 00(accepted)"
+[ -z "$lead" ] && ok "--runs reads leading zeros as decimal, and 00 is no count" \
+  || bad "--runs reads leading zeros as decimal, and 00 is no count (wrong:$lead)"
+
+# one repetition that measures nothing, or cannot be graded, is that
+# repetition's alone: the third session is with_skill/run-2
+khook="$work/count-hook"
+cat > "$khook" <<'HOOK'
+#!/usr/bin/env bash
+echo call >> "$HOOK_LOG"
+if [ "$(wc -l < "$HOOK_LOG")" -eq 3 ]; then
+  case "$KHOOK" in
+    crash) exit 3;;
+    lose) rm -f "$KHOOK_ARM/eval-case.json";;
+  esac
+fi
+echo "done answer"
+HOOK
+chmod +x "$khook"
+KHOOK=crash EV_HOOK="$khook" idrun runsx --plugin "$gitplug" --runs 2; rc=$?
+xit="$(idit runsx)/nested-files"
+[ "$rc" -eq 0 ] && grep -q '^nested-files/with_skill/run-2: indeterminate' "$work/runsx/out" \
+  && [ "$(grep -c ': indeterminate' "$work/runsx/out")" -eq 1 ] \
+  && [ "$(jq -r .outcome "$xit/with_skill/run-2/run_status.json" 2>/dev/null)" = indeterminate ] \
+  && [ "$(jq -r .outcome "$xit/with_skill/run-1/run_status.json" "$xit"/without_skill/run-*/run_status.json 2>/dev/null | tr '\n' ' ')" = "ok ok ok " ] \
+  && jq -e '[.runs[] | [.configuration, .run_number, .outcome]]
+      == [["with_skill", 1, "ok"], ["with_skill", 2, "indeterminate"], ["without_skill", 1, "ok"], ["without_skill", 2, "ok"]]
+    and .run_summary.with_skill.indeterminate_count == 1 and .run_summary.without_skill.indeterminate_count == 0
+    and .metadata.runs_per_eval == 2' "$(idit runsx)/benchmark.json" >/dev/null 2>&1 \
+  && ok "a repetition that measured nothing is indeterminate alone, under its run number" \
+  || bad "a repetition that measured nothing is indeterminate alone, under its run number (rc $rc; $(jq -c '[.runs[] | [.configuration, .run_number, .outcome]]' "$(idit runsx)/benchmark.json" 2>&1); $(tail -n 4 "$work/runsx/out" | tr '\n' ';'))"
+KHOOK=lose KHOOK_ARM="$(idit runsy)/nested-files/with_skill/run-2" EV_HOOK="$khook" idrun runsy --plugin "$gitplug" --runs 2; rc=$?
+[ "$rc" -eq 2 ] && grep -qxF 'nested-files/with_skill/run-2: bin/grade failed' "$work/runsy/out" \
+  && [ "$(grep -c 'bin/grade failed' "$work/runsy/out")" -eq 1 ] \
+  && grep -qxF 'not recorded: nested-files/with_skill/run-2 benchmark' "$work/runsy/out" \
+  && [ ! -e "$(idit runsy)/nested-files/with_skill/run-2/grading.json" ] \
+  && [ -f "$(idit runsy)/nested-files/without_skill/run-2/grading.json" ] \
+  && ok "a repetition that cannot be graded is named with its run number, and the rest still run" \
+  || bad "a repetition that cannot be graded is named with its run number, and the rest still run (rc $rc; $(tail -n 5 "$work/runsy/out" | tr '\n' ';'))"
+
 [ ! -s "$own_trip" ] && ok "no real agent CLI was called" || bad "no real agent CLI was called ($(cat "$own_trip"))"
 
 exit "$fails"

@@ -51,6 +51,50 @@ mkdir "$work/empty-arm"
 [ "$rc" -eq 2 ] && grep -q 'eval-case.json' "$work/empty-arm.out" \
   && ok "a directory with neither a run nor run-<k>/ is refused" \
   || bad "a directory with neither a run nor run-<k>/ is refused (rc $rc)"
+# the worst exit code wins, whichever run it comes from, and the rest are graded
+mkdir "$work/rep1"
+cp -r "$here/lib/tests/fixtures/grade-run" "$work/rep1/run-1"
+cp -r "$here/lib/tests/fixtures/grade-run" "$work/rep1/run-2"
+rm -rf "$work/rep1/run-1/outputs"
+"$here/bin/grade" "$work/rep1" >"$work/rep1.out" 2>&1; rc=$?
+[ "$rc" -eq 2 ] && grep -q 'run-1 was not graded' "$work/rep1.out" \
+  && [ ! -e "$work/rep1/run-1/grading.json" ] \
+  && jq -e '.summary.pass_rate == 0.5' "$work/rep1/run-2/grading.json" >/dev/null 2>&1 \
+  && ok "a first run that cannot be graded fails the arm, and the later runs are still graded" \
+  || bad "a first run that cannot be graded fails the arm, and the later runs are still graded (rc $rc: $(cat "$work/rep1.out"))"
+# an arm is one run or run-<k>/ directories, never both
+cp -r "$here/lib/tests/fixtures/grade-run" "$work/mixed"
+cp -r "$here/lib/tests/fixtures/grade-run" "$work/mixed/run-1"
+cp -r "$here/lib/tests/fixtures/grade-run" "$work/mixed/run-2"
+"$here/bin/grade" "$work/mixed" >"$work/mixed.out" 2>&1; rc=$?
+[ "$rc" -eq 2 ] && grep -qF "$work/mixed" "$work/mixed.out" && grep -q 'run-<k>' "$work/mixed.out" \
+  && [ -z "$(find "$work/mixed" -name grading.json)" ] \
+  && ok "an arm holding a run's files beside run-<k>/ is refused, and nothing is graded" \
+  || bad "an arm holding a run's files beside run-<k>/ is refused, and nothing is graded (rc $rc: $(cat "$work/mixed.out"); graded: $(find "$work/mixed" -name grading.json | tr '\n' ' '))"
+# a run directory is run-<k>, k counted from 1 and written without a leading zero
+odd=""
+for n in run-0 run-01 run-x run-; do
+  rm -rf "$work/odd"; mkdir "$work/odd"
+  cp -r "$here/lib/tests/fixtures/grade-run" "$work/odd/run-1"
+  cp -r "$here/lib/tests/fixtures/grade-run" "$work/odd/$n"
+  "$here/bin/grade" "$work/odd" >"$work/odd.out" 2>&1; rc=$?
+  [ "$rc" -eq 2 ] && grep -qF "$work/odd/$n" "$work/odd.out" \
+    && [ -z "$(find "$work/odd" -name grading.json)" ] || odd="$odd $n(rc $rc)"
+done
+[ -z "$odd" ] && ok "a run- name bin/evaluate does not write is refused by name, and nothing is graded" \
+  || bad "a run- name bin/evaluate does not write is refused by name, and nothing is graded (accepted:$odd)"
+: > "$work/odd/run-2"; rm -rf "$work/odd/run-"
+"$here/bin/grade" "$work/odd" >"$work/odd.out" 2>&1; rc=$?
+[ "$rc" -eq 2 ] && grep -qF "$work/odd/run-2" "$work/odd.out" \
+  && ok "a run-<k> that is not a directory is refused by name" \
+  || bad "a run-<k> that is not a directory is refused by name (rc $rc: $(cat "$work/odd.out"))"
+# number order, not name order
+mkdir "$work/ten"
+for k in $(seq 1 10); do cp -r "$here/lib/tests/fixtures/grade-run" "$work/ten/run-$k"; done
+rm -rf "$work/ten/run-2/outputs" "$work/ten/run-10/outputs"
+"$here/bin/grade" "$work/ten" >"$work/ten.out" 2>&1
+[ "$(grep -o 'run-[0-9]* was not graded' "$work/ten.out" | tr '\n' ' ')" = "run-2 was not graded run-10 was not graded " ] \
+  && ok "run-10 is graded after run-9" || bad "run-10 is graded after run-9 ($(cat "$work/ten.out"))"
 
 # --- the arm measured nothing: indeterminate short-circuits the grade --------
 cp -r "$here/lib/tests/fixtures/grade-run" "$work/indet"

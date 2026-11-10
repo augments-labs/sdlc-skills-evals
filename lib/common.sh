@@ -31,6 +31,32 @@ lab_changed_files() { # $1 work tree $2 base commit
       | tr '\0' '\n' | LC_ALL=C sort -u )
 }
 
+# The runs of one arm directory, one per line as "<run number> <dir>", in
+# number order: the arm itself as run 1, or its run-<k>/ directories when
+# bin/evaluate repeated the arm (--runs N above 1). An arm is one or the
+# other. Return 2, the reason on stderr and nothing on stdout, for a name
+# that begins run- and is not run-<k> (k digits, counted from 1, no leading
+# zero), for a run-<k> that is not a directory, and for run-<k>/ beside a
+# run's own files. The numbers are text here, never shell arithmetic.
+lab_arm_runs() { # $1 arm dir
+  local arm="${1%/}" r k f out=""
+  for r in "$arm"/run-*; do
+    [ -e "$r" ] || [ -L "$r" ] || continue
+    k="${r##*/run-}"
+    case "$k" in
+      ''|0*|*[!0-9]*) log "not a run directory: $r (bin/evaluate writes run-<k>/, k from 1)"; return 2;;
+    esac
+    [ -d "$r" ] || { log "not a run directory: $r is not a directory"; return 2; }
+    out="$out$k $r"$'\n'
+  done
+  [ -n "$out" ] || { printf '1 %s\n' "$arm"; return 0; }
+  for f in eval-case.json outputs run_status.json grading.json timing.json; do
+    [ ! -e "$arm/$f" ] || {
+      log "$arm holds $f beside run-<k>/ directories: an arm is one run or run-<k>/, not both"; return 2; }
+  done
+  printf '%s' "$out" | sort -n
+}
+
 lab_root() {
   # SDLC_SKILLS_EVALS_ROOT wins so every bin/* command works from any
   # working directory; otherwise the directory above lib/ (this file's

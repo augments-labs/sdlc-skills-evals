@@ -25,6 +25,14 @@
 # a Summary table and a Per-Eval Breakdown, with a run column when an arm
 # was repeated. No live calls.
 #
+# An arm is one run or run-<k>/ directories (k from 1, no leading zero),
+# never both: an arm holding a run's files beside run-<k>/, a run- name
+# that is not run-<k>, or a run-<k> that is not a directory is refused. So
+# is an iteration where some eval and arm does not hold exactly runs 1 to
+# N: N is identity.json's runs_per_eval, else the highest run number the
+# iteration holds. A refusal names the arm, writes nothing (a benchmark.json
+# already there stays as it was), and exits 2.
+#
 # The identity fields of metadata are bin/evaluate's <iteration>/identity.json,
 # copied — except that a missing runs_per_eval is the highest run number the
 # iteration holds (1 for one run per arm) and a commit or skill_tree that is
@@ -33,7 +41,8 @@
 # text each arm installed. plugin is {commit, skill_tree} for with_skill;
 # baseline is the same pair for old_skill and null for without_skill.
 # skill_tree is the git tree hash of the skill's directory at that commit.
-# An iteration with no identity.json, or an unreadable one, is still
+# An iteration with no identity.json, or an unreadable one (not one JSON
+# object, or a runs_per_eval that is not a positive integer), is still
 # benchmarked, unnamed: skill, harness, harness_version and model are null,
 # and plugin (and baseline for old_skill) is {commit: null, skill_tree: null}
 # — bin/report will not record it.
@@ -50,6 +59,8 @@ iter="${1:-}"; [ -n "$iter" ] || { echo "needs an iteration dir" >&2; exit 2; }
 [ -d "$iter" ] || { echo "no such dir: $iter" >&2; exit 2; }
 
 command -v jq >/dev/null 2>&1 || { echo "needs \`jq\`" >&2; exit 3; }
+# shellcheck source=../lib/common.sh
+. "$(cd "$(dirname "$0")/.." && pwd)/lib/common.sh"
 
 second_arm=""
 for e in "$iter"/*/; do
@@ -68,26 +79,25 @@ done
 [ -n "$second_arm" ] && [ "$second_arm" != with_skill ] || {
   echo "no with_skill/second-arm pairs in $iter" >&2; exit 2; }
 
+# Every arm is one run or run-<k>/ directories (lab_arm_runs says which and
+# refuses the rest), or the iteration is not aggregated.
+for e in "$iter"/*/; do
+  [ -d "$e" ] || continue
+  for a in with_skill "$second_arm"; do
+    [ ! -d "$e$a" ] || lab_arm_runs "$e$a" >/dev/null || {
+      echo "benchmark: $iter is not aggregated" >&2; exit 2; }
+  done
+done
+
 identity='{}'
 if [ -f "$iter/identity.json" ] && ! identity="$(jq -cse \
-    'if length == 1 and (.[0] | type) == "object" then .[0] else error("not one object") end' \
+    'if length == 1 and (.[0] | type) == "object"
+        and (.[0].runs_per_eval | . == null or (type == "number" and . >= 1 and . == floor))
+      then .[0] else error("not one identity") end' \
     "$iter/identity.json" 2>/dev/null)"; then
   identity='{}'
   echo "benchmark: $iter/identity.json is unreadable — this iteration's identity is null" >&2
 fi
-
-# The run dirs of one arm, one per line as "<run number> <dir>": the arm dir
-# itself as run 1, or its run-<k>/ directories in numeric order when
-# bin/evaluate repeated the arm (--runs N above 1).
-arm_runs() { # $1 arm dir
-  local r k out=""
-  for r in "$1"/run-*/; do
-    k="$(basename "$r")"; k="${k#run-}"
-    case "$k" in ''|*[!0-9]*) continue;; esac
-    [ -d "$r" ] && out="$out$((10#$k)) ${r%/}"$'\n'
-  done
-  if [ -n "$out" ]; then printf '%s' "$out" | sort -n; else printf '1 %s\n' "$1"; fi
-}
 
 # One row per eval, arm and run, in eval order, then arm order, then run order.
 runs="$(for e in "$iter"/*/; do
@@ -111,9 +121,28 @@ runs="$(for e in "$iter"/*/; do
          needs_review: $g.needs_review, total: $g.total,
          time_seconds: (if $t == null then null else (($t.duration_ms // 0) / 1000) end),
          tokens: (if $t == null then null else $t.total_tokens end)}'
-    done < <(arm_runs "$e$a")
+    done < <(lab_arm_runs "$e$a")
   done
 done | jq -s .)"
+
+# One iteration is N runs of every eval and arm, numbered 1 to N: N is
+# identity.json's runs_per_eval, else the highest run number held. An
+# iteration that is anything else is refused, and nothing is written.
+uneven="$(jq -rn --argjson runs "$runs" --argjson id "$identity" '
+  ($id.runs_per_eval // ([$runs[].run_number] | max) // 1) as $n
+  | $runs | group_by([.eval_id, .configuration])[]
+  | select(length != $n or (map(.run_number) | sort) != [range(1; length + 1)])
+  | "\(.[0].eval_id)/\(.[0].configuration) holds run(s) \(map(.run_number | tostring) | join(", ")), not 1 to \($n)"')" \
+  || { echo "cannot aggregate $iter" >&2; exit 2; }
+if [ -n "$uneven" ]; then
+  printf 'benchmark: %s\n' "$uneven" >&2
+  if jq -e '.runs_per_eval != null' <<<"$identity" >/dev/null; then
+    echo "benchmark: $iter is not aggregated — identity.json says runs_per_eval is $(jq -r .runs_per_eval <<<"$identity")" >&2
+  else
+    echo "benchmark: $iter is not aggregated — every eval and arm holds the same runs, 1 to N" >&2
+  fi
+  exit 2
+fi
 
 jq -n --argjson runs "$runs" --arg arm "$second_arm" --arg iter "$(basename "$iter")" \
   --argjson id "$identity" '
