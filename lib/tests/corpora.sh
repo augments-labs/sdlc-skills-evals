@@ -225,6 +225,22 @@ cp "$m2c/descriptions/yagni.json" "$m2c/descriptions/common/yagni.json"
 run_gate "$m2c"
 expect_fail "a query set under a phase directory is rejected" "descriptions/common/yagni.json is not at"
 
+# 2d. a skill the inventory holds is found however long the inventory is.
+# The lookup once read the list through a pipe into `grep -q`: grep left at
+# the match, the writer was killed on the closed pipe, and under pipefail
+# that read as "not a skill". A list longer than a pipe holds makes that
+# happen every time instead of now and then under load. The gate still
+# fails here, on the first padding name, which the coverage record's corpus
+# state does not hold: a rule it reaches only after every corpus asset and
+# every route was found in the list.
+m2d="$work/m2d"; copy_repo "$m2d"
+jq '.skills += [range(0; 12000) | "zz-a-name-that-pads-the-list-\(.)"]' "$m2d/$INV" \
+  > "$m2d/$INV.new"
+mv "$m2d/$INV.new" "$m2d/$INV"
+run_gate "$m2d"
+expect_fail "a skill the inventory holds is found in a long inventory" \
+  "zz-a-name-that-pads-the-list-0 is neither frozen nor named as new"
+
 # 3. a duplicated query inside a set
 m3="$work/m3"; copy_repo "$m3"
 jq '.[1].query = .[0].query' "$m3/descriptions/yagni.json" > "$m3/descriptions/yagni.json.new"

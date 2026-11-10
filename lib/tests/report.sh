@@ -136,6 +136,26 @@ mkdir -p "$work/old/ws" "$work/nobaseline/ws" "$work/failing/ws"
 bench old_skill "\"$feed\"" "$named" '{}' > "$work/old/ws/benchmark.json"
 copied old && ok "old_skill with both skill trees named is recorded" \
   || bad "old_skill with both skill trees named is recorded (rc $rc: $(cat "$work/old/out"))"
+# a tree hash is 40 hex digits, or 64 in a SHA-256 repository, for either
+# arm: the same shape a summary's is held to below. The lengths next to
+# each, 41 and 63, are refused; both arms read one pattern, so the plugin
+# arm stands for both there.
+feed64="$feed${feed:0:24}"
+mkdir -p "$work/tree64/ws" "$work/base64/ws" "$work/tree41/ws" "$work/tree63/ws"
+bench without_skill "\"$feed64\"" null '{}' > "$work/tree64/ws/benchmark.json"
+copied tree64 && ok "a 64-digit plugin.skill_tree is recorded" \
+  || bad "a 64-digit plugin.skill_tree is recorded (rc $rc: $(cat "$work/tree64/out"))"
+bench old_skill "\"$feed\"" "{\"commit\": \"c\", \"skill_tree\": \"$feed64\"}" '{}' > "$work/base64/ws/benchmark.json"
+copied base64 && ok "old_skill with a 64-digit baseline.skill_tree is recorded" \
+  || bad "old_skill with a 64-digit baseline.skill_tree is recorded (rc $rc: $(cat "$work/base64/out"))"
+bench without_skill "\"${feed}f\"" null '{}' > "$work/tree41/ws/benchmark.json"
+refused tree41 'with_skill' && grep -q 'not a git tree hash' "$work/tree41/out" \
+  && ok "a plugin.skill_tree of 41 digits is refused" \
+  || bad "a plugin.skill_tree of 41 digits is refused (rc $rc: $(cat "$work/tree41/out"))"
+bench without_skill "\"${feed64:0:63}\"" null '{}' > "$work/tree63/ws/benchmark.json"
+refused tree63 'with_skill' && grep -q 'not a git tree hash' "$work/tree63/out" \
+  && ok "a plugin.skill_tree of 63 digits is refused" \
+  || bad "a plugin.skill_tree of 63 digits is refused (rc $rc: $(cat "$work/tree63/out"))"
 # without_skill installs no plugin: its null baseline refuses nothing
 bench without_skill "\"$feed\"" null '{}' > "$work/nobaseline/ws/benchmark.json"
 copied nobaseline && ok "without_skill needs no baseline" \
