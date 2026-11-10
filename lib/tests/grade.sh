@@ -30,6 +30,28 @@ jq -e '.assertion_results[1].passed == false and (.assertion_results[1].evidence
   && ok "failures cite actuals, not silence" || bad "failures cite actuals, not silence"
 
 
+# --- an arm with repeated runs: <arm>/run-<k>/ is graded run by run ----------
+mkdir "$work/rep"
+cp -r "$here/lib/tests/fixtures/grade-run" "$work/rep/run-1"
+cp -r "$here/lib/tests/fixtures/grade-run" "$work/rep/run-2"
+printf '{"outcome":"indeterminate","reason":"timeout (exit 124)"}\n' > "$work/rep/run-2/run_status.json"
+"$here/bin/grade" "$work/rep" >/dev/null 2>&1; rc=$?
+[ "$rc" -eq 0 ] && jq -e '.summary.pass_rate == 0.5' "$work/rep/run-1/grading.json" >/dev/null 2>&1 \
+  && jq -e '.summary.outcome == "indeterminate" and .summary.pass_rate == null' "$work/rep/run-2/grading.json" >/dev/null 2>&1 \
+  && [ ! -e "$work/rep/grading.json" ] \
+  && ok "an arm holding run-<k>/ directories is graded run by run" \
+  || bad "an arm holding run-<k>/ directories is graded run by run (rc $rc)"
+rm -rf "$work/rep/run-2/outputs"
+"$here/bin/grade" "$work/rep" >"$work/rep.out" 2>&1; rc=$?
+[ "$rc" -eq 2 ] && grep -q 'run-2' "$work/rep.out" \
+  && ok "a run that cannot be graded fails the arm, by name" \
+  || bad "a run that cannot be graded fails the arm, by name (rc $rc: $(cat "$work/rep.out"))"
+mkdir "$work/empty-arm"
+"$here/bin/grade" "$work/empty-arm" >"$work/empty-arm.out" 2>&1; rc=$?
+[ "$rc" -eq 2 ] && grep -q 'eval-case.json' "$work/empty-arm.out" \
+  && ok "a directory with neither a run nor run-<k>/ is refused" \
+  || bad "a directory with neither a run nor run-<k>/ is refused (rc $rc)"
+
 # --- the arm measured nothing: indeterminate short-circuits the grade --------
 cp -r "$here/lib/tests/fixtures/grade-run" "$work/indet"
 printf '{"outcome":"indeterminate","reason":"timeout (exit 124)"}\n' > "$work/indet/run_status.json"
@@ -219,6 +241,18 @@ TMPDIR="$work/outer-tmp" HOME="$outer_home" TRIPWIRE_LOG="$own_trip" RUBRIC_MODE
   FAKE_BEHAVIORAL_HOOK="$rub_hook" "$here/bin/grade" "$work/rindet" --harness fake --harness-dir "$fake_h" >/dev/null 2>&1
 [ ! -e "$work/rindet.log" ] && ok "an indeterminate arm spends no grader call" \
   || bad "an indeterminate arm spends no grader call"
+# a repeated arm spends one grader call per run that has prose
+mkdir "$work/rrep"
+cp -r "$here/lib/tests/fixtures/grade-run" "$work/rrep/run-1"
+cp -r "$here/lib/tests/fixtures/grade-run" "$work/rrep/run-2"
+TMPDIR="$work/outer-tmp" HOME="$outer_home" TRIPWIRE_LOG="$own_trip" RUBRIC_MODE=file RUBRIC_LOG="$work/rrep.log" \
+  FAKE_BEHAVIORAL_HOOK="$rub_hook" FAKE_RECORD_DIR="$work/rrep.rec" \
+  FAKE_SOURCE_LOG="$work/rrep.src" FAKE_LAUNCH_LOG="$work/rrep.launch" \
+    "$here/bin/grade" "$work/rrep" --harness fake --harness-dir "$fake_h" --timeout 20 >/dev/null 2>&1
+[ "$(grep -c . "$work/rrep.log" 2>/dev/null)" = 2 ] \
+  && jq -e '.assertion_results[5].passed == false' "$work/rrep/run-2/grading.json" >/dev/null 2>&1 \
+  && ok "the rubric grader runs once per run of a repeated arm" \
+  || bad "the rubric grader runs once per run of a repeated arm ($(grep -c . "$work/rrep.log" 2>/dev/null) calls)"
 [ ! -s "$own_trip" ] && ok "no real agent CLI was called" || bad "no real agent CLI was called"
 
 exit "$fails"
