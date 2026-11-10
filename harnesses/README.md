@@ -18,7 +18,11 @@ evidence, never a fresh session), `adapter_model` and
 `scenario_model_tier` — the current runners leave it empty; a runner that
 sets a tier must refuse the run on an adapter without them rather than run
 the default model and call it that tier), `adapter_ran`, `adapter_usage`,
-`adapter_activation_flags`, `adapter_prompt_suffix`, `adapter_name`.
+`adapter_version` (the CLI version the adapter itself probed) and
+`adapter_session_model <stream>` (the model the session named in its own
+stream) — `bin/evaluate` records both, and null without them, never the
+tier asked for — `adapter_activation_flags`, `adapter_prompt_suffix`,
+`adapter_name`.
 
 Detection is structural, never a prose grep: an activation counts only
 when the harness's own stream carries a structured skill-invocation
@@ -279,6 +283,12 @@ With that record in hand:
 A harness whose run produced no skill record, or whose stream the parser
 could not read, stays `runnable=no` — with the reason naming what the run
 showed instead. The flag is never promoted by a test.
+
+A record names the skill text an arm installed as the git tree hash of
+`skills/[<phase>/]<name>` (`lib/pin.sh` `lab_pin_identity`). An adapter
+that installs another copy of the skill — `antigravity` and `devin`
+install the tree's `plugins/sdlc-skills` mirror — stays `runnable=no`
+until it shows the copy it loads is that same text.
 
 ## The adapter tests
 

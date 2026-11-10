@@ -138,4 +138,80 @@ mkdir -p "$work4/none/eval-a/with_skill"
   && ok "an iteration with no pair exits 2" || bad "an iteration with no pair exits 2 (rc $rc)"
 rm -rf "$work4"
 
+# --- what the iteration measured: identity.json into metadata ----------------
+# bin/evaluate writes identity.json beside the evals; bin/benchmark copies it
+# into metadata next to the fields it always wrote. An iteration without one
+# is still benchmarked: its identity is null, never a guess.
+jq -e '.metadata | .iteration == "iter" and .configurations == ["with_skill", "without_skill"]
+  and .eval_ids == ["eval-a", "eval-b"]
+  and .skill == null and .harness == null and .harness_version == null and .model == null
+  and .runs_per_eval == 1 and .plugin == {commit: null, skill_tree: null} and .baseline == null' "$b" >/dev/null 2>&1 \
+  && ok "an iteration with no identity.json has a null identity" \
+  || bad "an iteration with no identity.json has a null identity ($(jq -c .metadata "$b" 2>/dev/null))"
+
+c1=1111111111111111111111111111111111111111; t1=2222222222222222222222222222222222222222
+c2=3333333333333333333333333333333333333333; t2=4444444444444444444444444444444444444444
+work5="$(mktemp -d)"
+ident() { # $1 baseline json — prints an identity.json
+  jq -n --arg c "$c1" --arg t "$t1" --argjson base "$1" '{skill: "probe", harness: "fake",
+    harness_version: "1.2.3", model: "model-1", runs_per_eval: 1,
+    plugin: {commit: $c, skill_tree: $t}, baseline: $base}'
+}
+cp -r "$here/lib/tests/fixtures/bench-iter" "$work5/id"
+ident null > "$work5/id/identity.json"
+"$here/bin/benchmark" "$work5/id" >/dev/null 2>&1; rc=$?
+[ "$rc" -eq 0 ] && jq -e --arg c "$c1" --arg t "$t1" '.metadata == {iteration: "id",
+    configurations: ["with_skill", "without_skill"], eval_ids: ["eval-a", "eval-b"],
+    skill: "probe", harness: "fake", harness_version: "1.2.3", model: "model-1", runs_per_eval: 1,
+    plugin: {commit: $c, skill_tree: $t}, baseline: null}
+  and (.runs | length) == 4 and .run_summary.delta.pass_rate == 0.5' "$work5/id/benchmark.json" >/dev/null 2>&1 \
+  && ok "identity.json is copied into metadata, and is not read as an eval" \
+  || bad "identity.json is copied into metadata, and is not read as an eval (rc $rc; $(jq -c .metadata "$work5/id/benchmark.json" 2>/dev/null))"
+
+# old_skill names its baseline; without_skill has none, whatever the file says
+mk_old() { # $1 dir — the fixture with old_skill as the second arm
+  cp -r "$here/lib/tests/fixtures/bench-iter" "$1"
+  for e in eval-a eval-b; do mv "$1/$e/without_skill" "$1/$e/old_skill"; done
+}
+mk_old "$work5/old"
+ident "$(jq -nc --arg c "$c2" --arg t "$t2" '{commit: $c, skill_tree: $t}')" > "$work5/old/identity.json"
+"$here/bin/benchmark" "$work5/old" >/dev/null 2>&1
+jq -e --arg c "$c2" --arg t "$t2" '.metadata.configurations == ["with_skill", "old_skill"]
+  and .metadata.baseline == {commit: $c, skill_tree: $t}' "$work5/old/benchmark.json" >/dev/null 2>&1 \
+  && ok "old_skill names the baseline it installed" \
+  || bad "old_skill names the baseline it installed ($(jq -c .metadata "$work5/old/benchmark.json" 2>/dev/null))"
+mk_old "$work5/old-none"
+"$here/bin/benchmark" "$work5/old-none" >/dev/null 2>&1
+jq -e '.metadata.baseline == {commit: null, skill_tree: null}' "$work5/old-none/benchmark.json" >/dev/null 2>&1 \
+  && ok "old_skill with no identity.json has a null baseline identity, not a null baseline" \
+  || bad "old_skill with no identity.json has a null baseline identity, not a null baseline"
+cp -r "$here/lib/tests/fixtures/bench-iter" "$work5/stray"
+ident "$(jq -nc --arg c "$c2" --arg t "$t2" '{commit: $c, skill_tree: $t}')" > "$work5/stray/identity.json"
+"$here/bin/benchmark" "$work5/stray" >/dev/null 2>&1
+jq -e '.metadata | has("baseline") and .baseline == null' "$work5/stray/benchmark.json" >/dev/null 2>&1 \
+  && ok "without_skill has no baseline" || bad "without_skill has no baseline"
+
+# an identity.json that cannot be read is no identity, and the operator is told
+cp -r "$here/lib/tests/fixtures/bench-iter" "$work5/broken"
+printf '{"plugin": ' > "$work5/broken/identity.json"
+"$here/bin/benchmark" "$work5/broken" >"$work5/broken.out" 2>&1; rc=$?
+[ "$rc" -eq 0 ] && grep -q 'identity.json' "$work5/broken.out" \
+  && jq -e '.metadata.plugin == {commit: null, skill_tree: null} and .metadata.skill == null
+    and (.runs | length) == 4' "$work5/broken/benchmark.json" >/dev/null 2>&1 \
+  && ok "an unreadable identity.json is a null identity, said aloud" \
+  || bad "an unreadable identity.json is a null identity, said aloud (rc $rc)"
+# so is one that holds anything but a single object
+n=0
+for content in '[]' '"x"' 'null' '{"skill":"x"}{"skill":"y"}' ''; do
+  n=$((n + 1)); cp -r "$here/lib/tests/fixtures/bench-iter" "$work5/shape$n"
+  printf '%s\n' "$content" > "$work5/shape$n/identity.json"
+  "$here/bin/benchmark" "$work5/shape$n" >"$work5/shape$n.out" 2>&1; rc=$?
+  [ "$rc" -eq 0 ] && grep -q 'identity.json' "$work5/shape$n.out" \
+    && jq -e '.metadata.plugin == {commit: null, skill_tree: null} and .metadata.skill == null
+      and (.runs | length) == 4' "$work5/shape$n/benchmark.json" >/dev/null 2>&1 \
+    && ok "identity.json holding '$content' is a null identity, said aloud" \
+    || bad "identity.json holding '$content' is a null identity, said aloud (rc $rc: $(head -n 2 "$work5/shape$n.out"))"
+done
+rm -rf "$work5"
+
 exit "$fails"

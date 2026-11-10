@@ -4,7 +4,8 @@
 #
 # Reads <eval-id>/{with_skill,without_skill|old_skill}/{grading.json,
 # timing.json} and writes benchmark.json:
-#   metadata    {iteration, configurations, eval_ids}
+#   metadata    {iteration, configurations, eval_ids, skill, harness,
+#               harness_version, model, runs_per_eval, plugin, baseline}
 #   runs[]      one row per eval and arm: {eval_id, configuration, outcome,
 #               reason, pass_rate, passed, failed, needs_review, total,
 #               time_seconds, tokens}
@@ -17,6 +18,18 @@
 # run over the runs that reported tokens. The second arm keeps its own name
 # (without_skill or old_skill). benchmark.md is the same data for a human:
 # a Summary table and a Per-Eval Breakdown. No live calls.
+#
+# The identity fields of metadata are bin/evaluate's <iteration>/identity.json,
+# copied — except that runs_per_eval defaults to 1 and a commit or skill_tree
+# that is not a string becomes null: which skill, on which harness (and CLI
+# version, and the model the sessions named — null when unknown), and which
+# skill text each arm installed. plugin is {commit, skill_tree} for
+# with_skill; baseline is the same pair for old_skill and null for
+# without_skill. skill_tree is the git tree hash of the skill's directory at
+# that commit. An iteration with no identity.json, or an unreadable one, is
+# still benchmarked, unnamed: skill, harness, harness_version and model are
+# null, and plugin (and baseline for old_skill) is {commit: null,
+# skill_tree: null} — bin/report will not record it.
 #
 # An arm whose grading.json is missing or unreadable, or whose timing.json
 # is unreadable (not an object, or a non-number duration_ms/total_tokens),
@@ -48,6 +61,14 @@ done
 [ -n "$second_arm" ] && [ "$second_arm" != with_skill ] || {
   echo "no with_skill/second-arm pairs in $iter" >&2; exit 2; }
 
+identity='{}'
+if [ -f "$iter/identity.json" ] && ! identity="$(jq -cse \
+    'if length == 1 and (.[0] | type) == "object" then .[0] else error("not one object") end' \
+    "$iter/identity.json" 2>/dev/null)"; then
+  identity='{}'
+  echo "benchmark: $iter/identity.json is unreadable — this iteration's identity is null" >&2
+fi
+
 # One row per eval and arm, in eval order then arm order.
 runs="$(for e in "$iter"/*/; do
   [ -d "$e" ] || continue
@@ -73,7 +94,10 @@ runs="$(for e in "$iter"/*/; do
   done
 done | jq -s .)"
 
-jq -n --argjson runs "$runs" --arg arm "$second_arm" --arg iter "$(basename "$iter")" '
+jq -n --argjson runs "$runs" --arg arm "$second_arm" --arg iter "$(basename "$iter")" \
+  --argjson id "$identity" '
+  def named(o): (o | objects) // {}
+    | {commit: ((.commit | strings) // null), skill_tree: ((.skill_tree | strings) // null)};
   def agg: if length == 0 then null
     else (add / length) as $m
     | {mean: $m,
@@ -88,7 +112,12 @@ jq -n --argjson runs "$runs" --arg arm "$second_arm" --arg iter "$(basename "$it
   def sub(a; b): if a == null or b == null then null else a - b end;
   stats("with_skill") as $with | stats($arm) as $second
   | {metadata: {iteration: $iter, configurations: ["with_skill", $arm],
-                eval_ids: ([$runs[].eval_id] | unique)},
+                eval_ids: ([$runs[].eval_id] | unique),
+                skill: $id.skill, harness: $id.harness,
+                harness_version: $id.harness_version, model: $id.model,
+                runs_per_eval: ($id.runs_per_eval // 1),
+                plugin: named($id.plugin),
+                baseline: (if $arm == "old_skill" then named($id.baseline) else null end)},
      runs: $runs,
      run_summary: ({with_skill: $with} + {($arm): $second}
        + {delta: {pass_rate: sub(meanof($with.pass_rate); meanof($second.pass_rate)),

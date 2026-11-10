@@ -16,13 +16,19 @@ CLI. Read `harnesses/README.md` for the contract, then:
 3. Add what the CLI truly offers and nothing else: `adapter_usage` only
    from observed token keys (silence beats invention),
    `adapter_continue_behavioral` only from a structured session identity,
-   `adapter_model` only for a real tier-to-model binding.
+   `adapter_model` only for a real tier-to-model binding,
+   `adapter_version` only from a probe that runs under the closed
+   environment, `adapter_session_model` only from a model field observed
+   in a real stream.
 4. Write the header from observation: `runnable=no` with the reason
    until a real run on this machine proves otherwise;
    `permission_flags` naming exactly the flags the file passes (a header
    naming a flag the file does not pass fails `bin/check`);
    `capabilities` with `run` evidence only for what a real stream
-   showed, `documentation` for the rest.
+   showed, `documentation` for the rest. A record names the skill text
+   as the tree hash of `skills/[<phase>/]<name>`; an adapter that
+   installs another copy of the skill (the `plugins/sdlc-skills` mirror)
+   stays `runnable=no` until it shows that copy is the same text.
 5. Keep the plugin's offline bindings in the plugin: install smoke,
    discovery, and inventory stay where they are; this file is the live
    half only.

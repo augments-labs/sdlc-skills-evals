@@ -118,6 +118,10 @@ adapter_check() {
   esac
 }
 
+# The version adapter_check probed, for the record: nothing before a probe.
+adapter_version() {
+  [ -z "${opencode_version:-}" ] || printf '%s\n' "$opencode_version"
+}
 
 # OpenCode loads a plugin from the checkout, so the checkout is the whole
 # install: the plugin resolves its skills from its own location. The isolated

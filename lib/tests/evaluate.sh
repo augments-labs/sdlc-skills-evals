@@ -96,12 +96,13 @@ outer_home="$work/outer-home"
 mkdir -p "$outer_home/.config/sdlc-skills-evals/credentials/fake"
 printf 'token\n' > "$outer_home/.config/sdlc-skills-evals/credentials/fake/.fakerc"
 
-# one evaluation, fully offline; $1 a tag naming its files
+# one evaluation, fully offline; $1 a tag naming its files. EV_HOOK replaces
+# the agent for one call.
 run_ev() { # $1 tag, rest: evaluate args
   local tag="$1"; shift
   mkdir -p "$work/$tag"
   HOME="$outer_home" EVALS_ROOT="$evroot" WORKSPACES_ROOT="$work/$tag/ws" \
-  TRIPWIRE_LOG="$own_trip" FAKE_BEHAVIORAL_HOOK="$hook" \
+  TRIPWIRE_LOG="$own_trip" FAKE_BEHAVIORAL_HOOK="${EV_HOOK:-$hook}" \
   FAKE_RECORD_DIR="$work/$tag/rec" FAKE_SOURCE_LOG="$work/$tag/source.log" \
   FAKE_LAUNCH_LOG="$work/$tag/launch.log" HOOK_LOG="$work/$tag/hook.log" \
     "$ev" --harness fake --harness-dir "$fake_h" --skill probe --timeout 20 "$@" \
@@ -417,6 +418,168 @@ la="$work/lost/ws/c6/iteration-1/lost/with_skill"
     and (.assertion_results[0].evidence | test("change list unavailable"))' "$la/grading.json" >/dev/null 2>&1 \
   && ok "a lost seed records no change list, says so, and git-count waits for review" \
   || bad "a lost seed records no change list, says so, and git-count waits for review (git-changed: '$(cat "$la/git-changed.txt" 2>/dev/null)'; $(jq -c '.assertion_results' "$la/grading.json" 2>/dev/null))"
+
+# --- identity.json: which skill text each arm installed ----------------------
+# A plugin checkout with two commits of the probe skill, a tag on the second,
+# and a clone of it to dirty mid-run.
+gitplug="$work/git-plugin"
+gp() { git -C "$gitplug" -c user.name=t -c user.email=t@example.invalid "$@"; }
+mkdir -p "$gitplug/skills/testing/probe"
+printf -- '---\nname: probe\ndescription: "probe one"\n---\n' > "$gitplug/skills/testing/probe/SKILL.md"
+git -C "$gitplug" init -q && gp add -A && gp commit -q -m one
+c_one="$(gp rev-parse HEAD)"; t_one="$(gp rev-parse HEAD:skills/testing/probe)"
+printf -- '---\nname: probe\ndescription: "probe two"\n---\n' > "$gitplug/skills/testing/probe/SKILL.md"
+gp add -A && gp commit -q -m two && gp tag v2
+c_two="$(gp rev-parse HEAD)"; t_two="$(gp rev-parse HEAD:skills/testing/probe)"
+dirtied="$work/git-plugin-dirtied"
+git clone -q "$gitplug" "$dirtied"
+
+# the agent, naming its model first: MODEL_NAME, or a different one per call
+mhook="$work/model-hook"
+cat > "$mhook" <<'HOOK'
+#!/usr/bin/env bash
+echo call >> "$HOOK_LOG"
+if [ -z "${MODEL_ONCE:-}" ] || [ "$(wc -l < "$HOOK_LOG")" -eq 1 ]; then
+  printf 'MODEL %s\n' "${MODEL_NAME:-model-$(wc -l < "$HOOK_LOG")}"
+fi
+[ -z "${DIRTY_PLUGIN:-}" ] || printf 'edited mid-run\n' >> "$DIRTY_PLUGIN/skills/testing/probe/SKILL.md"
+echo "done answer"
+HOOK
+chmod +x "$mhook"
+idrun() { # $1 tag, rest: evaluate args — one eval, under its own outer TMPDIR
+  local tag="$1"; shift
+  ( export TMPDIR="$work/outer-tmp"; run_ev "$tag" --eval-id nested-files --campaign "$tag" "$@" )
+}
+idit() { printf '%s\n' "$work/$1/ws/$1/iteration-1"; }
+report_to() { # $1 tag — bin/report of that iteration into a fresh record
+  "$here/bin/report" --workspace "$(idit "$1")" --record "$work/$1/record" >"$work/$1/report.out" 2>&1
+}
+
+# a directory that is no git work tree: the arm ran, its text has no name
+idrun idnone --plugin "$with_plug"; rc=$?
+[ "$rc" -eq 0 ] && jq -e '. == {skill: "probe", harness: "fake", harness_version: null, model: null,
+    runs_per_eval: 1, plugin: {commit: null, skill_tree: null}, baseline: null}' \
+    "$(idit idnone)/identity.json" >/dev/null 2>&1 \
+  && ok "a plugin directory outside git runs, and identity.json names no skill text" \
+  || bad "a plugin directory outside git runs, and identity.json names no skill text (rc $rc; $(jq -c . "$(idit idnone)/identity.json" 2>&1))"
+jq -e '.metadata | .iteration == "iteration-1" and .configurations == ["with_skill", "without_skill"]
+    and .eval_ids == ["nested-files"] and .skill == "probe" and .harness == "fake"
+    and .plugin == {commit: null, skill_tree: null}' "$(idit idnone)/benchmark.json" >/dev/null 2>&1 \
+  && ok "the benchmark carries the identity beside the fields it always had" \
+  || bad "the benchmark carries the identity beside the fields it always had ($(jq -c .metadata "$(idit idnone)/benchmark.json" 2>&1))"
+grep -q 'with_skill.*unidentified (.*work tree.*bin/report' "$work/idnone/out" \
+  && ok "the run says with_skill is unidentified, why, and that bin/report will refuse it" \
+  || bad "the run says with_skill is unidentified, why, and that bin/report will refuse it ($(grep -i identi "$work/idnone/out"))"
+report_to idnone; rc=$?
+[ "$rc" -eq 2 ] && [ ! -e "$work/idnone/record" ] \
+  && ok "bin/report refuses the unidentified iteration" \
+  || bad "bin/report refuses the unidentified iteration (rc $rc)"
+
+# a clean git work tree: HEAD and the skill's tree hash, the CLI version, the model
+MODEL_NAME=model-x FAKE_VERSION=9.8.7 EV_HOOK="$mhook" idrun idgit --plugin "$gitplug"; rc=$?
+[ "$rc" -eq 0 ] && jq -e --arg c "$c_two" --arg t "$t_two" '. == {skill: "probe", harness: "fake",
+    harness_version: "9.8.7", model: "model-x", runs_per_eval: 1,
+    plugin: {commit: $c, skill_tree: $t}, baseline: null}' "$(idit idgit)/identity.json" >/dev/null 2>&1 \
+  && ok "a clean git work tree is HEAD and the skill's tree hash, with the CLI version and the model" \
+  || bad "a clean git work tree is HEAD and the skill's tree hash, with the CLI version and the model (rc $rc; $(jq -c . "$(idit idgit)/identity.json" 2>&1))"
+grep -q 'unidentified' "$work/idgit/out" && bad "an identified run prints no warning" \
+  || ok "an identified run prints no warning"
+report_to idgit; rc=$?
+[ "$rc" -eq 0 ] && jq -e --arg t "$t_two" '.metadata.plugin.skill_tree == $t' \
+    "$work/idgit/record/benchmark.json" >/dev/null 2>&1 \
+  && ok "bin/report records the identified iteration" \
+  || bad "bin/report records the identified iteration (rc $rc: $(cat "$work/idgit/report.out"))"
+
+# refs: a tag is the commit under it; old_skill names its baseline
+SDLC_SKILLS_ROOT="$gitplug" idrun idref --plugin v2 --baseline-plugin "$c_one"; rc=$?
+[ "$rc" -eq 0 ] && jq -e --arg c "$c_two" --arg t "$t_two" --arg bc "$c_one" --arg bt "$t_one" '
+    .plugin == {commit: $c, skill_tree: $t} and .baseline == {commit: $bc, skill_tree: $bt}' \
+    "$(idit idref)/identity.json" >/dev/null 2>&1 \
+  && jq -e --arg bt "$t_one" '.metadata.configurations == ["with_skill", "old_skill"]
+    and .metadata.baseline.skill_tree == $bt' "$(idit idref)/benchmark.json" >/dev/null 2>&1 \
+  && ok "refs are named by full commit and skill tree, for with_skill and old_skill" \
+  || bad "refs are named by full commit and skill tree, for with_skill and old_skill (rc $rc; $(jq -c . "$(idit idref)/identity.json" 2>&1))"
+
+# old_skill on a directory outside git: the baseline is the unnamed one
+idrun idbase --plugin "$gitplug" --baseline-plugin "$old_plug"; rc=$?
+[ "$rc" -eq 0 ] && jq -e --arg t "$t_two" '.plugin.skill_tree == $t
+    and .baseline == {commit: null, skill_tree: null}' "$(idit idbase)/identity.json" >/dev/null 2>&1 \
+  && grep -q 'old_skill.*unidentified' "$work/idbase/out" && ! grep -q 'with_skill.*unidentified' "$work/idbase/out" \
+  && ok "an unnamed baseline is null, and only old_skill is warned about" \
+  || bad "an unnamed baseline is null, and only old_skill is warned about (rc $rc; $(jq -c . "$(idit idbase)/identity.json" 2>&1))"
+report_to idbase; rc=$?
+[ "$rc" -eq 2 ] && grep -q 'old_skill' "$work/idbase/report.out" \
+  && ok "bin/report refuses it, naming old_skill" || bad "bin/report refuses it, naming old_skill (rc $rc)"
+
+# two arms that name different models: the iteration names none
+EV_HOOK="$mhook" idrun idmodels --plugin "$gitplug"
+jq -e --arg t "$t_two" '.model == null and .plugin.skill_tree == $t' "$(idit idmodels)/identity.json" >/dev/null 2>&1 \
+  && [ "$(grep -h '^MODEL ' "$(idit idmodels)"/nested-files/*/stream.txt | sort -u | wc -l)" -eq 2 ] \
+  && ok "arms that name different models record a null model, not one of them" \
+  || bad "arms that name different models record a null model, not one of them ($(jq -c . "$(idit idmodels)/identity.json" 2>&1))"
+
+# one arm names its model and the other names none: the iteration names none
+MODEL_NAME=model-x MODEL_ONCE=1 EV_HOOK="$mhook" idrun idsome --plugin "$gitplug"
+jq -e --arg t "$t_two" '.model == null and .plugin.skill_tree == $t' "$(idit idsome)/identity.json" >/dev/null 2>&1 \
+  && [ "$(grep -h '^MODEL ' "$(idit idsome)"/nested-files/*/stream.txt | wc -l)" -eq 1 ] \
+  && ok "a model only some arms named is not recorded for the iteration" \
+  || bad "a model only some arms named is not recorded for the iteration ($(jq -c . "$(idit idsome)/identity.json" 2>&1))"
+
+# a session whose outputs could not be copied still ran, so the model it named
+# counts: here it differs from the other arm's, and the iteration names none
+gonehook="$work/gone-hook.sh"
+cat > "$gonehook" <<'HOOK'
+#!/usr/bin/env bash
+echo call >> "$HOOK_LOG"
+n="$(wc -l < "$HOOK_LOG")"
+printf 'MODEL model-%s\n' "$n"
+echo "done answer"
+[ "$n" -eq 1 ] || rm -rf "$1"
+HOOK
+chmod +x "$gonehook"
+EV_HOOK="$gonehook" idrun idgone --plugin "$gitplug"; rc=$?
+[ "$rc" -eq 2 ] && grep -q 'nested-files/without_skill' "$work/idgone/out" \
+  && [ ! -e "$(idit idgone)/nested-files/without_skill/grading.json" ] \
+  && [ "$(grep -h '^MODEL ' "$(idit idgone)"/nested-files/*/stream.txt | sort -u | wc -l)" -eq 2 ] \
+  && jq -e --arg t "$t_two" '.model == null and .plugin.skill_tree == $t' "$(idit idgone)/identity.json" >/dev/null 2>&1 \
+  && ok "an arm whose outputs were lost still counts its session's model" \
+  || bad "an arm whose outputs were lost still counts its session's model (rc $rc; $(jq -c . "$(idit idgone)/identity.json" 2>&1); $(tail -n 3 "$work/idgone/out"))"
+
+# skill text edited while the run was under way: what the arms saw is no commit's
+MODEL_NAME=model-x DIRTY_PLUGIN="$dirtied" EV_HOOK="$mhook" idrun iddirty --plugin "$dirtied"; rc=$?
+[ "$rc" -eq 0 ] && jq -e '.plugin == {commit: null, skill_tree: null}' "$(idit iddirty)/identity.json" >/dev/null 2>&1 \
+  && grep -q 'with_skill.*unidentified' "$work/iddirty/out" \
+  && ok "a plugin edited during the run ends unidentified" \
+  || bad "a plugin edited during the run ends unidentified (rc $rc; $(jq -c . "$(idit iddirty)/identity.json" 2>&1))"
+# the same for the baseline: old_skill ends unidentified, with_skill stays named
+dirtied2="$work/git-plugin-dirtied2"
+git clone -q "$gitplug" "$dirtied2"
+MODEL_NAME=model-x DIRTY_PLUGIN="$dirtied2" EV_HOOK="$mhook" idrun idbasedirty --plugin "$gitplug" --baseline-plugin "$dirtied2"; rc=$?
+[ "$rc" -eq 0 ] && jq -e --arg t "$t_two" '.plugin.skill_tree == $t
+    and .baseline == {commit: null, skill_tree: null}' "$(idit idbasedirty)/identity.json" >/dev/null 2>&1 \
+  && grep -q 'old_skill.*unidentified.*changed during the run' "$work/idbasedirty/out" \
+  && ! grep -q 'with_skill.*unidentified' "$work/idbasedirty/out" \
+  && ok "a baseline edited during the run ends unidentified, and with_skill stays named" \
+  || bad "a baseline edited during the run ends unidentified, and with_skill stays named (rc $rc; $(jq -c . "$(idit idbasedirty)/identity.json" 2>&1))"
+report_to idbasedirty; rc=$?
+[ "$rc" -eq 2 ] && grep -q 'old_skill' "$work/idbasedirty/report.out" && ! grep -q 'with_skill' "$work/idbasedirty/report.out" \
+  && ok "bin/report refuses that iteration, naming old_skill only" \
+  || bad "bin/report refuses that iteration, naming old_skill only (rc $rc: $(cat "$work/idbasedirty/report.out"))"
+
+# the dry run says, before anything is spent, whether the run can be recorded
+dry_id="$(dry --plugin "$gitplug")"
+printf '%s\n' "$dry_id" | grep -q "^identity : with_skill $c_two  skill_tree $t_two\$" \
+  && ok "the dry run names with_skill's commit and skill tree" \
+  || bad "the dry run names with_skill's commit and skill tree (got '$dry_id')"
+dry_id="$(dry --plugin "$with_plug" --baseline-plugin "$gitplug")"
+printf '%s\n' "$dry_id" | grep -q '^identity : with_skill unidentified.*bin/report' \
+  && printf '%s\n' "$dry_id" | grep -q "^identity : old_skill $c_two  skill_tree $t_two\$" \
+  && ok "the dry run says which arm is unidentified, and names the other" \
+  || bad "the dry run says which arm is unidentified, and names the other (got '$dry_id')"
+[ "$(dry --plugin "$with_plug" | grep -c '^identity :')" -eq 1 ] \
+  && [ "$(dry --plugin "$with_plug" --baseline-plugin "$gitplug" | grep -c '^identity :')" -eq 2 ] \
+  && ok "the dry run prints one identity line per arm that installs a plugin, none for without_skill" \
+  || bad "the dry run prints one identity line per arm that installs a plugin, none for without_skill"
 
 [ ! -s "$own_trip" ] && ok "no real agent CLI was called" || bad "no real agent CLI was called ($(cat "$own_trip"))"
 

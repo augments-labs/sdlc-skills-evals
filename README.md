@@ -47,8 +47,12 @@ Prerequisites:
   holding the pinned commit. `--plugin` takes a directory or a ref in that
   checkout and defaults to the inventory's commit. Every `--dry-run` prints
   the pin it resolved; `bin/optimize-description` also records it in
-  `optimization.json`. `bin/evaluate` and `bin/triggering` record none, so
-  note the pin you priced when you start one of them.
+  `optimization.json`, and `bin/evaluate` records what each arm installed
+  in `identity.json`. `bin/triggering` records none, so note the pin you
+  priced when you start it;
+- `git` and `jq` on your `PATH`: `bin/evaluate`, `bin/benchmark`,
+  `bin/report`, `bin/triggering` and `bin/optimize-description` exit 3
+  without `jq`, and `bin/grade` needs it too.
 
 Price every live command with its own `--dry-run` first: it prints the pin,
 the selection, and the number of CLI calls, and launches nothing. For
@@ -66,9 +70,24 @@ bin/evaluate --harness opencode --skill yagni
 Outputs land in `workspaces/<campaign>/` (default campaign
 `evaluate-<skill>`), one `iteration-<N>/` per run: per eval and arm the
 produced `outputs/`, `run_status.json`, `timing.json`, and `grading.json`,
-then `benchmark.json`, `benchmark.md`, and an empty `feedback.json` for
-your review. `--baseline-plugin` pairs the skill against an older plugin
-tree (`old_skill`) instead of no skill.
+then `identity.json`, `benchmark.json`, `benchmark.md`, and an empty
+`feedback.json` for your review. `--baseline-plugin` pairs the skill
+against an older plugin tree (`old_skill`) instead of no skill.
+
+`identity.json` says what the iteration measured, and `bin/benchmark`
+copies it into `benchmark.json`'s `metadata`: the skill, the harness, its
+CLI version and the model every session named (each null when the adapter
+reads none; the model also when a session named none or two disagreed),
+and for each arm that installed a plugin the full `commit` and the
+`skill_tree` — the git tree hash of the skill's directory at that commit,
+`git rev-parse <commit>:skills/<phase>/<name>`, which names the skill text
+by content. A `--plugin` or `--baseline-plugin` directory is named only
+when it is the top of a git work tree whose skill directory is exactly
+`HEAD`'s: no modified, untracked or git-ignored file in it, no file mode
+`HEAD` does not hold, and no file marked `assume-unchanged` or
+`skip-worktree`. Otherwise both are null, the
+`--dry-run` and the run say so, and `bin/report` will not record the
+iteration.
 
 Prose assertions wait as `needs_review` for you. To have a skill-free
 session on the same harness grade them, price the extra calls first —
