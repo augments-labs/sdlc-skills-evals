@@ -218,6 +218,21 @@ cp "$m2b/evals/yagni/evals.json" \
 run_gate "$m2b"
 expect_fail "a stale skill's eval definition is rejected" "names a skill the inventory does not hold"
 
+# 2d. a skill the inventory holds is found however long the inventory is.
+# The lookup once read the list through a pipe into `grep -q`: grep left at
+# the match, the writer was killed on the closed pipe, and under pipefail
+# that read as "not a skill". A list longer than a pipe holds makes that
+# happen every time instead of now and then under load. The gate still
+# fails here, on the first padding name, which has no set: a rule it reaches
+# only after every corpus asset and every route was found in the list.
+m2d="$work/m2d"; copy_repo "$m2d"
+jq '.skills += [range(0; 12000) | "zz-a-name-that-pads-the-list-\(.)"]' "$m2d/$INV" \
+  > "$m2d/$INV.new"
+mv "$m2d/$INV.new" "$m2d/$INV"
+run_gate "$m2d"
+expect_fail "a skill the inventory holds is found in a long inventory" \
+  "zz-a-name-that-pads-the-list-0 is neither frozen nor named as new"
+
 # 2c. a set under a retired phase directory is read by no runner
 m2c="$work/m2c"; copy_repo "$m2c"
 mkdir -p "$m2c/descriptions/common"
