@@ -25,8 +25,8 @@ echo "check: .gitignore honors plans, raw runs, workspaces, secrets"
 # is the output-eval root the coverage scan, the corpora check and the corpus
 # audit all read.
 INV_URL="https://github.com/augments-labs/sdlc-skills"
-INV_COMMIT="40f8ff4c532da29b286b4d06ecf4516a4a093a7d"
-INV_VERSION="11.2.0"
+INV_COMMIT="c1e995a0371b11271b1d9a393e89fb2f345b2611"
+INV_VERSION="12.0.0"
 inv_path="${INVENTORY_PATH:-config/upstream-inventory.json}"
 docs_root="${DOCS_ROOT:-docs}"
 desc_root="${DESCRIPTIONS_ROOT:-descriptions}"

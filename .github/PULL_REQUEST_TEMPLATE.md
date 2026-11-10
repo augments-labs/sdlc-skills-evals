@@ -14,7 +14,7 @@ Low-evidence, speculative, or bundled PRs will be closed.
 
 ## Relationship to sdlc-skills
 <!-- Plugin pin under test (the inventory pins commit
-     40f8ff4c532da29b286b4d06ecf4516a4a093a7d, 11.2.0, in config/upstream-inventory.json).
+     c1e995a0371b11271b1d9a393e89fb2f345b2611, 12.0.0, in config/upstream-inventory.json).
      If this changes skill behavior, harness loading, or eval methodology,
      describe the expected before/after signal and why it belongs here. -->
 

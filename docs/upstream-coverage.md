@@ -1,9 +1,10 @@
-# Upstream coverage — the pinned v11 scope and the work already done
+# Upstream coverage — the pinned v12 scope and the work already done
 
 This record answers two questions for whoever picks the lab up next.
 
-1. **What has to be covered?** The pinned upstream: 48 canonical skills and
-   11 harnesses, at one commit. `config/upstream-inventory.json` holds the
+1. **What has to be covered?** The pinned upstream: the 48 canonical skills
+   the inventory holds, of the 49 at the pin, and 11 harnesses, at one
+   commit. `config/upstream-inventory.json` holds the
    pin; `bin/check` enforces it offline.
 2. **What of the earlier plan is already built?** Every task of the
    predecessor plan, mapped to preserved, extended or removed scope, with
@@ -22,14 +23,14 @@ which.
 | Field | Value |
 | --- | --- |
 | Repository | `https://github.com/augments-labs/sdlc-skills` |
-| Commit | `40f8ff4c532da29b286b4d06ecf4516a4a093a7d` — a commit, not a mutable version tag |
-| Package version | `11.2.0` |
-| Canonical skills | 48, at `skills/<phase>/<name>/SKILL.md`; the inventory holds the bare `<name>` |
+| Commit | `c1e995a0371b11271b1d9a393e89fb2f345b2611` — a commit, not a mutable version tag |
+| Package version | `12.0.0` |
+| Canonical skills | 48 of the 49 at `skills/<phase>/<name>/SKILL.md`; the inventory holds the bare `<name>`. The 49th, `runtime-evidence`, is new in `12.0.0` and joins the inventory together with its eval set and query set, which the gate requires of every skill it holds |
 | Upstream harnesses | 11, at `tests/harnesses/<name>.sh` |
 
-The packaged mirror under `plugins/sdlc-skills/skills/` carries the same 48
-skills in a flat layout. It is a distribution artifact, never a second
-canonical copy: the inventory and the drift check count `skills/` only.
+The packaged mirror under `plugins/sdlc-skills/skills/` carries the same
+skills as `skills/` in a flat layout. It is a distribution artifact, never a
+second canonical copy: the inventory and the drift check count `skills/` only.
 `bin/check --plugin` reads a skill as the basename of the directory that
 holds its `SKILL.md`, so it accepts either layout, and it refuses a tree in
 which two directories share a basename. A packaged mirror carries no
@@ -63,8 +64,13 @@ obligation. `bin/check` fails when a task in this table has no verdict.
 Rows E-2, E-4, E-8 and E-10 describe the lab before the behavior runner, its
 scenarios and manifests, `bin/campaign`, `lib/verdict.sh` and
 `lib/prelude.sh` were retired by the agentskills.io alignment, and "46
-skills" in E-5 and E-7 is that pin's count; the current pin has 48. The rows
-stay as written: they are provenance.
+skills" in E-5 and E-7 is that pin's count; the inventory holds 48. E-0's
+"the committed inventory names the v11 commit", E-5's "the pinned v11
+bodies" and E-7's "every skill in the pin now carries a definition" were
+true of the pin of that time, as is each "the v11 body of" or "the v11
+bodies of" cell of the corpus audit; the pin is now `12.0.0`, the inventory
+names its commit, and one skill at it has no definition yet (the gaps
+section below). The rows stay as written: they are provenance.
 
 Work after the tasks themselves: the independent review fixes (`5b15240`),
 the pull-request feedback round (`2d15beb`) and the merge of the whole lab
@@ -98,8 +104,11 @@ now in the user's hands.
 `bin/check` prints the three asset lists on every run that reaches the
 pinned-scope section — the last section of the full gate — so a run that
 fails earlier prints none of them; the lists below are their state at this
-commit. The two skill gaps are closed: every skill in the pin carries a
-description set and an output-eval definition. The old evals-coverage gate
+commit. The lists are computed from the inventory, and for it the two skill
+gaps are closed: every skill the inventory holds carries a description set
+and an output-eval definition. The 49th skill at the pin,
+`runtime-evidence`, is not in the inventory yet and has neither; no list
+below names it. The old evals-coverage gate
 was a reported gap list so the initial coverage could be recorded without a
 red cell — the plan's own clause permits it ("Initial coverage may record
 missing assets; V3-CORPORA closes them", `01-inventory.md`) — and the last
@@ -110,13 +119,13 @@ the adapter gap.
 
 ### Skills with no eval definition (0)
 
-None. Every skill in the pin carries an output-eval definition with its own
-fixture tree; the corpus audit below is the row per skill.
+None. Every skill the inventory holds carries an output-eval definition
+with its own fixture tree; the corpus audit below is the row per skill.
 
 ### Skills with no description set (0)
 
-None. Every skill in the pin carries a description set of at least twenty
-balanced queries with fixed `train`/`validation` splits and near-miss
+None. Every skill the inventory holds carries a description set of at least
+twenty balanced queries with fixed `train`/`validation` splits and near-miss
 negatives.
 
 ### Harnesses with no lab adapter (0)
@@ -209,12 +218,14 @@ holdout cannot simply be placed in the corpus before the selection step.
 
 ## The corpus audit — one row per skill
 
-Every skill in the pin carries two corpora: a description set of at least
-twenty balanced queries with fixed `train`/`validation` splits and near-miss
-negatives, and an output-eval definition of two or three cases with its own
-fixture tree. A row is not a name: it links the upstream body the corpus was
-written against, the positives, the near misses, the output case that bounds
-the skill, and the inputs the corpus stages for it.
+Every skill the inventory holds carries two corpora: a description set of at
+least twenty balanced queries with fixed `train`/`validation` splits and
+near-miss negatives, and an output-eval definition of two or three cases
+with its own fixture tree. A row is not a name: it links the upstream body
+the corpus was written against, the positives, the near misses, the output
+case that bounds the skill, and the inputs the corpus stages for it.
+`12.0.0` changed the body of every one of the 48 skills, and no set has been
+re-checked against the new bodies yet.
 
 Two staged-input trees exist, and they are different things. The
 **description-query tree** is what `bin/triggering` seeds each run with

@@ -2,7 +2,7 @@
 
 This repo is the eval lab for the `sdlc-skills` plugin (`SDLC_SKILLS_ROOT`,
 default `../sdlc-skills` from the lab root), pinned to commit
-`40f8ff4c532da29b286b4d06ecf4516a4a093a7d` (`11.2.0`) in
+`c1e995a0371b11271b1d9a393e89fb2f345b2611` (`12.0.0`) in
 `config/upstream-inventory.json`. It runs the two agentskills.io workflows,
 one skill on one harness at a time:
 

@@ -1,7 +1,7 @@
 # sdlc-skills-evals
 
 The eval lab for [sdlc-skills](https://github.com/augments-labs/sdlc-skills), pinned to upstream commit
-`40f8ff4c532da29b286b4d06ecf4516a4a093a7d` (package version `11.2.0`) in
+`c1e995a0371b11271b1d9a393e89fb2f345b2611` (package version `12.0.0`) in
 `config/upstream-inventory.json`. It runs the two
 [agentskills.io](https://agentskills.io) workflows for one skill on one
 harness at a time:

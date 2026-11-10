@@ -119,7 +119,7 @@ unpriced_live() { # stdin command lines — each live command with no earlier --
 # --- each detector against an input it must flag and a near-miss ------------
 
 printf 'run bin/behavior --scenario x\n' >"$work/stale.md"
-printf 'run bin/benchmark on adapter_run_behavioral output, pinned at v11.2.0\n' >"$work/near.md"
+printf 'run bin/benchmark on adapter_run_behavioral output, pinned at v12.0.0\n' >"$work/near.md"
 [ -n "$(stale_lines "$work/stale.md")" ] && [ -z "$(stale_lines "$work/near.md")" ] \
   && ok "the stale-instruction detector flags bin/behavior and passes bin/benchmark" \
   || bad "the stale-instruction detector flags bin/behavior and passes bin/benchmark"
@@ -170,9 +170,9 @@ links="$(broken_links "$here" "${active_docs[@]}")"
 
 pin="$(jq -r '.upstream.commit' config/upstream-inventory.json)"
 ver="$(jq -r '.upstream.version' config/upstream-inventory.json)"
-check "the inventory pins commit 40f8ff4c532da29b286b4d06ecf4516a4a093a7d (11.2.0)" \
-  test "$pin $ver" = "40f8ff4c532da29b286b4d06ecf4516a4a093a7d 11.2.0"
-for f in README.md .github/PULL_REQUEST_TEMPLATE.md; do
+check "the inventory pins commit c1e995a0371b11271b1d9a393e89fb2f345b2611 (12.0.0)" \
+  test "$pin $ver" = "c1e995a0371b11271b1d9a393e89fb2f345b2611 12.0.0"
+for f in README.md CLAUDE.md .github/PULL_REQUEST_TEMPLATE.md; do
   check "$f names the pinned commit $pin" grep -qF -- "$pin" "$f"
 done
 pin_section="$(awk '/^## The pin[[:space:]]*$/ { f = 1; next } f && /^## / { exit } f' docs/upstream-coverage.md)"
