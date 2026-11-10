@@ -374,7 +374,12 @@ observe_once() { # $1 query text  $2 subject skill
   local want="$subject"
   while kill -0 "$cpid" 2>/dev/null; do
     adapter_chain "$stream" | sed 's/^sdlc-skills://' | grep -qx "$want" && { kill "$cpid" 2>/dev/null; break; }
-    sleep 2
+    # The chain is read every two seconds. The wait between two reads is cut
+    # into ten, so a CLI that has exited is not held for the rest of it.
+    for _ in 1 2 3 4 5 6 7 8 9 10; do
+      kill -0 "$cpid" 2>/dev/null || break
+      sleep 0.2
+    done
   done
   wait "$cpid" 2>/dev/null
 
