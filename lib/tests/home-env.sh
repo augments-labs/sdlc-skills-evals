@@ -14,10 +14,15 @@ t() { # $1 description $2... command — passes iff the command exits 0
 }
 
 run_dir="$(mktemp -d)"
-trap 'lab_home_cleanup "$run_dir" 2>/dev/null; rm -rf "$run_dir"' EXIT
+orig_tmp="${TMPDIR:-/tmp}"
+# lab_home_cleanup removes the run's home but leaves the shared
+# sdlc-skills-evals/ parent for other runs; the suite removes that parent too
+# when it was the one to make it.
+made_parent=0; [ -d "$orig_tmp/sdlc-skills-evals" ] || made_parent=1
+trap 'lab_home_cleanup "$run_dir" 2>/dev/null; rm -rf "$run_dir"
+  [ "$made_parent" -eq 0 ] || rmdir "$orig_tmp/sdlc-skills-evals" 2>/dev/null' EXIT
 
 # the assignments point outside the repository, never at the host HOME
-orig_tmp="${TMPDIR:-/tmp}"
 eval "$(lab_home_env "$run_dir")"
 [ -n "${HOME:-}" ] && [ "$HOME" != "$run_dir" ] && [ "$HOME" != "$PWD" ] && ok "HOME redirected away from host and repo" || bad "HOME redirected away from host and repo (got ${HOME:-empty})"
 case "$HOME" in "$orig_tmp"/*) ok "HOME lives under TMPDIR";; *) bad "HOME lives under TMPDIR (got $HOME)";; esac
