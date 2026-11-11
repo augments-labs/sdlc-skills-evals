@@ -508,7 +508,7 @@ _check_corpora() { # the corpora, against the committed inventory
     fi
     # No prompt names a project that does not exist. The tilde is written
     # inside the pattern rather than as a path, so nothing expands it.
-    if jq -r '.evals[].prompt' "$f" | grep -qE '[^A-Za-z0-9_]~/|/home/|/Users/'; then
+    if grep -qE '[^A-Za-z0-9_]~/|/home/|/Users/' < <(jq -r '.evals[].prompt' "$f"); then
       echo "check: FAIL $f names a project outside the run workdir; the fixture tree is the project"
       return 1
     fi
@@ -795,12 +795,15 @@ _check_audit || exit 1
 # Enforced as no-exec-bit + no-shebang: a non-executable, shebang-less
 # script file would pass, so treat this as the realistic-vectors proxy it
 # is and keep code out of both trees by review, not just by gate.
-if find "$docs_root" results -type f -perm -111 2>/dev/null | grep -q .; then
+# Each listing feeds grep -q through a process substitution, not a pipe:
+# grep stops at the first match, and under pipefail a writer still writing
+# would die of SIGPIPE and turn the match into "no match".
+if grep -q . < <(find "$docs_root" results -type f -perm -111 2>/dev/null); then
   echo "check: FAIL executable under docs/ or results/ (records and guidance only)"
   find "$docs_root" results -type f -perm -111 2>/dev/null
   exit 1
 fi
-if grep -rl '^#!' "$docs_root" 2>/dev/null | grep -q .; then
+if grep -q . < <(grep -rl '^#!' "$docs_root" 2>/dev/null); then
   echo "check: FAIL shebang under docs/ (records and guidance only)"
   exit 1
 fi

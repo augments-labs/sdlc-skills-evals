@@ -198,7 +198,10 @@ for i in $(seq 0 $((n_assert - 1)) 2>/dev/null || true); do
         fi
         ;;
       command-succeeds)
-        if out="$(cd "$out_dir" && timeout 120 bash -c "$args" 2>&1 | head -c 200)"; then
+        # The reader keeps the first 200 bytes and drains the rest: one that
+        # stopped there would leave a loud command to die of SIGPIPE, and
+        # pipefail would fail a command that succeeded.
+        if out="$(cd "$out_dir" && timeout 120 bash -c "$args" 2>&1 | { head -c 200; cat >/dev/null; })"; then
           verdict="passed"; evidence="exit 0: ${out:-<silent>}"
         else
           verdict="failed"; evidence="non-zero exit: ${out:-<silent>}"

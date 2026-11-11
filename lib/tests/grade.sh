@@ -179,6 +179,15 @@ jq -e '.assertion_results[0].passed == false and (.assertion_results[0].evidence
   "$work/verbs/grading.json" >/dev/null 2>&1 \
   && ok "a failing command fails, and an unknown verb waits for review" \
   || bad "a failing command fails, and an unknown verb waits for review"
+# A command that succeeds while printing far more than the evidence keeps
+# passes: its exit is the command's, not that of a reader that stopped early.
+mk_case "$work/loud" "[check:command-succeeds seq 200000] prints a long listing"
+"$here/bin/grade" "$work/loud" >/dev/null 2>&1
+jq -e '.assertion_results[0].passed == true
+  and (.assertion_results[0].evidence | startswith("passed: exit 0: 1\n2\n") and length <= 216)' \
+  "$work/loud/grading.json" >/dev/null 2>&1 \
+  && ok "a succeeding command that prints a long listing passes, its evidence cut to 200 characters" \
+  || bad "a succeeding command that prints a long listing passes, its evidence cut to 200 characters ($(jq -c '.assertion_results[0] | [.passed, (.evidence | .[0:60])]' "$work/loud/grading.json" 2>/dev/null))"
 
 # --- a run_status.json that exists but cannot be read is not a scored arm ----
 cp -r "$here/lib/tests/fixtures/grade-run" "$work/badstatus"
