@@ -388,14 +388,16 @@ observe_once() { # $1 query text  $2 subject skill
   # correctly-behaving negative.
   # Chain names differ per harness (opencode reports bare directory names,
   # others prefix sdlc-skills:) — normalize before comparing with the subject.
-  local want="$subject"
+  local want="$subject" step
   while kill -0 "$cpid" 2>/dev/null; do
     grep -qx "$want" < <(adapter_chain "$stream" | sed 's/^sdlc-skills://') && { stop_tree "$cpid"; break; }
     # The chain is read every two seconds. The wait between two reads is cut
-    # into ten, so a CLI that has exited is not held for the rest of it.
-    for _ in 1 2 3 4 5 6 7 8 9 10; do
+    # into forty steps of 0.05 s, so a CLI that has exited is held for at most
+    # one step. A CLI that exits at once is still alive at the first check, so
+    # every run pays one step: at 0.2 s that was most of a fake run's time.
+    for ((step = 0; step < 40; step++)); do
       kill -0 "$cpid" 2>/dev/null || break
-      sleep 0.2
+      sleep 0.05
     done
   done
   wait "$cpid" 2>/dev/null
