@@ -106,15 +106,21 @@ leaky_suites=""
 for t in lib/tests/*.sh; do
   [ "$t" = "$self" ] && continue
   # Each suite gets a TMPDIR of its own, empty, so what it leaves there is
-  # its own: a suite removes every temp file and directory it creates.
+  # its own: a suite removes every temp file and directory it creates. A
+  # case that unsets TMPDIR runs under /tmp, where only the run-home parent
+  # is watched, and only when it is absent before the suite starts; a
+  # suite that writes elsewhere under /tmp is not seen.
   suite_tmp="$work/tmp-$(basename "$t" .sh)"
   mkdir -p "$suite_tmp"
+  had_parent=0; [ ! -e /tmp/sdlc-skills-evals ] || had_parent=1
   ( export TRIPWIRE_LOG="$trip"; PATH="$here/lib/tests/tripwire:$PATH"; export PATH
     TMPDIR="$suite_tmp"; export TMPDIR
     bash "$t" ) < /dev/null > "$work/suite.out" 2>&1 \
     || { failed_suites="$failed_suites $t"; grep -E '^\s*FAIL' "$work/suite.out" | head -5 | sed 's/^/        /'; }
   left="$(find "$suite_tmp" -mindepth 1 -maxdepth 1 | wc -l)"
   [ "$left" -eq 0 ] || leaky_suites="$leaky_suites $t($left left)"
+  [ "$had_parent" -eq 1 ] || [ ! -e /tmp/sdlc-skills-evals ] \
+    || leaky_suites="$leaky_suites $t(/tmp/sdlc-skills-evals left)"
   rm -rf "$suite_tmp"
 done
 [ -z "$failed_suites" ] && ok "every other lib/tests suite passes under the tripwire" \

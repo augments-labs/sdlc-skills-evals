@@ -274,6 +274,9 @@ left="$(find "$work/outer-tmp" -mindepth 1 2>/dev/null | grep -v '/sdlc-skills-e
   || bad "no run_base is left behind (TMPDIR exported; left: $left)"
 
 # TMPDIR unset: the bases sit under /tmp and are still removed
+# lab_home_env makes /tmp/sdlc-skills-evals/ for a run with TMPDIR unset and
+# leaves it there for other runs; the suite removes it when it made it.
+made_tmp_parent=0; [ -e /tmp/sdlc-skills-evals ] || made_tmp_parent=1
 ( unset TMPDIR; run_ev unset --plugin "$with_plug" --campaign c2 --eval-id change-seed
   printf '%s\n' "$?" > "$work/unset/rc" )
 u_home="$(sed -n 's/^HOME=//p' "$work/unset/rec/call-1/env" 2>/dev/null)"
@@ -286,6 +289,7 @@ esac
   && [ ! -e "$(dirname "$u_home")" ] && [ ! -e "/tmp/$(basename "$(dirname "$u_home")")" ] \
   && ok "with TMPDIR unset it is exported and nothing is left behind" \
   || bad "with TMPDIR unset it is exported and nothing is left behind"
+[ "$made_tmp_parent" -eq 0 ] || rmdir /tmp/sdlc-skills-evals 2>/dev/null
 
 # the next run of a campaign is the next iteration; a named one in use is refused
 ( export TMPDIR="$work/outer-tmp"

@@ -279,6 +279,9 @@ left="$(find "$work/outer-tmp" -mindepth 1 -maxdepth 2 2>/dev/null | grep -v '/s
 # is still removed
 mkdir -p "$work/unset"
 printf '%s\n' "covers alpha beta gamma" > "$work/unset/candidates"
+# lab_home_env makes /tmp/sdlc-skills-evals/ for a run with TMPDIR unset and
+# leaves it there for other runs; the suite removes it when it made it.
+made_tmp_parent=0; [ -e /tmp/sdlc-skills-evals ] || made_tmp_parent=1
 ( unset TMPDIR; run_opt unset --plugin "$plug_commit" --max-iterations 2 --campaign c2
   printf '%s\n' "$?" > "$work/unset/rc" )
 u_home="$(sed -n 's/^HOME=//p' "$work/unset/rec/call-1/env" 2>/dev/null)"
@@ -290,6 +293,7 @@ esac
   && [ ! -e "/tmp/$(basename "$(dirname "$u_home")")" ] \
   && ok "no run_base is left behind (TMPDIR unset)" \
   || bad "no run_base is left behind (TMPDIR unset)"
+[ "$made_tmp_parent" -eq 0 ] || rmdir /tmp/sdlc-skills-evals 2>/dev/null
 [ -s "$work/unset/ws/c2/iteration-2/metrics.json" ] \
   && ok "the second iteration runs with TMPDIR unset" \
   || bad "the second iteration runs with TMPDIR unset"
