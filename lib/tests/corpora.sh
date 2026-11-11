@@ -103,6 +103,50 @@ expect_pass() { # $1 label
   fi
 }
 
+# The mutation cases run the gate several at once. The gate stops at its first
+# failure, so each mutation needs a run of its own; the runs share nothing
+# (each reads its own copy, and its temporary files come from mktemp), so
+# they need not wait for one another. gate_rejects starts a case's run, at
+# most one per core at a time; report_gates waits for them all and judges
+# each in the order the cases were written, so the output reads the same as
+# if they had run one after another.
+gate_max="$(getconf _NPROCESSORS_ONLN 2>/dev/null || echo 4)"
+gate_n=0
+gate_reaped=0
+gate_pids=()
+gate_labels=()
+gate_messages=()
+
+gate_rejects() { # $1 root, $2 label, $3 the message the failure must carry, then VAR=value for the gate
+  local root="$1" i="$gate_n"
+  gate_labels[i]="$2"
+  gate_messages[i]="$3"
+  shift 3
+  if [ $((i - gate_reaped)) -ge "$gate_max" ]; then
+    wait "${gate_pids[gate_reaped]}"
+    gate_reaped=$((gate_reaped + 1))
+  fi
+  {
+    ( cd "$root" && env "$@" bash bin/check ) >"$work/gate.$i.out" 2>&1
+    echo "$?" >"$work/gate.$i.rc"
+  } &
+  gate_pids[i]=$!
+  gate_n=$((i + 1))
+}
+
+report_gates() {
+  local i
+  wait
+  for ((i = 0; i < gate_n; i++)); do
+    check_rc="$(cat "$work/gate.$i.rc" 2>/dev/null)"
+    check_out="$(cat "$work/gate.$i.out" 2>/dev/null)"
+    case "$check_rc" in
+      ''|*[!0-9]*) bad "${gate_labels[i]} (the gate left no exit status)" ;;
+      *) expect_fail "${gate_labels[i]}" "${gate_messages[i]}" ;;
+    esac
+  done
+}
+
 # --- the committed corpora ---------------------------------------------------
 
 run_gate "$here"
@@ -191,39 +235,36 @@ fi
 # --- the mutations that prove the gate bites ---------------------------------
 #
 # Each mutation is applied to a throwaway copy and the gate must reject it.
+# Every copy is a directory of its own: the gate may still be reading one
+# while the next case is built.
 
 # 1. a skill is removed: its description set goes, and the coverage list is
 #    no longer closed
 m1="$work/m1"; copy_repo "$m1"
 rm -f "$m1/descriptions/yagni.json"
-run_gate "$m1"
-expect_fail "a removed skill is rejected" "no description set for yagni"
+gate_rejects "$m1" "a removed skill is rejected" "no description set for yagni"
 
 # 1b. a skill is removed on the output side
 m1b="$work/m1b"; copy_repo "$m1b"
 rm -f "$m1b/evals/yagni/evals.json"
-run_gate "$m1b"
-expect_fail "a removed eval definition is rejected" "no evals.json for yagni"
+gate_rejects "$m1b" "a removed eval definition is rejected" "no evals.json for yagni"
 
 # 2. a stale skill: a corpus asset for a skill the inventory does not hold
 m2="$work/m2"; copy_repo "$m2"
 cp "$m2/descriptions/yagni.json" "$m2/descriptions/a-skill-that-was-removed.json"
-run_gate "$m2"
-expect_fail "a stale skill's query set is rejected" "names a skill the inventory does not hold"
+gate_rejects "$m2" "a stale skill's query set is rejected" "names a skill the inventory does not hold"
 
 m2b="$work/m2b"; copy_repo "$m2b"
 mkdir -p "$m2b/evals/a-skill-that-was-removed"
 cp "$m2b/evals/yagni/evals.json" \
    "$m2b/evals/a-skill-that-was-removed/evals.json"
-run_gate "$m2b"
-expect_fail "a stale skill's eval definition is rejected" "names a skill the inventory does not hold"
+gate_rejects "$m2b" "a stale skill's eval definition is rejected" "names a skill the inventory does not hold"
 
 # 2c. a set under a retired phase directory is read by no runner
 m2c="$work/m2c"; copy_repo "$m2c"
 mkdir -p "$m2c/descriptions/common"
 cp "$m2c/descriptions/yagni.json" "$m2c/descriptions/common/yagni.json"
-run_gate "$m2c"
-expect_fail "a query set under a phase directory is rejected" "descriptions/common/yagni.json is not at"
+gate_rejects "$m2c" "a query set under a phase directory is rejected" "descriptions/common/yagni.json is not at"
 
 # 2d. a skill the inventory holds is found however long the inventory is.
 # The lookup once read the list through a pipe into `grep -q`: grep left at
@@ -237,24 +278,21 @@ m2d="$work/m2d"; copy_repo "$m2d"
 jq '.skills += [range(0; 12000) | "zz-a-name-that-pads-the-list-\(.)"]' "$m2d/$INV" \
   > "$m2d/$INV.new"
 mv "$m2d/$INV.new" "$m2d/$INV"
-run_gate "$m2d"
-expect_fail "a skill the inventory holds is found in a long inventory" \
+gate_rejects "$m2d" "a skill the inventory holds is found in a long inventory" \
   "zz-a-name-that-pads-the-list-0 is neither frozen nor named as new"
 
 # 3. a duplicated query inside a set
 m3="$work/m3"; copy_repo "$m3"
 jq '.[1].query = .[0].query' "$m3/descriptions/yagni.json" > "$m3/descriptions/yagni.json.new"
 mv "$m3/descriptions/yagni.json.new" "$m3/descriptions/yagni.json"
-run_gate "$m3"
-expect_fail "a duplicated query is rejected" "has duplicate queries"
+gate_rejects "$m3" "a duplicated query is rejected" "has duplicate queries"
 
 # 3b. a set too small to decide anything: ten positives and ten near misses
 #     is twenty queries, so a set that loses a near miss loses that too
 m3b="$work/m3b"; copy_repo "$m3b"
 jq 'del(.[19])' "$m3b/descriptions/yagni.json" > "$m3b/descriptions/yagni.json.new"
 mv "$m3b/descriptions/yagni.json.new" "$m3b/descriptions/yagni.json"
-run_gate "$m3b"
-expect_fail "a query set holding fewer than ten near misses is rejected" "needs >= 10 negatives"
+gate_rejects "$m3b" "a query set holding fewer than ten near misses is rejected" "needs >= 10 negatives"
 
 # 4. validation leaks into the holdout role, and the holdout role leaks
 #    back into a main set
@@ -263,80 +301,69 @@ mkdir -p "$m4/descriptions/holdout"
 # the holdout file holds five fresh queries and repeats one of the set's
 jq '[range(5) | {query: "a fresh holdout query \(.)", should_trigger: false, split: "holdout", expect: "none"}]
     + [.[0] | .split = "holdout"]' "$m4/descriptions/yagni.json" > "$m4/descriptions/holdout/yagni.json"
-run_gate "$m4"
-expect_fail "a holdout that reuses a main set's query is rejected" "reuses queries from"
+gate_rejects "$m4" "a holdout that reuses a main set's query is rejected" "reuses queries from"
 
 m4b="$work/m4b"; copy_repo "$m4b"
 mkdir -p "$m4b/descriptions/holdout"
 jq '[range(5) | {query: "a fresh holdout query \(.)", should_trigger: false, split: "holdout", expect: "none"}]
     | .[0].split = "validation"' "$m4b/descriptions/yagni.json" \
   > "$m4b/descriptions/holdout/yagni.json"
-run_gate "$m4b"
-expect_fail "a holdout carrying a validation split is rejected" "must carry split=holdout"
+gate_rejects "$m4b" "a holdout carrying a validation split is rejected" "must carry split=holdout"
 
 m4c="$work/m4c"; copy_repo "$m4c"
 jq '.[0].split = "holdout"' "$m4c/descriptions/yagni.json" > "$m4c/descriptions/yagni.json.new"
 mv "$m4c/descriptions/yagni.json.new" "$m4c/descriptions/yagni.json"
-run_gate "$m4c"
-expect_fail "a main set carrying a holdout entry is rejected" "carries a holdout entry"
+gate_rejects "$m4c" "a main set carrying a holdout entry is rejected" "carries a holdout entry"
 
 # 5. an output case names a file its fixture tree does not hold
 m5="$work/m5"; copy_repo "$m5"
 jq '.evals[0].prompt = "Refactor src/a-file-that-is-not-there.js so it stops re-parsing the auth header."' \
   "$m5/evals/yagni/evals.json" > "$m5/evals/yagni/evals.json.new"
 mv "$m5/evals/yagni/evals.json.new" "$m5/evals/yagni/evals.json"
-run_gate "$m5"
-expect_fail "an output case naming a missing file is rejected" "names a file its fixture tree does not hold"
+gate_rejects "$m5" "an output case naming a missing file is rejected" "names a file its fixture tree does not hold"
 
 # 6. a corrupted eval structure
 m6="$work/m6"; copy_repo "$m6"
 jq 'del(.evals[0].expected_output)' "$m6/evals/yagni/evals.json" \
   > "$m6/evals/yagni/evals.json.new"
 mv "$m6/evals/yagni/evals.json.new" "$m6/evals/yagni/evals.json"
-run_gate "$m6"
-expect_fail "an eval with no expected output is rejected" "needs an id, a prompt, an expected output"
+gate_rejects "$m6" "an eval with no expected output is rejected" "needs an id, a prompt, an expected output"
 
 m6b="$work/m6b"; copy_repo "$m6b"
 jq '.evals = .evals[0:1]' "$m6b/evals/yagni/evals.json" \
   > "$m6b/evals/yagni/evals.json.new"
 mv "$m6b/evals/yagni/evals.json.new" "$m6b/evals/yagni/evals.json"
-run_gate "$m6b"
-expect_fail "an eval holding one case is rejected" "holds 2-3 output cases"
+gate_rejects "$m6b" "an eval holding one case is rejected" "holds 2-3 output cases"
 
 m6c="$work/m6c"; copy_repo "$m6c"
 jq '.skill_name = "some-other-skill"' "$m6c/evals/yagni/evals.json" \
   > "$m6c/evals/yagni/evals.json.new"
 mv "$m6c/evals/yagni/evals.json.new" "$m6c/evals/yagni/evals.json"
-run_gate "$m6c"
-expect_fail "an eval naming another skill is rejected" "names a skill that is not its own"
+gate_rejects "$m6c" "an eval naming another skill is rejected" "names a skill that is not its own"
 
 m6d="$work/m6d"; copy_repo "$m6d"
 jq '.pending_first_run = true | .evals[0].assertions = ["[check:file-exists src/server.js]"]' \
   "$m6d/evals/yagni/evals.json" > "$m6d/evals/yagni/evals.json.new"
 mv "$m6d/evals/yagni/evals.json.new" "$m6d/evals/yagni/evals.json"
-run_gate "$m6d"
-expect_fail "an unobserved case carrying an assertion is rejected" "must carry empty assertions"
+gate_rejects "$m6d" "an unobserved case carrying an assertion is rejected" "must carry empty assertions"
 
 m6e="$work/m6e"; copy_repo "$m6e"
 jq '.evals[0].prompt = "In ~/work/billing-api the toggle command is done. Call this done."' \
   "$m6e/evals/yagni/evals.json" > "$m6e/evals/yagni/evals.json.new"
 mv "$m6e/evals/yagni/evals.json.new" "$m6e/evals/yagni/evals.json"
-run_gate "$m6e"
-expect_fail "an output case naming a project outside the workdir is rejected" "names a project outside the run workdir"
+gate_rejects "$m6e" "an output case naming a project outside the workdir is rejected" "names a project outside the run workdir"
 
 # 7. a near miss that routes to a skill the inventory does not hold
 m7c="$work/m7c"; copy_repo "$m7c"
 jq '.[10].expect = "a-skill-that-does-not-exist"' "$m7c/descriptions/yagni.json" \
   > "$m7c/descriptions/yagni.json.new"
 mv "$m7c/descriptions/yagni.json.new" "$m7c/descriptions/yagni.json"
-run_gate "$m7c"
-expect_fail "a near miss routing to an unknown skill is rejected" "names a route that is not a skill"
+gate_rejects "$m7c" "a near miss routing to an unknown skill is rejected" "names a route that is not a skill"
 
 # 8. an eval definition with no fixture tree
 m8="$work/m8"; copy_repo "$m8"
 rm -rf "$m8/evals/yagni/files"
-run_gate "$m8"
-expect_fail "an eval definition with no fixture tree is rejected" "has no files/ tree"
+gate_rejects "$m8" "an eval definition with no fixture tree is rejected" "has no files/ tree"
 
 # 9. the seams the gate reads: the holdout cross-check follows the
 #    descriptions root, and the docs rule follows the docs root
@@ -345,18 +372,16 @@ mkdir -p "$m9/seam-descriptions/holdout"
 cp "$m9/descriptions/yagni.json" "$m9/seam-descriptions/yagni.json"
 jq '[range(5) | {query: "a fresh holdout query \(.)", should_trigger: false, split: "holdout", expect: "none"}]
     + [.[0] | .split = "holdout"]' "$m9/seam-descriptions/yagni.json" > "$m9/seam-descriptions/holdout/yagni.json"
-check_out="$(cd "$m9" && DESCRIPTIONS_ROOT=seam-descriptions bash bin/check 2>&1)"
-check_rc=$?
-expect_fail "the holdout cross-check follows the descriptions root seam" "reuses queries from"
+gate_rejects "$m9" "the holdout cross-check follows the descriptions root seam" "reuses queries from" \
+  DESCRIPTIONS_ROOT=seam-descriptions
 
 m9b="$work/m9b"; copy_repo "$m9b"
 mkdir -p "$m9b/seam-docs"
 cp "$m9b/docs/upstream-coverage.md" "$m9b/seam-docs/upstream-coverage.md"
 printf '# a record\n' > "$m9b/seam-docs/record.md"
 chmod +x "$m9b/seam-docs/record.md"
-check_out="$(cd "$m9b" && DOCS_ROOT=seam-docs bash bin/check 2>&1)"
-check_rc=$?
-expect_fail "the docs no-exec-bit rule follows the docs root seam" "executable under docs/"
+gate_rejects "$m9b" "the docs no-exec-bit rule follows the docs root seam" "executable under docs/" \
+  DOCS_ROOT=seam-docs
 
 # the eval definitions follow their own root: a case broken only under the
 # moved root is caught, so the gate reads that root and not evals/
@@ -365,9 +390,8 @@ cp -a "$m9c/evals" "$m9c/seam-evals"
 jq 'del(.evals[0].expected_output)' "$m9c/seam-evals/yagni/evals.json" \
   > "$m9c/seam-evals/yagni/evals.json.new"
 mv "$m9c/seam-evals/yagni/evals.json.new" "$m9c/seam-evals/yagni/evals.json"
-check_out="$(cd "$m9c" && EVALS_ROOT=seam-evals bash bin/check 2>&1)"
-check_rc=$?
-expect_fail "the eval definitions follow the evals root seam" "needs an id, a prompt, an expected output"
+gate_rejects "$m9c" "the eval definitions follow the evals root seam" "needs an id, a prompt, an expected output" \
+  EVALS_ROOT=seam-evals
 
 # A rule that reads a long listing through `writer | grep -q` stops reading
 # at the first match; the writer then dies of SIGPIPE, pipefail reports 141,
@@ -381,8 +405,7 @@ jq --rawfile filler "$work/filler.txt" \
    | .evals[1].prompt += " " + $filler' \
   "$m9d/evals/yagni/evals.json" > "$m9d/evals/yagni/evals.json.new"
 mv "$m9d/evals/yagni/evals.json.new" "$m9d/evals/yagni/evals.json"
-run_gate "$m9d"
-expect_fail "a home path in the first prompt is rejected when a long prompt follows it" \
+gate_rejects "$m9d" "a home path in the first prompt is rejected when a long prompt follows it" \
   "names a project outside the run workdir"
 
 m9e="$work/m9e"; copy_repo "$m9e"
@@ -390,39 +413,34 @@ mkdir -p "$m9e/seam-docs/many"
 cp "$m9e/docs/upstream-coverage.md" "$m9e/seam-docs/upstream-coverage.md"
 for i in $(seq 3000); do : > "$m9e/seam-docs/many/$long_name-$i.md"; done
 chmod +x "$m9e"/seam-docs/many/*
-check_out="$(cd "$m9e" && DOCS_ROOT=seam-docs bash bin/check 2>&1)"
-check_rc=$?
-expect_fail "the docs no-exec-bit rule holds when thousands of files carry the bit" "executable under docs/"
+gate_rejects "$m9e" "the docs no-exec-bit rule holds when thousands of files carry the bit" "executable under docs/" \
+  DOCS_ROOT=seam-docs
 
 m9f="$work/m9f"; copy_repo "$m9f"
 mkdir -p "$m9f/seam-docs/many"
 cp "$m9f/docs/upstream-coverage.md" "$m9f/seam-docs/upstream-coverage.md"
 for i in $(seq 3000); do printf '#!/bin/sh\n' > "$m9f/seam-docs/many/$long_name-$i.md"; done
-check_out="$(cd "$m9f" && DOCS_ROOT=seam-docs bash bin/check 2>&1)"
-check_rc=$?
-expect_fail "the docs no-shebang rule holds when thousands of files carry one" "shebang under docs/"
+gate_rejects "$m9f" "the docs no-shebang rule holds when thousands of files carry one" "shebang under docs/" \
+  DOCS_ROOT=seam-docs
 
 # --- bin/ holds executable bash scripts only ----------------------------------
 #
 # Every file under bin/ is a tool a user runs by path. A file there that is
 # not executable, or that names another interpreter, is a tool that does not
 # run the way its neighbours do.
-m9d="$work/m9d"; copy_repo "$m9d"
-printf '#!/usr/bin/env bash\necho a tool\n' > "$m9d/bin/not-executable"
-chmod -x "$m9d/bin/not-executable"
-run_gate "$m9d"
-expect_fail "a bin/ file that is not executable is rejected" "bin/not-executable is not executable"
+m9g="$work/m9g"; copy_repo "$m9g"
+printf '#!/usr/bin/env bash\necho a tool\n' > "$m9g/bin/not-executable"
+chmod -x "$m9g/bin/not-executable"
+gate_rejects "$m9g" "a bin/ file that is not executable is rejected" "bin/not-executable is not executable"
 
-m9e="$work/m9e"; copy_repo "$m9e"
-printf '#!/bin/sh\necho a tool\n' > "$m9e/bin/another-shell"
-chmod +x "$m9e/bin/another-shell"
-run_gate "$m9e"
-expect_fail "a bin/ file without the bash shebang is rejected" "bin/another-shell does not start with #!/usr/bin/env bash"
+m9h="$work/m9h"; copy_repo "$m9h"
+printf '#!/bin/sh\necho a tool\n' > "$m9h/bin/another-shell"
+chmod +x "$m9h/bin/another-shell"
+gate_rejects "$m9h" "a bin/ file without the bash shebang is rejected" "bin/another-shell does not start with #!/usr/bin/env bash"
 
-m9f="$work/m9f"; copy_repo "$m9f"
-printf '# notes about the tools\n' > "$m9f/bin/NOTES.md"
-run_gate "$m9f"
-expect_fail "a non-script file under bin/ is rejected" "bin/NOTES.md is not executable"
+m9i="$work/m9i"; copy_repo "$m9i"
+printf '# notes about the tools\n' > "$m9i/bin/NOTES.md"
+gate_rejects "$m9i" "a non-script file under bin/ is rejected" "bin/NOTES.md is not executable"
 
 # --- the corpus state the gate holds against ---------------------------------
 #
@@ -437,8 +455,7 @@ m10="$work/m10"; copy_repo "$m10"
 jq 'del(.pending_first_run) | .evals[0].assertions = ["[check:file-exists src/server.js]"]' \
   "$m10/evals/yagni/evals.json" > "$m10/evals/yagni/evals.json.new"
 mv "$m10/evals/yagni/evals.json.new" "$m10/evals/yagni/evals.json"
-run_gate "$m10"
-expect_fail "a case with an assertion and no observation state is rejected" \
+gate_rejects "$m10" "a case with an assertion and no observation state is rejected" \
   "carries an assertion but records no observation state"
 
 # E-1, second direction: the same assertion added to a case that is still
@@ -447,8 +464,7 @@ m11="$work/m11"; copy_repo "$m11"
 jq '.evals[0].assertions = ["[check:file-exists src/server.js]"]' \
   "$m11/evals/yagni/evals.json" > "$m11/evals/yagni/evals.json.new"
 mv "$m11/evals/yagni/evals.json.new" "$m11/evals/yagni/evals.json"
-run_gate "$m11"
-expect_fail "a case with an assertion while pending its first run is rejected" \
+gate_rejects "$m11" "a case with an assertion while pending its first run is rejected" \
   "is pending its first run and must carry empty assertions"
 
 # E-2: two entries of a frozen set swap splits. The ratios the shape check
@@ -457,8 +473,7 @@ m12="$work/m12"; copy_repo "$m12"
 jq '.[0].split = "validation" | .[5].split = "train"' \
   "$m12/descriptions/yagni.json" > "$m12/descriptions/yagni.json.new"
 mv "$m12/descriptions/yagni.json.new" "$m12/descriptions/yagni.json"
-run_gate "$m12"
-expect_fail "an entry that moves between splits is rejected" \
+gate_rejects "$m12" "an entry that moves between splits is rejected" \
   "does not hold the frozen split assignment"
 
 # E-2, second direction: an entry moves into the holdout role.
@@ -466,22 +481,19 @@ m13="$work/m13"; copy_repo "$m13"
 jq '.[0].split = "holdout"' "$m13/descriptions/yagni.json" \
   > "$m13/descriptions/yagni.json.new"
 mv "$m13/descriptions/yagni.json.new" "$m13/descriptions/yagni.json"
-run_gate "$m13"
-expect_fail "an entry moved into the holdout role is rejected" \
+gate_rejects "$m13" "an entry moved into the holdout role is rejected" \
   "carries a holdout entry"
 
 # E-4: the staged plan's approval row, and the task file its index names.
 # Each is a required staged input, and the gate refuses without it.
 m14="$work/m14"; copy_repo "$m14"
 rm -f "$m14/fixtures/seed/plans/2026-10-05-multi-tenancy/00-index.ledger.md"
-run_gate "$m14"
-expect_fail "a staged plan with no approval row is rejected" \
+gate_rejects "$m14" "a staged plan with no approval row is rejected" \
   "the staged plan 2026-10-05-multi-tenancy carries no ledger"
 
 m15="$work/m15"; copy_repo "$m15"
 rm -f "$m15/fixtures/seed/plans/2026-10-05-multi-tenancy/01-tenant-column.md"
-run_gate "$m15"
-expect_fail "a staged plan with a missing task file is rejected" \
+gate_rejects "$m15" "a staged plan with a missing task file is rejected" \
   "names a task file it does not hold"
 
 # E-5: the corpus audit's own numbers. A row that no longer recomputes is a
@@ -489,8 +501,7 @@ expect_fail "a staged plan with a missing task file is rejected" \
 m16="$work/m16"; copy_repo "$m16"
 sed -i 's#| `yagni` | `skills/common/yagni/SKILL.md` | 10 | 10 |#| `yagni` | `skills/common/yagni/SKILL.md` | 9 | 10 |#' \
   "$m16/docs/upstream-coverage.md"
-run_gate "$m16"
-expect_fail "a corpus audit row whose numbers no longer recompute is rejected" \
+gate_rejects "$m16" "a corpus audit row whose numbers no longer recompute is rejected" \
   "states 9 positives and the set holds another number"
 
 # E-6: a holdout file placed in the corpus before the selection step. It is
@@ -499,9 +510,10 @@ m17="$work/m17"; copy_repo "$m17"
 mkdir -p "$m17/descriptions/holdout"
 jq -n '[range(5) | {query: "a fresh holdout query \(.)", should_trigger: false, split: "holdout", expect: "none"}]' \
   > "$m17/descriptions/holdout/yagni.json"
-run_gate "$m17"
-expect_fail "a holdout placed before the selection step is rejected" \
+gate_rejects "$m17" "a holdout placed before the selection step is rejected" \
   "names no recorded selection"
+
+report_gates
 
 # --- the staged description-query tree ---------------------------------------
 #
