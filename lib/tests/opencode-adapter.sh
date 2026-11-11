@@ -117,9 +117,12 @@ if adapter_install "$plug" >/dev/null 2>&1; then
 else
   ok "an unrecognised opencode version is refused"
 fi
+# a refused install has already made its home
+rm -rf "$harness_home"
 
 fake_version 1.9.0
 adapter_install "$plug" >/dev/null 2>&1
+rm -rf "$harness_home"
 saved_turns="${maxturns:-}"
 unset maxturns
 adapter_install "$plug" 2>/dev/null
@@ -127,6 +130,7 @@ cfg="$harness_home/xdg/opencode/opencode.json"
 jq -e 'has("agent") | not' "$cfg" >/dev/null \
   && ok "install omits steps without maxturns" || bad "install omits steps without maxturns"
 maxturns="$saved_turns"
+rm -rf "$harness_home"
 adapter_install "" 2>/dev/null
 cfg="$harness_home/xdg/opencode/opencode.json"
 jq -e '(has("plugin") | not) and (has("plugins") | not)' "$cfg" >/dev/null \
