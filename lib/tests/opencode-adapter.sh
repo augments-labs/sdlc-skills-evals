@@ -25,9 +25,9 @@ jq -c '.[]' "$fix/activation.json" > "$stream"
 
 [ "$(adapter_chain "$stream")" = "using-git-worktrees" ] \
   && ok "chain reports the invoked skill" || bad "chain reports the invoked skill (got $(adapter_chain "$stream"))"
-adapter_behavioral_events "$stream" | grep -qx "SKILL using-git-worktrees" \
+grep -qx "SKILL using-git-worktrees" < <(adapter_behavioral_events "$stream") \
   && ok "events report SKILL" || bad "events report SKILL"
-adapter_behavioral_events "$stream" | grep -qx "EDIT src/x.ts" \
+grep -qx "EDIT src/x.ts" < <(adapter_behavioral_events "$stream") \
   && ok "events report EDIT with path" || bad "events report EDIT with path"
 adapter_ran "$stream" \
   && ok "stream with model output ran" || bad "stream with model output ran"

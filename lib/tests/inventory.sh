@@ -69,7 +69,7 @@ expect_pass() { # $1 label
 expect_fail() { # $1 label, $2 the message the failure must carry
   if [ "$check_rc" -eq 0 ]; then
     bad "$1 (the gate accepted it)"
-  elif printf '%s\n' "$check_out" | grep -qF "$2"; then
+  elif grep -qF "$2" <<< "$check_out"; then
     ok "$1"
   else
     bad "$1 (exit $check_rc, no '$2' in: $(printf '%s\n' "$check_out" | tail -2 | tr '\n' ' '))"
@@ -149,7 +149,7 @@ expect_pass "the committed inventory passes the gate"
 
 # the default path says what it did NOT check: membership is knowable only
 # against a tree
-if printf '%s\n' "$check_out" | grep -q "membership not checked"; then
+if grep -q "membership not checked" <<< "$check_out"; then
   ok "the default path says membership was not checked"
 else
   bad "the default path says membership was not checked"
@@ -157,7 +157,7 @@ fi
 
 # the partial run says which sections it ran, so its result cannot be read
 # as a full-gate pass
-if printf '%s\n' "$check_out" | grep -q "pinned scope only"; then
+if grep -q "pinned scope only" <<< "$check_out"; then
   ok "the partial run says it ran the pinned scope only"
 else
   bad "the partial run says it ran the pinned scope only"
@@ -172,8 +172,8 @@ expect_fail "the default CI path runs the inventory check" "no upstream inventor
 # inventory and the committed record are the ones that are checked
 run_check_ci
 expect_pass "the gate passes the way CI runs it"
-if printf '%s\n' "$check_out" | grep -q "^check: inventory ok$" \
-    && printf '%s\n' "$check_out" | grep -q "^check: OK$"; then
+if grep -q "^check: inventory ok$" <<< "$check_out" \
+    && grep -q "^check: OK$" <<< "$check_out"; then
   ok "the CI-shaped run resolves the committed inventory and ends with check: OK"
 else
   bad "the CI-shaped run resolves the committed inventory and ends with check: OK"
@@ -225,8 +225,8 @@ expect_pass "the inventory matches a tree built from it"
 
 # the with-tree path says what it did not verify: the comparison is by
 # name, so the tree's commit and its contents are not established
-if printf '%s\n' "$check_out" | grep -q "compared by name" \
-    && printf '%s\n' "$check_out" | grep -q "were not verified"; then
+if grep -q "compared by name" <<< "$check_out" \
+    && grep -q "were not verified" <<< "$check_out"; then
   ok "the with-tree path says what it did not verify"
 else
   bad "the with-tree path says what it did not verify"
@@ -257,7 +257,7 @@ flat_stdout="$(INVENTORY_PATH="$INV" DOCS_ROOT=docs bash bin/check --inventory -
   && check_rc=0 || check_rc=$?
 check_out="$flat_stdout"
 expect_pass "a packaged flat plugin tree is accepted"
-if printf '%s\n' "$flat_stdout" | grep -q "tests/harnesses/ is absent"; then
+if grep -q "tests/harnesses/ is absent" <<< "$flat_stdout"; then
   ok "a flat tree's run says on stdout that harness membership was not compared"
 else
   bad "a flat tree's run says on stdout that harness membership was not compared"
@@ -403,12 +403,12 @@ mkdir -p "$drift_tree7/skills/design/newphase/newskill"
 : >"$drift_tree7/skills/design/newphase/newskill/SKILL.md"
 run_check "$INV" docs --plugin "$drift_tree7"
 expect_fail "a drifting tree is rejected" "absent from the inventory"
-if printf '%s\n' "$check_out" | grep -q "were not verified"; then
+if grep -q "were not verified" <<< "$check_out"; then
   ok "the failure path carries the not-verified disclosure"
 else
   bad "the failure path carries the not-verified disclosure"
 fi
-if printf '%s\n' "$check_out" | grep -q "upstream tree"; then
+if grep -q "upstream tree" <<< "$check_out"; then
   bad "the failure path does not claim the tree is upstream"
 else
   ok "the failure path does not claim the tree is upstream"
@@ -421,7 +421,7 @@ mkdir -p "$dup_tree/tests/harnesses/nested"
 : >"$dup_tree/tests/harnesses/nested/opencode.sh"
 run_check "$INV" docs --plugin "$dup_tree"
 expect_pass "a repeated harness basename is one member"
-if printf '%s\n' "$check_out" | grep -q "absent from the inventory"; then
+if grep -q "absent from the inventory" <<< "$check_out"; then
   bad "a repeated harness basename is not reported as drift"
 else
   ok "a repeated harness basename is not reported as drift"
@@ -433,7 +433,7 @@ cp -r "$tree" "$empty_name_tree"
 : >"$empty_name_tree/tests/harnesses/.sh"
 run_check "$INV" docs --plugin "$empty_name_tree"
 expect_fail "a tree file with an empty name is drift" "absent from the inventory"
-if printf '%s\n' "$check_out" | grep -q "an empty name"; then
+if grep -q "an empty name" <<< "$check_out"; then
   ok "the drift report names an empty member readably"
 else
   bad "the drift report names an empty member readably"
@@ -462,9 +462,9 @@ if [ -n "$list_lines_fn" ]; then
 fi
 if [ "$empty_list_lines" = "0" ] \
     && [ "$check_rc" -ne 0 ] \
-    && printf '%s\n' "$check_out" | grep -qF "in the inventory, absent from the supplied tree:" \
-    && printf '%s\n' "$check_out" | grep -qF "$(jq -r '.skills[0]' "$INV")" \
-    && ! printf '%s\n' "$check_out" | grep -qE '^[[:space:]]+$'; then
+    && grep -qF "in the inventory, absent from the supplied tree:" <<< "$check_out" \
+    && grep -qF "$(jq -r '.skills[0]' "$INV")" <<< "$check_out" \
+    && ! grep -qE '^[[:space:]]+$' <<< "$check_out"; then
   ok "an empty tree is drift with no blank member line, and an empty list prints no line"
 else
   bad "an empty tree is drift with no blank member line, and an empty list prints no line (exit $check_rc, empty list lines: '$empty_list_lines')"
@@ -639,8 +639,8 @@ fi
 zero_inv="$work/zero-gap-inventory.json"
 jq '.skills = ["yagni"] | .harnesses = ["opencode"]' "$INV" >"$zero_inv"
 run_check "$zero_inv" docs
-if printf '%s\n' "$check_out" \
-    | grep -q "coverage checked: 0 skills without an eval definition, 0 without a description set, 0 without a lab adapter"; then
+if grep -q "coverage checked: 0 skills without an eval definition, 0 without a description set, 0 without a lab adapter" \
+    <<< "$check_out"; then
   ok "the gate says so when there are no coverage gaps"
 else
   bad "the gate says so when there are no coverage gaps"
@@ -671,7 +671,7 @@ real_jq="$(command -v jq)"
 check_out="$(PATH="$work/fake-bin:$PATH" REAL_JQ="$real_jq" bash bin/check --inventory 2>&1)" \
   && check_rc=0 || check_rc=$?
 expect_fail "a coverage scan that cannot read the inventory fails" "cannot read the skill list from"
-if printf '%s\n' "$check_out" | grep -q "coverage checked:"; then
+if grep -q "coverage checked:" <<< "$check_out"; then
   bad "a failed scan printed a coverage count"
 else
   ok "a failed scan printed no coverage count"
@@ -734,7 +734,7 @@ skill_paths_named_in() { # $1 file — the inventory skill paths it names outsid
   local file="$1" sk found="" code
   code="$(sed -e 's/^[[:space:]]*#.*$//' -e 's/[[:space:]]#.*$//' "$file")"
   while IFS= read -r sk; do
-    if printf '%s\n' "$code" | grep -qF -- "$sk"; then found="$found $sk"; fi
+    if grep -qF -- "$sk" <<< "$code"; then found="$found $sk"; fi
   done < <(jq -r '.skills[]' "$INV")
   printf '%s' "$found"
 }
@@ -768,8 +768,9 @@ fi
 # not matched, and neither is a word that merely ends in a command name.
 
 gate_code="$(sed -e 's/^[[:space:]]*#.*$//' -e 's/[[:space:]]#.*$//' bin/check)"
-if printf '%s\n' "$gate_code" | grep -qE \
-    '(^|[[:space:]]|[;&|(]|\$\()(curl|wget|git[[:space:]]+(fetch|ls-remote|clone|pull|remote))([^[:alnum:]_-]|$)'; then
+if grep -qE \
+    '(^|[[:space:]]|[;&|(]|\$\()(curl|wget|git[[:space:]]+(fetch|ls-remote|clone|pull|remote))([^[:alnum:]_-]|$)' \
+    <<< "$gate_code"; then
   bad "the gate holds no network command"
 else
   ok "the gate holds no network command"

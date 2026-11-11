@@ -45,7 +45,7 @@ cmd='(run:[[:space:]]*(\|[[:space:]]*)?|bash[[:space:]]+|&&[[:space:]]*|;[[:spac
   && ok "no live launcher, agent CLI, or dangerous-mode flag runs in CI" \
   || bad "no live launcher, agent CLI, or dangerous-mode flag runs in CI"
 globs='bin/* lib/*.sh lib/tests/*.sh lib/tests/fake-cli/*.sh harnesses/*.sh fixtures/*.sh'
-tr -s ' \n' ' ' < "$wf" | grep -qF "shellcheck -S warning $globs" \
+grep -qF "shellcheck -S warning $globs" < <(tr -s ' \n' ' ' < "$wf") \
   && ok "shellcheck -S warning lints every shell glob" || bad "shellcheck -S warning lints every shell glob"
 has 'run: bash bin/check$' && ok "the workflow runs bin/check" || bad "the workflow runs bin/check"
 has "run: bash $self\$" && ok "the suite step is bash $self" || bad "the suite step is bash $self"

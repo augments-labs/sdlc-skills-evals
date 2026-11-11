@@ -77,7 +77,7 @@ for h in "${adapters[@]}"; do
   missing=""
   for want in subagent-loads-skills nesting-depth tier-settable \
               session-start-event post-compaction-event; do
-    printf '%s\n' "$caps" | tr ' ' '\n' | grep -q "^$want=" || missing="$missing $want"
+    grep -q "^$want=" < <(tr ' ' '\n' <<< "$caps") || missing="$missing $want"
   done
   if [ "$total_caps" -gt 0 ] && [ "$bad_caps" -eq 0 ] && [ -z "$missing" ]; then
     ok "$name capabilities carry their evidence class"
@@ -138,19 +138,19 @@ else
     shape="$(printf '%s\n' "$row" | cut -f3)"
     fixture="$(printf '%s\n' "$row" | cut -f4)"
     status="$(printf '%s\n' "$row" | cut -f5)"
-    if [ -n "$shape" ] && printf '%s' "$shape" | grep -q '[0-9]'; then
+    if [ -n "$shape" ] && grep -q '[0-9]' <<< "$shape"; then
       ok "$h provenance row names the source and its version"
     else
       bad "$h provenance row names the source and its version"
     fi
     # A synthetic fixture is labelled synthetic, never presented as an
     # observation.
-    if printf '%s' "$fixture" | grep -qi 'synthetic'; then
+    if grep -qi 'synthetic' <<< "$fixture"; then
       ok "$h provenance row labels its fixture synthetic"
     else
       bad "$h provenance row labels its fixture synthetic"
     fi
-    if printf '%s' "$status" | grep -qiE 'observed|unverified'; then
+    if grep -qiE 'observed|unverified' <<< "$status"; then
       ok "$h provenance row states the runtime status"
     else
       bad "$h provenance row states the runtime status"
@@ -159,7 +159,7 @@ else
     # a harness whose parser has never seen this CLI's own stream cannot be
     # called runnable. The one direction that holds is checked — runnable=yes
     # requires a provenance row that does not say unverified.
-    if [ "$(runnable_of "$h")" = "yes" ] && printf '%s' "$status" | grep -qi 'unverified'; then
+    if [ "$(runnable_of "$h")" = "yes" ] && grep -qi 'unverified' <<< "$status"; then
       bad "$h runnable=yes requires a provenance row that records an observed runtime status"
     else
       ok "$h runnable=yes requires a provenance row that records an observed runtime status"

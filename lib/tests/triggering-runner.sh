@@ -41,7 +41,7 @@ base=(--harness fake --harness-dir "$fake_h" --plugin "$standin")
 
 # --dry-run prices without pinning or calling anything (no --plugin needed)
 out="$("$here/bin/triggering" --harness fake --skill yagni --dry-run 2>&1)"
-[ "$?" -eq 0 ] && printf '%s' "$out" | grep -qE "[0-9]+ (calls|invocations)" \
+[ "$?" -eq 0 ] && grep -qE "[0-9]+ (calls|invocations)" <<< "$out" \
   && ok "dry-run prices without calling" || bad "dry-run prices without calling"
 
 # firing fake: positives pass, negatives fail, sheet exits 1
@@ -49,19 +49,19 @@ out="$(FAKE_FIRE=1 FAKE_SUBJECT=yagni "$here/bin/triggering" "${base[@]}" \
   --skill yagni --split train --runs 1 --jobs 2 2>&1)"
 rc="$?"
 [ "$rc" -eq 1 ] && ok "mixed sheet exits 1" || bad "mixed sheet exits 1 (got $rc)"
-printf '%s' "$out" | grep -q "PASS" && ok "positives pass" || bad "positives pass"
-printf '%s' "$out" | grep -q "should have routed to" \
+grep -q "PASS" <<< "$out" && ok "positives pass" || bad "positives pass"
+grep -q "should have routed to" <<< "$out" \
   && ok "negative failures name the route" || bad "negative failures name the route"
 
 # silent fake: positives miss with the observed-routing diagnostic
 out="$(FAKE_FIRE=0 "$here/bin/triggering" "${base[@]}" \
   --skill yagni --split train --runs 1 --jobs 2 2>&1)"
-printf '%s' "$out" | grep -q "expected yagni to fire | observed: (nothing routed)" \
+grep -q "expected yagni to fire | observed: (nothing routed)" <<< "$out" \
   && ok "misses name the observation" || bad "misses name the observation"
 
 # an empty split scores nothing and passes
 out="$("$here/bin/triggering" "${base[@]}" --skill yagni --split holdout --runs 1 2>&1)"
-[ "$?" -eq 0 ] && printf '%s' "$out" | grep -q "no queries in this split" \
+[ "$?" -eq 0 ] && grep -q "no queries in this split" <<< "$out" \
   && ok "empty split is quiet" || bad "empty split is quiet"
 
 # an unrunnable harness measures nothing, via exit 2 before any launch
@@ -77,7 +77,7 @@ out="$("$here/bin/triggering" --harness codex --skill yagni --dry-run 2>&1)"
 # run would be, without pinning, calling or launching anything.
 
 out="$("$here/bin/triggering" --harness fake --skill yagni --dry-run 2>&1)"
-printf '%s' "$out" | grep -qF "$inv_commit" \
+grep -qF "$inv_commit" <<< "$out" \
   && ok "the dry run names the pinned commit" || bad "the dry run names the pinned commit"
 
 # the plan is the whole command, option by option: a prefix match would
@@ -113,7 +113,7 @@ fi
 
 # an explicit plugin is named as it was given
 out="$("$here/bin/triggering" --harness fake --skill yagni --plugin "$standin" --dry-run 2>&1)"
-printf '%s' "$out" | grep -qF "command  : bin/triggering --harness fake --skill yagni --plugin $standin" \
+grep -qF "command  : bin/triggering --harness fake --skill yagni --plugin $standin" <<< "$out" \
   && ok "the dry run names the plugin the caller gave" \
   || bad "the dry run names the plugin the caller gave"
 
@@ -124,7 +124,7 @@ out="$(SDLC_SKILLS_ROOT="$standin" "$here/bin/triggering" --harness fake --harne
 rc="$?"
 [ "$rc" -eq 2 ] && ok "a run that cannot resolve the default pin refuses" \
   || bad "a run that cannot resolve the default pin refuses (exit $rc)"
-printf '%s' "$out" | grep -qF "$inv_commit" \
+grep -qF "$inv_commit" <<< "$out" \
   && ok "the refusal names the pinned commit" || bad "the refusal names the pinned commit"
 
 # an inventory that names no commit is refused, and NO tree is named in
@@ -134,7 +134,7 @@ jq '.upstream.commit = "v11.0.0"' "$here/config/upstream-inventory.json" > "$bro
 out="$(INVENTORY_PATH="$broken_inv" "$here/bin/triggering" --harness fake --skill yagni \
   --dry-run 2>&1)"
 rc="$?"
-if [ "$rc" -eq 2 ] && printf '%s' "$out" | grep -qF "no usable upstream pin"; then
+if [ "$rc" -eq 2 ] && grep -qF "no usable upstream pin" <<< "$out"; then
   ok "the descriptions runner refuses a default pin it cannot resolve"
 else
   bad "the descriptions runner refuses a default pin it cannot resolve (exit $rc, got '$out')"
@@ -161,7 +161,7 @@ out="$(SDLC_SKILLS_ROOT="$standin" FAKE_LAUNCH_LOG="$launch_log" \
   DESCRIPTIONS_ROOT="$work/descriptions" \
   "$here/bin/triggering" --harness fake --harness-dir "$fake_h" --skill probe \
   --plugin "$plug_commit" --runs 1 --split train 2>&1)"
-printf '%s' "$out" | grep -qF "$plug_commit" \
+grep -qF "$plug_commit" <<< "$out" \
   && ok "a live run names the pin it resolved" || bad "a live run names the pin it resolved"
 install_path="$(sed -n 's/^install //p' "$launch_log" 2>/dev/null | head -1)"
 if [ -n "$install_path" ] && [ "$install_path" != "$standin" ]; then
@@ -182,7 +182,7 @@ mkdir -p "$plugdir"
 git -C "$plugdir" init -q
 git -C "$plugdir" -c user.name=t -c user.email=t@example.invalid commit -q --allow-empty -m tree
 out="$("$here/bin/triggering" --harness fake --harness-dir "$fake_h" --plugin "$plugdir" --skill yagni --dry-run 2>&1)"
-printf '%s' "$out" | grep -qF "plugin   : $plugdir" \
+grep -qF "plugin   : $plugdir" <<< "$out" \
   && ok "the dry run names the tree a directory plugin installs" \
   || bad "the dry run names the tree a directory plugin installs"
 launch_log2="$work/launch2.log"
@@ -190,7 +190,7 @@ out="$(SDLC_SKILLS_ROOT="$standin" FAKE_LAUNCH_LOG="$launch_log2" \
   DESCRIPTIONS_ROOT="$work/descriptions" \
   "$here/bin/triggering" --harness fake --harness-dir "$fake_h" --skill probe \
   --plugin "$plugdir" --runs 1 --split train 2>&1)"
-printf '%s' "$out" | grep -qF "plugin   : $plugdir" \
+grep -qF "plugin   : $plugdir" <<< "$out" \
   && ok "a live run names the tree it installs" || bad "a live run names the tree it installs"
 if grep -q "^install $plugdir\$" "$launch_log2" 2>/dev/null; then
   ok "a directory plugin installs the tree it names"
@@ -200,7 +200,7 @@ fi
 
 # the dry run names every option the live path honours
 out="$("$here/bin/triggering" --harness fake --harness-dir "$fake_h" --skill yagni --dry-run 2>&1)"
-printf '%s' "$out" | grep -qF -- "--harness-dir $fake_h" \
+grep -qF -- "--harness-dir $fake_h" <<< "$out" \
   && ok "the dry run names the harness directory" || bad "the dry run names the harness directory"
 
 # --- a ref plugin: the plan names a commit, and the plan installs it --------
@@ -220,7 +220,7 @@ tag_two="$(git -C "$tagrepo" rev-parse HEAD)"
 out="$(SDLC_SKILLS_ROOT="$tagrepo" DESCRIPTIONS_ROOT="$work/descriptions" "$here/bin/triggering" \
   --harness fake --harness-dir "$fake_h" --skill probe --plugin selftest-plan-tag \
   --runs 1 --split train --dry-run 2>&1)"
-printf '%s' "$out" | grep -qF "plugin   : $tag_one" \
+grep -qF "plugin   : $tag_one" <<< "$out" \
   && ok "the dry run names the commit a ref resolves to" \
   || bad "the dry run names the commit a ref resolves to"
 plan="$(plan_cmd "$out")"
@@ -232,7 +232,7 @@ esac
 git -C "$tagrepo" tag -f selftest-plan-tag "$tag_two" >/dev/null 2>&1
 out2="$( cd "$here" && SDLC_SKILLS_ROOT="$tagrepo" DESCRIPTIONS_ROOT="$work/descriptions" \
   eval "$plan" 2>&1 )"
-printf '%s' "$out2" | grep -qF "plugin   : $tag_one" \
+grep -qF "plugin   : $tag_one" <<< "$out2" \
   && ok "the planned command still installs the commit the plan froze" \
   || bad "the planned command still installs the commit the plan froze (got '$(printf '%s' "$out2" | sed -n 's/^plugin   : //p')')"
 
@@ -300,9 +300,9 @@ rc="$?"
 # the dry run prices the same queries the run would score
 out="$(DESCRIPTIONS_ROOT="$iso" "$here/bin/triggering" --harness fake --harness-dir "$fake_h" \
   --skill probe --split all --runs 3 --dry-run 2>&1)"
-printf '%s' "$out" | grep -qE '(^|[^0-9])6 (calls|invocations)' \
+grep -qE '(^|[^0-9])6 (calls|invocations)' <<< "$out" \
   && ok "the dry run prices the flat set alone (2 queries x 3 runs)" \
-  || bad "the dry run prices the flat set alone (2 queries x 3 runs; got '$(printf '%s' "$out" | grep -E 'calls|invocations')')"
+  || bad "the dry run prices the flat set alone (2 queries x 3 runs; got '$(grep -E 'calls|invocations' <<< "$out")')"
 
 # the selection loop is the lab's to run now: the build-only ban is gone
 help_text="$("$here/bin/triggering" --help 2>&1)"
@@ -552,30 +552,30 @@ want="bin/triggering --harness fake --skill probe --plugin $sumrepo --runs 2 --j
   && ok "the dry run names --summary in the planned invocation and writes nothing" \
   || bad "the dry run names --summary in the planned invocation and writes nothing (got '$(plan_cmd "$out")')"
 plan_all="$out"
-printf '%s\n' "$out" | grep -q "^identity : $sum_commit  skill_tree $sum_tree\$" \
+grep -q "^identity : $sum_commit  skill_tree $sum_tree\$" <<< "$out" \
   && ok "the dry run names the skill text a summary would carry" \
   || bad "the dry run names the skill text a summary would carry (got '$(printf '%s\n' "$out" | grep identity)')"
 out="$(DESCRIPTIONS_ROOT="$sumdesc" "$here/bin/triggering" --harness fake --harness-dir "$fake_h" \
   --skill probe --plugin "$work/sumplain" --summary "$work/plan-sum.json" --dry-run 2>&1)"
-printf '%s\n' "$out" | grep -q '^identity : unidentified (.*) — bin/report will not record this summary$' \
+grep -q '^identity : unidentified (.*) — bin/report will not record this summary$' <<< "$out" \
   && ok "the dry run says when the summary could not be recorded" \
   || bad "the dry run says when the summary could not be recorded (got '$(printf '%s\n' "$out" | grep identity)')"
 out="$(DESCRIPTIONS_ROOT="$sumdesc" "$here/bin/triggering" --harness fake --harness-dir "$fake_h" \
   --skill probe --plugin "$sumrepo" --dry-run 2>&1)"
-printf '%s\n' "$out" | grep -q '^identity ' \
+grep -q '^identity ' <<< "$out" \
   && bad "a dry run without --summary prints no identity line" \
   || ok "a dry run without --summary prints no identity line"
 # a split without validation cannot be recorded: the plan and the run say so
 out="$(DESCRIPTIONS_ROOT="$sumdesc" "$here/bin/triggering" --harness fake --harness-dir "$fake_h" \
   --skill probe --plugin "$sumrepo" --split train --summary "$work/plan-sum.json" --dry-run 2>&1)"
-printf '%s\n' "$out" | grep -q '^summary  : no validation split (--split train) — bin/report will not record this summary$' \
+grep -q '^summary  : no validation split (--split train) — bin/report will not record this summary$' <<< "$out" \
   && grep -q '^summary  : no validation split (--split holdout) — bin/report will not record' "$work/sumhold.out" \
   && ok "a summary of train or holdout alone is said to be unrecordable, in the plan and in the run" \
   || bad "a summary of train or holdout alone is said to be unrecordable, in the plan and in the run (got '$(printf '%s\n' "$out" | grep '^summary')')"
 { grep -q '^summary  : ' "$work/sum.out" || grep -q '^summary  : ' <<<"$plan_all"; } \
   && bad "a summary that includes validation prints no such line" \
   || ok "a summary that includes validation prints no such line"
-printf '%s\n' "$help_text" | grep -q -- '--summary PATH' \
+grep -q -- '--summary PATH' <<< "$help_text" \
   && ok "--help documents --summary" || bad "--help documents --summary"
 
 # the seam: what bin/triggering wrote is what bin/report records or refuses
@@ -715,7 +715,7 @@ fi
 money_re='(\$[0-9])|(\bUSD\b)|(\bEUR\b)|(\bGBP\b)|(€)|(£)'
 for text in "$("$here/bin/triggering" --help 2>&1)" \
             "$("$here/bin/triggering" --harness fake --skill yagni --dry-run 2>&1)"; do
-  if printf '%s\n' "$text" | grep -qE "$money_re"; then
+  if grep -qE "$money_re" <<< "$text"; then
     bad "the help and the dry run carry no monetary figure"
   else
     ok "the help and the dry run carry no monetary figure"

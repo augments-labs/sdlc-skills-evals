@@ -293,7 +293,7 @@ rm "$work6/gap/eval-b/with_skill/run-2/grading.json"
 refused() { # $1 dir $2 text the refusal must carry — the dir holds no benchmark yet
   local out rc
   out="$("$here/bin/benchmark" "$1" 2>&1 >/dev/null)"; rc=$?
-  [ "$rc" -eq 2 ] && printf '%s' "$out" | grep -qF -- "$2" \
+  [ "$rc" -eq 2 ] && grep -qF -- "$2" <<< "$out" \
     && [ ! -e "$1/benchmark.json" ] && [ ! -e "$1/benchmark.md" ] && return 0
   printf '%s\n' "rc $rc: $out" > "$work6/refused.out"; return 1
 }
@@ -367,11 +367,11 @@ cp "$work6/stale/benchmark.json" "$work6/stale.json"; cp "$work6/stale/benchmark
 rm -rf "$work6/stale/eval-b/with_skill/run-2"
 out="$("$here/bin/benchmark" "$work6/stale" 2>&1 >/dev/null)"; rc=$?
 [ "$rc" -eq 2 ] && cmp -s "$work6/stale/benchmark.json" "$work6/stale.json" && cmp -s "$work6/stale/benchmark.md" "$work6/stale.md" \
-  && printf '%s' "$out" | grep -qF "$work6/stale/benchmark.json is from an earlier aggregation and is left as it was" \
+  && grep -qF "$work6/stale/benchmark.json is from an earlier aggregation and is left as it was" <<< "$out" \
   && ok "a refusal leaves an earlier benchmark.json as it was, and says it is the earlier one" \
   || bad "a refusal leaves an earlier benchmark.json as it was, and says it is the earlier one (rc $rc: $out)"
 out="$("$here/bin/benchmark" "$work6/hole" 2>&1 >/dev/null)"; rc=$?
-[ "$rc" -eq 2 ] && ! printf '%s' "$out" | grep -q 'earlier aggregation' \
+[ "$rc" -eq 2 ] && ! grep -q 'earlier aggregation' <<< "$out" \
   && ok "a refusal with no benchmark.json names no earlier one" \
   || bad "a refusal with no benchmark.json names no earlier one (rc $rc: $out)"
 # the other two refusals say it too: a mixed arm, and fewer runs than identity.json says
@@ -380,7 +380,7 @@ earlier_named() { # $1 dir, aggregated once and broken since; $1.json is the ear
   out="$("$here/bin/benchmark" "$1" 2>&1 >/dev/null)"; rc=$?
   printf '%s\n' "$out" > "$1.err"
   [ "$rc" -eq 2 ] && cmp -s "$1/benchmark.json" "$1.json" \
-    && printf '%s' "$out" | grep -qF "$1/benchmark.json is from an earlier aggregation and is left as it was" && return 0
+    && grep -qF "$1/benchmark.json is from an earlier aggregation and is left as it was" <<< "$out" && return 0
   printf '%s\n' "rc $rc: $out" > "$work6/refused.out"; return 1
 }
 mk_runs "$work6/stale-mixed" 2
@@ -421,7 +421,7 @@ for v in '"three"' 0 2.5 -1 true; do
   rm -rf "$work6/notn"; mk_runs "$work6/notn" 2
   jq -n --argjson v "$v" '{skill: "probe", harness: "fake", runs_per_eval: $v}' > "$work6/notn/identity.json"
   out="$("$here/bin/benchmark" "$work6/notn" 2>&1 >/dev/null)"; rc=$?
-  [ "$rc" -eq 0 ] && printf '%s' "$out" | grep -qF 'identity.json is unreadable (not one JSON object, or a runs_per_eval that is not a positive integer)' \
+  [ "$rc" -eq 0 ] && grep -qF 'identity.json is unreadable (not one JSON object, or a runs_per_eval that is not a positive integer)' <<< "$out" \
     && jq -e '.metadata.runs_per_eval == 2 and .metadata.skill == null and .metadata.harness == null' \
          "$work6/notn/benchmark.json" >/dev/null 2>&1 || notn="$notn $v(rc $rc)"
 done

@@ -326,7 +326,7 @@ EOS
   local calls; calls="$(cat "$log" 2>/dev/null; cat "$harness_home/.fake-harness.log" 2>/dev/null)"
   if [ -z "$install_pattern" ]; then
     ok "$h install needs no CLI invocation"
-  elif printf '%s\n' "$calls" | grep -qF -- "$install_pattern"; then
+  elif grep -qF -- "$install_pattern" <<< "$calls"; then
     ok "$h install invokes the CLI ($install_pattern)"
   else
     bad "$h install invokes the CLI ($install_pattern) — log: $(printf '%s\n' "$calls" | grep '^call ' | tr '\n' '|')"
@@ -375,8 +375,8 @@ EOS
   [ -n "$none_found" ] && none_leak="$none_leak plugin-tree"
   none_found="$(grep -rlF -- "$plug" "$harness_home" 2>/dev/null | head -1 || true)"
   [ -n "$none_found" ] && none_leak="$none_leak registry"
-  printf '%s\n' "$none_calls" | grep -qF -- "$plug" && none_leak="$none_leak command"
-  if [ -n "$install_pattern" ] && printf '%s\n' "$none_calls" | grep -qF -- "$install_pattern"; then
+  grep -qF -- "$plug" <<< "$none_calls" && none_leak="$none_leak command"
+  if [ -n "$install_pattern" ] && grep -qF -- "$install_pattern" <<< "$none_calls"; then
     none_leak="$none_leak install-command"
   fi
   [ -n "${plugin_dir:-}" ] && none_leak="$none_leak plugin-dir"
@@ -425,7 +425,7 @@ EOS
   fi
   local launch_pattern; launch_pattern="$(expect "$h" launch)"
   local launch_calls; launch_calls="$(cat "$log" 2>/dev/null; cat "$harness_home/.fake-harness.log" 2>/dev/null)"
-  if printf '%s\n' "$launch_calls" | grep -qF -- "$launch_pattern"; then
+  if grep -qF -- "$launch_pattern" <<< "$launch_calls"; then
     ok "$h activation launch reaches the CLI ($launch_pattern)"
   else
     bad "$h activation launch reaches the CLI ($launch_pattern) — log: $(printf '%s\n' "$launch_calls" | grep '^call ' | tr '\n' '|')"
@@ -835,8 +835,8 @@ EOS
     # cannot see the use from here.
     # shellcheck disable=SC2034
     scenario_model_tier=medium
-    if adapter_model_flags 2>/dev/null | grep -qx -- "--model" &&
-       adapter_model_flags 2>/dev/null | grep -qx -- "sonnet"; then
+    if grep -qx -- "--model" < <(adapter_model_flags 2>/dev/null) &&
+       grep -qx -- "sonnet" < <(adapter_model_flags 2>/dev/null); then
       ok "$h passes the tier's model only when a tier is asked for"
     else
       bad "$h passes the tier's model only when a tier is asked for"

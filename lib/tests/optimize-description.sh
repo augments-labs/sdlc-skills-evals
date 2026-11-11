@@ -137,15 +137,15 @@ dry_out="$(HOME="$outer_home" DESCRIPTIONS_ROOT="$desc" SDLC_SKILLS_ROOT="$plug"
 rc="$?"
 [ "$rc" -eq 0 ] && ok "the dry run exits 0" || bad "the dry run exits 0 (got $rc: $dry_out)"
 # 3 iterations x 7 queries x 2 runs + 2 reviser calls
-printf '%s' "$dry_out" | grep -qE '(^|[^0-9])44 (calls|invocations)' \
+grep -qE '(^|[^0-9])44 (calls|invocations)' <<< "$dry_out" \
   && ok "the dry run prices K*N*runs + (K-1) calls" \
   || bad "the dry run prices K*N*runs + (K-1) calls (got '$dry_out')"
-printf '%s' "$dry_out" | grep -qF "$plug_commit" \
+grep -qF "$plug_commit" <<< "$dry_out" \
   && ok "the dry run names the pin" || bad "the dry run names the pin"
-printf '%s' "$dry_out" | grep -q '^command  : bin/optimize-description --harness fake --skill probe' \
+grep -q '^command  : bin/optimize-description --harness fake --skill probe' <<< "$dry_out" \
   && ok "the dry run names the command" || bad "the dry run names the command"
 money_re='(\$[0-9])|(\bUSD\b)|(\bEUR\b)|(\bGBP\b)|(€)|(£)'
-if printf '%s\n' "$dry_out" "$("$opt" --help 2>&1)" | grep -qE "$money_re"; then
+if grep -qE "$money_re" < <(printf '%s\n' "$dry_out" "$("$opt" --help 2>&1)"); then
   bad "the help and the dry run carry no monetary figure"
 else
   ok "the help and the dry run carry no monetary figure"
@@ -264,7 +264,7 @@ grep -qx "LAB_CREDENTIAL_SEED=$outer_home/.config/sdlc-skills-evals/credentials"
 grep -q 'seeded=yes' "$work/main/calls" && ok "the reviser's home holds the seeded credential" \
   || bad "the reviser's home holds the seeded credential"
 grep -qx "source_home=$outer_home" "$env1" 2>/dev/null \
-  && ! grep -v "home=$outer_home\$" "$work/main/source.log" | grep -q . \
+  && ! grep -q . < <(grep -v "home=$outer_home\$" "$work/main/source.log") \
   && ok "the adapter is sourced against the operator's home, never the throwaway one" \
   || bad "the adapter is sourced against the operator's home, never the throwaway one"
 grep -q '^install $' "$work/main/launch.log" \
@@ -574,13 +574,13 @@ out="$(dry --skill probe --max-iterations 00)"; rc=$?
 [ "$rc" -eq 2 ] && ok "--max-iterations 00 is refused" || bad "--max-iterations 00 is refused (rc $rc: $out)"
 # 3 x 7 x 8 + 2: 08 is not octal here
 out="$(dry --skill probe --max-iterations 03 --runs 08)"; rc=$?
-[ "$rc" -eq 0 ] && printf '%s' "$out" | grep -qE '(^|[^0-9])170 calls' \
+[ "$rc" -eq 0 ] && grep -qE '(^|[^0-9])170 calls' <<< "$out" \
   && ok "a zero-padded count is read as its decimal value" \
   || bad "a zero-padded count is read as its decimal value (rc $rc: $out)"
 cp "$desc/probe.json" "$work/probe.json"; mkdir -p "$desc/sub"; cp "$desc/probe.json" "$desc/sub/x.json"
 for s in ../probe sub/x . ..; do
   out="$(dry --skill "$s")"; rc=$?
-  [ "$rc" -eq 2 ] && printf '%s' "$out" | grep -q 'is a name' \
+  [ "$rc" -eq 2 ] && grep -q 'is a name' <<< "$out" \
     && ok "--skill '$s' is refused as a path" || bad "--skill '$s' is refused as a path (rc $rc: $out)"
 done
 rm -rf "$work/probe.json" "$desc/sub"
