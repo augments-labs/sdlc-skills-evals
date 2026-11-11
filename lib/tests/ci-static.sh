@@ -102,14 +102,25 @@ done
 tree_before="$(git status --porcelain 2>/dev/null)"
 trip="$(mktemp)"   # absolute and outside the repo: the clean-tree check stays valid
 failed_suites=""
+leaky_suites=""
 for t in lib/tests/*.sh; do
   [ "$t" = "$self" ] && continue
+  # Each suite gets a TMPDIR of its own, empty, so what it leaves there is
+  # its own: a suite removes every temp file and directory it creates.
+  suite_tmp="$work/tmp-$(basename "$t" .sh)"
+  mkdir -p "$suite_tmp"
   ( export TRIPWIRE_LOG="$trip"; PATH="$here/lib/tests/tripwire:$PATH"; export PATH
+    TMPDIR="$suite_tmp"; export TMPDIR
     bash "$t" ) < /dev/null > "$work/suite.out" 2>&1 \
     || { failed_suites="$failed_suites $t"; grep -E '^\s*FAIL' "$work/suite.out" | head -5 | sed 's/^/        /'; }
+  left="$(find "$suite_tmp" -mindepth 1 -maxdepth 1 | wc -l)"
+  [ "$left" -eq 0 ] || leaky_suites="$leaky_suites $t($left left)"
+  rm -rf "$suite_tmp"
 done
 [ -z "$failed_suites" ] && ok "every other lib/tests suite passes under the tripwire" \
   || bad "every other lib/tests suite passes under the tripwire (failed:$failed_suites)"
+[ -z "$leaky_suites" ] && ok "every other lib/tests suite leaves its TMPDIR empty" \
+  || bad "every other lib/tests suite leaves its TMPDIR empty (left behind:$leaky_suites)"
 [ ! -s "$trip" ] && ok "no suite reached a real agent CLI (tripwire log empty)" \
   || bad "no suite reached a real agent CLI (tripwire log: $(head -3 "$trip" | tr '\n' ';'))"
 rm -f "$trip"
