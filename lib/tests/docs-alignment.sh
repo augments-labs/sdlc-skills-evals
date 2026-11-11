@@ -286,9 +286,9 @@ check "the PR template names bin/evaluate" grep -qF 'bin/evaluate' .github/PULL_
 flat() { tr -s ' \n' ' '; }
 nospread=""
 for f in README.md results/README.md docs/authoring.md; do
-  flat < "$f" | grep -qF 'With one run the stddev means nothing' || flat < "$f" | grep -qF 'with one run the stddev means nothing' \
+  grep -qF 'With one run the stddev means nothing' < <(flat < "$f") || grep -qF 'with one run the stddev means nothing' < <(flat < "$f") \
     || nospread="$nospread $f(stddev)"
-  flat < "$f" | grep -qF -- '--runs 3' || nospread="$nospread $f(--runs 3)"
+  grep -qF -- '--runs 3' < <(flat < "$f") || nospread="$nospread $f(--runs 3)"
 done
 ev_help="$(bash bin/evaluate --help | flat)"
 grep -qF 'With one run the stddev means nothing; a record uses 3' <<<"$ev_help" || nospread="$nospread bin/evaluate--help(stddev)"

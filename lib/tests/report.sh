@@ -306,7 +306,7 @@ trec texists
 [ "$rc" -eq 2 ] && [ ! -e "$work/tmixed" ] \
   && ok "--workspace and --triggering together are refused" \
   || bad "--workspace and --triggering together are refused (rc $rc)"
-"$here/bin/report" --help 2>&1 | grep -q -- '--triggering' \
+grep -q -- '--triggering' < <("$here/bin/report" --help 2>&1) \
   && ok "--help documents --triggering" || bad "--help documents --triggering"
 
 exit "$fails"

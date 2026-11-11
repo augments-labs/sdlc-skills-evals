@@ -88,7 +88,7 @@ _staged_paths() { # $1 descriptions root, $2 the staged tree
 expect_fail() { # $1 label, $2 the message the failure must carry
   if [ "$check_rc" -eq 0 ]; then
     bad "$1 (the gate accepted it)"
-  elif printf '%s\n' "$check_out" | grep -qF "$2"; then
+  elif grep -qF "$2" <<< "$check_out"; then
     ok "$1"
   else
     bad "$1 (exit $check_rc, no '$2' in: $(printf '%s\n' "$check_out" | tail -3 | tr '\n' ' '))"
@@ -107,7 +107,7 @@ expect_pass() { # $1 label
 
 run_gate "$here"
 expect_pass "the committed corpora pass the gate"
-if printf '%s\n' "$check_out" | grep -q "^check: corpora ok$"; then
+if grep -q "^check: corpora ok$" <<< "$check_out"; then
   ok "the gate says the corpora are ok"
 else
   bad "the gate says the corpora are ok"
@@ -143,9 +143,9 @@ done < <(jq -r '.skills[]' "$INV")
 for sk in brainstorming eliminating-corrections runtime-evidence; do
   named=0
   if [ -f "descriptions/$sk.json" ] \
-      && jq -r '.[].query' "descriptions/$sk.json" | grep -qiF "$sk"; then named=1; fi
+      && grep -qiF "$sk" < <(jq -r '.[].query' "descriptions/$sk.json"); then named=1; fi
   if [ -f "evals/$sk/evals.json" ] \
-      && jq -r '.evals[].prompt' "evals/$sk/evals.json" | grep -qiF "$sk"; then named=1; fi
+      && grep -qiF "$sk" < <(jq -r '.evals[].prompt' "evals/$sk/evals.json"); then named=1; fi
   if [ -f "descriptions/$sk.json" ] && [ -f "evals/$sk/evals.json" ] && [ "$named" -eq 0 ]; then
     ok "no $sk query or prompt names its own skill"
   else
@@ -368,6 +368,39 @@ mv "$m9c/seam-evals/yagni/evals.json.new" "$m9c/seam-evals/yagni/evals.json"
 check_out="$(cd "$m9c" && EVALS_ROOT=seam-evals bash bin/check 2>&1)"
 check_rc=$?
 expect_fail "the eval definitions follow the evals root seam" "needs an id, a prompt, an expected output"
+
+# A rule that reads a long listing through `writer | grep -q` stops reading
+# at the first match; the writer then dies of SIGPIPE, pipefail reports 141,
+# and the `if` reads "no match". Each case below puts the match first and
+# writes far more than a pipe holds after it, so a cut pipe passes the gate.
+long_name="$(printf 'r%.0s' $(seq 100))"
+m9d="$work/m9d"; copy_repo "$m9d"
+head -c 1048576 /dev/zero | tr '\0' 'a' > "$work/filler.txt"
+jq --rawfile filler "$work/filler.txt" \
+  '.evals[0].prompt = "In ~/work/billing-api the toggle command is done. Call this done."
+   | .evals[1].prompt += " " + $filler' \
+  "$m9d/evals/yagni/evals.json" > "$m9d/evals/yagni/evals.json.new"
+mv "$m9d/evals/yagni/evals.json.new" "$m9d/evals/yagni/evals.json"
+run_gate "$m9d"
+expect_fail "a home path in the first prompt is rejected when a long prompt follows it" \
+  "names a project outside the run workdir"
+
+m9e="$work/m9e"; copy_repo "$m9e"
+mkdir -p "$m9e/seam-docs/many"
+cp "$m9e/docs/upstream-coverage.md" "$m9e/seam-docs/upstream-coverage.md"
+for i in $(seq 3000); do : > "$m9e/seam-docs/many/$long_name-$i.md"; done
+chmod +x "$m9e"/seam-docs/many/*
+check_out="$(cd "$m9e" && DOCS_ROOT=seam-docs bash bin/check 2>&1)"
+check_rc=$?
+expect_fail "the docs no-exec-bit rule holds when thousands of files carry the bit" "executable under docs/"
+
+m9f="$work/m9f"; copy_repo "$m9f"
+mkdir -p "$m9f/seam-docs/many"
+cp "$m9f/docs/upstream-coverage.md" "$m9f/seam-docs/upstream-coverage.md"
+for i in $(seq 3000); do printf '#!/bin/sh\n' > "$m9f/seam-docs/many/$long_name-$i.md"; done
+check_out="$(cd "$m9f" && DOCS_ROOT=seam-docs bash bin/check 2>&1)"
+check_rc=$?
+expect_fail "the docs no-shebang rule holds when thousands of files carry one" "shebang under docs/"
 
 # --- bin/ holds executable bash scripts only ----------------------------------
 #
@@ -643,7 +676,7 @@ if [ -d "$snapshot" ]; then
     # transcript mentions: a transcript whose edit lands on another file
     # disagrees with the map the case grades, and the case then measures
     # nothing.
-    grep -iE 'edit' "$transcript" 2>/dev/null | grep -qF "$tok" \
+    grep -qF "$tok" < <(grep -iE 'edit' "$transcript" 2>/dev/null) \
       || graded_missing=$((graded_missing + 1))
   done
   if [ "$graded" -gt 0 ] && [ "$graded_missing" -eq 0 ]; then

@@ -123,20 +123,20 @@ dry() { # $@ evaluate args — prints the dry run's output
 }
 dry_out="$(dry --plugin "$with_plug")"; rc=$?
 [ "$rc" -eq 0 ] && ok "the dry run exits 0" || bad "the dry run exits 0 (got $rc: $dry_out)"
-printf '%s' "$dry_out" | grep -qF "$with_plug" && ok "the dry run names the pin" \
+grep -qF "$with_plug" <<< "$dry_out" && ok "the dry run names the pin" \
   || bad "the dry run names the pin"
-printf '%s' "$dry_out" | grep -q 'change-seed' && printf '%s' "$dry_out" | grep -q 'nested-files' \
-  && printf '%s' "$dry_out" | grep -q 'pending' \
+grep -q 'change-seed' <<< "$dry_out" && grep -q 'nested-files' <<< "$dry_out" \
+  && grep -q 'pending' <<< "$dry_out" \
   && ok "the dry run names every selected eval" || bad "the dry run names every selected eval"
-printf '%s' "$dry_out" | grep -qE '(^|[^0-9])6 calls' \
+grep -qE '(^|[^0-9])6 calls' <<< "$dry_out" \
   && ok "the dry run prices 2 x N_evals arm calls" \
   || bad "the dry run prices 2 x N_evals arm calls (got '$dry_out')"
 # one eval carries a prose assertion: with the rubric grader, +1 call per arm
-printf '%s' "$(dry --plugin "$with_plug" --grade-with-harness)" | grep -qE '(^|[^0-9])8 calls' \
+grep -qE '(^|[^0-9])8 calls' <<< "$(dry --plugin "$with_plug" --grade-with-harness)" \
   && ok "the dry run adds one rubric call per arm with prose assertions" \
   || bad "the dry run adds one rubric call per arm with prose assertions"
 one="$(dry --plugin "$with_plug" --eval-id change-seed)"
-printf '%s' "$one" | grep -qE '(^|[^0-9])2 calls' && ! printf '%s' "$one" | grep -q 'nested-files' \
+grep -qE '(^|[^0-9])2 calls' <<< "$one" && ! grep -q 'nested-files' <<< "$one" \
   && ok "--eval-id narrows the plan to that eval" || bad "--eval-id narrows the plan to that eval ($one)"
 # A requested eval is found, and kept, however long the lists are. Both
 # lookups once read a list through a pipe into `grep -q`: grep left at the
@@ -160,7 +160,7 @@ HOME="$outer_home" EVALS_ROOT="$bigroot" TRIPWIRE_LOG="$own_trip" \
 grep -q '^budget   : 100 eval(s) ' "$work/big.out" \
   && ok "every requested eval is in the plan when the request is long" \
   || bad "every requested eval is in the plan when the request is long (got '$(grep '^budget' "$work/big.out")')"
-printf '%s' "$(dry --plugin "$with_plug" --baseline-plugin "$old_plug")" | grep -qF "$old_plug" \
+grep -qF "$old_plug" <<< "$(dry --plugin "$with_plug" --baseline-plugin "$old_plug")" \
   && ok "the dry run names the baseline pin" || bad "the dry run names the baseline pin"
 [ ! -s "$work/dry-launch.log" ] && [ ! -s "$work/dry-source.log" ] \
   && ok "the dry run sources and launches nothing" \
@@ -335,7 +335,7 @@ indet() { # $1 tag $2 reason regex $3 which arms (both|without) — then the env
   w="$(jq -r '.outcome' "$d/with_skill/run_status.json" 2>/dev/null)"
   o="$(jq -r '.outcome + " " + (.reason // "")' "$d/without_skill/run_status.json" 2>/dev/null)"
   if [ "$arms" = both ]; then [ "$w" = indeterminate ]; else [ "$w" = ok ]; fi \
-    && printf '%s' "$o" | grep -qiE "^indeterminate .*($re)" \
+    && grep -qiE "^indeterminate .*($re)" <<< "$o" \
     && jq -e '.summary.outcome == "indeterminate" and .summary.pass_rate == null
               and .summary.passed == 0 and .summary.failed == 0 and .summary.total == 5' \
          "$d/without_skill/grading.json" >/dev/null 2>&1 \
@@ -603,12 +603,12 @@ report_to idbasedirty; rc=$?
 
 # the dry run says, before anything is spent, whether the run can be recorded
 dry_id="$(dry --plugin "$gitplug")"
-printf '%s\n' "$dry_id" | grep -q "^identity : with_skill $c_two  skill_tree $t_two\$" \
+grep -q "^identity : with_skill $c_two  skill_tree $t_two\$" <<< "$dry_id" \
   && ok "the dry run names with_skill's commit and skill tree" \
   || bad "the dry run names with_skill's commit and skill tree (got '$dry_id')"
 dry_id="$(dry --plugin "$with_plug" --baseline-plugin "$gitplug")"
-printf '%s\n' "$dry_id" | grep -q '^identity : with_skill unidentified.*bin/report' \
-  && printf '%s\n' "$dry_id" | grep -q "^identity : old_skill $c_two  skill_tree $t_two\$" \
+grep -q '^identity : with_skill unidentified.*bin/report' <<< "$dry_id" \
+  && grep -q "^identity : old_skill $c_two  skill_tree $t_two\$" <<< "$dry_id" \
   && ok "the dry run says which arm is unidentified, and names the other" \
   || bad "the dry run says which arm is unidentified, and names the other (got '$dry_id')"
 [ "$(dry --plugin "$with_plug" | grep -c '^identity :')" -eq 1 ] \
@@ -636,17 +636,17 @@ MODEL_NAME=model-x DIRTY_STAGE="$work/outer-tmp" EV_HOOK="$mhook" SDLC_SKILLS_RO
   && ok "a ref whose extracted files were edited during the run ends unidentified" \
   || bad "a ref whose extracted files were edited during the run ends unidentified (rc $rc; $(jq -c . "$(idit idrefdirty)/identity.json" 2>&1): $(grep identity "$work/idrefdirty/out"))"
 dry_id="$(SDLC_SKILLS_ROOT="$convplug" dry --plugin "$c_two")"
-printf '%s\n' "$dry_id" | grep -q "^identity : with_skill $c_two  skill_tree $t_two\$" \
+grep -q "^identity : with_skill $c_two  skill_tree $t_two\$" <<< "$dry_id" \
   && ok "the dry run installs nothing: it prints the identity the commit names" \
   || bad "the dry run installs nothing: it prints the identity the commit names (got '$dry_id')"
 
 # --- --runs N: each eval and arm is repeated N times --------------------------
 
 dry3="$(dry --plugin "$with_plug" --runs 3)"
-printf '%s' "$dry3" | grep -qE '(^|[^0-9])18 calls' \
-  && printf '%s\n' "$dry3" | grep -qx 'budget   : 3 eval(s) x 2 arms x 3 runs = 18 arm calls' \
+grep -qE '(^|[^0-9])18 calls' <<< "$dry3" \
+  && grep -qx 'budget   : 3 eval(s) x 2 arms x 3 runs = 18 arm calls' <<< "$dry3" \
   && ok "the dry run prices evals x arms x runs" || bad "the dry run prices evals x arms x runs (got '$dry3')"
-printf '%s' "$(dry --plugin "$with_plug" --runs 3 --grade-with-harness)" | grep -qE '(^|[^0-9])24 calls' \
+grep -qE '(^|[^0-9])24 calls' <<< "$(dry --plugin "$with_plug" --runs 3 --grade-with-harness)" \
   && ok "the dry run prices one rubric call per arm with prose, per run" \
   || bad "the dry run prices one rubric call per arm with prose, per run"
 [ "$(dry --plugin "$with_plug" --runs 1)" = "$dry_out" ] \
@@ -657,7 +657,7 @@ for v in 0 x -1 1.5 ''; do
   dry --plugin "$with_plug" --runs "$v" >/dev/null; [ "$?" -eq 2 ] || bad_runs="$bad_runs '$v'"
 done
 [ -z "$bad_runs" ] && ok "--runs needs a positive integer" || bad "--runs needs a positive integer (accepted:$bad_runs)"
-"$ev" --help | grep -q -- '--runs N' && ok "--help names --runs" || bad "--help names --runs"
+grep -q -- '--runs N' < <("$ev" --help) && ok "--help names --runs" || bad "--help names --runs"
 
 idrun runs2 --plugin "$gitplug" --runs 2; rc=$?
 rit="$(idit runs2)"
@@ -707,13 +707,13 @@ jq -e '.runs_per_eval == 1' "$(idit runs1)/identity.json" >/dev/null 2>&1 \
 
 # one run says, word for word, what it said before --runs existed
 dry_g="$(dry --plugin "$with_plug" --grade-with-harness)"
-printf '%s\n' "$dry_out" | grep -qxF 'budget   : 3 eval(s) x 2 arms = 6 arm calls' \
-  && printf '%s\n' "$dry_out" | grep -qxF 'at most 6 calls total, billed to your own harness account.' \
-  && printf '%s\n' "$dry_g" | grep -qxF 'budget   : 3 eval(s) x 2 arms = 6 arm calls' \
-  && printf '%s\n' "$dry_g" | grep -qxF '         + 2 rubric grader call(s) (1 eval(s) with prose x 2 arms)' \
-  && printf '%s\n' "$dry_g" | grep -qxF 'at most 8 calls total, billed to your own harness account.' \
+grep -qxF 'budget   : 3 eval(s) x 2 arms = 6 arm calls' <<< "$dry_out" \
+  && grep -qxF 'at most 6 calls total, billed to your own harness account.' <<< "$dry_out" \
+  && grep -qxF 'budget   : 3 eval(s) x 2 arms = 6 arm calls' <<< "$dry_g" \
+  && grep -qxF '         + 2 rubric grader call(s) (1 eval(s) with prose x 2 arms)' <<< "$dry_g" \
+  && grep -qxF 'at most 8 calls total, billed to your own harness account.' <<< "$dry_g" \
   && ok "one run is priced in the words used before --runs" \
-  || bad "one run is priced in the words used before --runs ($(printf '%s\n' "$dry_g" | grep -E 'budget|rubric|at most' | tr '\n' ';'))"
+  || bad "one run is priced in the words used before --runs ($(grep -E 'budget|rubric|at most' <<< "$dry_g" | tr '\n' ';'))"
 one_said=$'nested-files/with_skill: running\nnested-files/without_skill: running'
 [ "$(grep ': running$' "$work/runs0/out")" = "$one_said" ] && [ "$(grep ': running$' "$work/runs1/out")" = "$one_said" ] \
   && ! grep -q '/run-[0-9]' "$work/runs0/out" "$work/runs1/out" \
@@ -731,7 +731,7 @@ nested-files/without_skill/run-2: running" ] \
 # a count with leading zeros is decimal, and zero is still refused
 lead=""
 for v in "08:x 8 runs = 48" "003:x 3 runs = 18" "010:x 10 runs = 60"; do
-  dry --plugin "$with_plug" --runs "${v%%:*}" | grep -qxF "budget   : 3 eval(s) x 2 arms ${v#*:} arm calls" \
+  grep -qxF "budget   : 3 eval(s) x 2 arms ${v#*:} arm calls" < <(dry --plugin "$with_plug" --runs "${v%%:*}") \
     || lead="$lead ${v%%:*}"
 done
 dry --plugin "$with_plug" --runs 00 >/dev/null; [ "$?" -eq 2 ] || lead="$lead 00(accepted)"
