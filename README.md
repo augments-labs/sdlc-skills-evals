@@ -1,5 +1,12 @@
 # sdlc-skills-evals
 
+> [!IMPORTANT]
+> **This repository is archived and no longer actively maintained.**
+>
+> Skill evaluations are moving into **[augments-labs/skills](https://github.com/augments-labs/skills)** (`evals/`), the successor monorepo for `augments-labs` skills (currently being built from pre-release `0.0.0`).
+>
+> Historical evaluation records and tooling here remain available read-only for reference.
+
 The eval lab for [sdlc-skills](https://github.com/augments-labs/sdlc-skills), pinned to upstream commit
 `c1e995a0371b11271b1d9a393e89fb2f345b2611` (package version `12.0.0`) in
 `config/upstream-inventory.json`. It runs the two
